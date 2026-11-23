@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN, sendWinVirtualKey } from '../platform/win32.js';
 import type { MediaState } from '../types/protocol.js';
 import { getMacVolumeState, getTrackedBrightness } from './hardware.js';
 
@@ -21,6 +22,18 @@ async function isAppRunning(appName: string): Promise<boolean> {
 export async function getMediaState(): Promise<MediaState> {
   const { volume, muted } = await getMacVolumeState();
   const brightness = getTrackedBrightness();
+
+  if (IS_WIN) {
+    return {
+      volume,
+      muted,
+      brightness,
+      playing: false,
+      track: 'Windows Media Controls',
+      artist: 'Spotify / Browser / Anghami',
+      player: 'Windows',
+    };
+  }
 
   for (const player of ['Spotify', 'Music'] as const) {
     if (await isAppRunning(player)) {
@@ -66,6 +79,13 @@ export async function getMediaState(): Promise<MediaState> {
 }
 
 export async function controlMacMedia(action: 'playpause' | 'next' | 'prev'): Promise<string> {
+  if (IS_WIN) {
+    // Universal Windows media keys work with Spotify, Chrome, Edge, Anghami, Apple Music, etc.
+    const vk = action === 'playpause' ? '0xB3' : action === 'next' ? '0xB0' : '0xB1';
+    await sendWinVirtualKey(vk);
+    return `Windows Media: ${action}`;
+  }
+
   const cmd =
     action === 'playpause'
       ? 'playpause'

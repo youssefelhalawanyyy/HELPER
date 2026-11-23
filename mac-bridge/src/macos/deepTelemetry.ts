@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import si from 'systeminformation';
+import { IS_WIN, runPowerShell } from '../platform/win32.js';
 import type {
   BluetoothDeviceInfo,
   MacDeepTelemetry,
@@ -31,7 +32,7 @@ export class DeepTelemetryService {
     batteryWattage: null,
     bluetoothDevices: [],
     displays: [],
-    audioOutputDevice: 'MacBook Speakers',
+    audioOutputDevice: IS_WIN ? 'Windows Audio' : 'MacBook Speakers',
     wifiSsid: 'Wi-Fi',
     wifiSignalDbm: null,
   };
@@ -65,7 +66,7 @@ export class DeepTelemetryService {
       projectScripts: [],
       micInputPct: 50,
       micMuted: false,
-      audioOutputDevice: 'MacBook Speakers',
+      audioOutputDevice: IS_WIN ? 'Windows Audio' : 'MacBook Speakers',
       darkMode: true,
       ts: Date.now(),
     };
@@ -75,12 +76,81 @@ export class DeepTelemetryService {
     return this.latest;
   }
 
+  private async scanSlowHardwareWindows(): Promise<void> {
+    // 1. Battery health & cycles via systeminformation
+    try {
+      const batt = await si.battery();
+      if (batt.hasBattery) {
+        if (batt.cycleCount > 0) this.cachedSlow.batteryCycles = batt.cycleCount;
+        if (batt.designedCapacity > 0 && batt.maxCapacity > 0) {
+          this.cachedSlow.batteryHealthPct = Math.min(
+            100,
+            Math.round((batt.maxCapacity / batt.designedCapacity) * 100),
+          );
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 2. Displays
+    try {
+      const gfx = await si.graphics();
+      this.cachedSlow.displays = gfx.displays
+        .map((d) => `${d.model || 'Display'} (${d.resolutionX || '?'}×${d.resolutionY || '?'})`)
+        .slice(0, 4);
+    } catch {
+      // Ignore
+    }
+
+    // 3. Audio output
+    try {
+      const audio = await si.audio();
+      const def = audio.find((a) => a.default) || audio[0];
+      if (def?.name) this.cachedSlow.audioOutputDevice = def.name;
+    } catch {
+      // Ignore
+    }
+
+    // 4. Wi-Fi SSID & Signal
+    try {
+      const wifi = await si.wifiConnections();
+      const first = wifi[0];
+      if (first?.ssid) this.cachedSlow.wifiSsid = first.ssid;
+      if (typeof first?.signalLevel === 'number') {
+        this.cachedSlow.wifiSignalDbm = first.signalLevel;
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 5. Bluetooth devices
+    try {
+      const bt = await si.bluetoothDevices();
+      this.cachedSlow.bluetoothDevices = bt
+        .filter((d) => d.connected && d.name)
+        .slice(0, 6)
+        .map((d) => ({
+          name: d.name,
+          connected: true,
+          batteryPct: typeof d.batteryPercent === 'number' ? d.batteryPercent : null,
+        }));
+    } catch {
+      // Ignore
+    }
+  }
+
   private async scanSlowHardware(): Promise<void> {
     const now = Date.now();
     if (now - this.lastSlowScan < 25_000) return;
     this.lastSlowScan = now;
 
-    // 1. Battery health / cycles / wattage
+    if (IS_WIN) {
+      await this.scanSlowHardwareWindows();
+      return;
+    }
+
+    // 1. Battery health / cycles / wattage (macOS)
     try {
       const { stdout } = await execFileAsync('system_profiler', ['SPPowerDataType', '-json'], {
         timeout: 4000,
@@ -115,7 +185,8 @@ export class DeepTelemetryService {
       });
       const json = JSON.parse(stdout) as { SPBluetoothDataType?: Array<Record<string, unknown>> };
       const btRoot = json.SPBluetoothDataType?.[0] || {};
-      const connectedArr = (btRoot.device_connected as Array<Record<string, Record<string, unknown>>>) || [];
+      const connectedArr =
+        (btRoot.device_connected as Array<Record<string, Record<string, unknown>>>) || [];
       const devices: BluetoothDeviceInfo[] = [];
       for (const devObj of connectedArr) {
         for (const [name, details] of Object.entries(devObj)) {
@@ -153,7 +224,9 @@ export class DeepTelemetryService {
         timeout: 3500,
         maxBuffer: 2 * 1024 * 1024,
       });
-      const json = JSON.parse(stdout) as { SPAudioDataType?: Array<{ _items?: Array<Record<string, unknown>> }> };
+      const json = JSON.parse(stdout) as {
+        SPAudioDataType?: Array<{ _items?: Array<Record<string, unknown>> }>;
+      };
       const items = json.SPAudioDataType?.[0]?._items || [];
       const defOut = items.find((i) => i.coreaudio_default_audio_output_device === 'spaudio_yes');
       if (defOut && typeof defOut._name === 'string') {
@@ -193,6 +266,22 @@ export class DeepTelemetryService {
   }
 
   private async readBatteryRemaining(): Promise<string> {
+    if (IS_WIN) {
+      try {
+        const batt = await si.battery();
+        if (!batt.hasBattery) return 'AC Power';
+        if (batt.isCharging) return 'Charging';
+        if (batt.timeRemaining && batt.timeRemaining > 0 && batt.timeRemaining < 2000) {
+          const h = Math.floor(batt.timeRemaining / 60);
+          const m = batt.timeRemaining % 60;
+          return `${h}:${String(m).padStart(2, '0')} left`;
+        }
+        return batt.percent >= 99 ? 'Charged' : '--';
+      } catch {
+        return '--';
+      }
+    }
+
     try {
       const { stdout } = await execFileAsync('pmset', ['-g', 'batt'], { timeout: 1200 });
       const m = stdout.match(/(\d+:\d+)\s+remaining/i);
@@ -207,10 +296,11 @@ export class DeepTelemetryService {
 
   private async readPingMs(): Promise<number | null> {
     try {
-      const { stdout } = await execFileAsync('ping', ['-c', '1', '-W', '1000', '1.1.1.1'], {
-        timeout: 1800,
-      });
-      const m = stdout.match(/time=([\d.]+)\s*ms/i);
+      const args = IS_WIN
+        ? ['-n', '1', '-w', '1000', '1.1.1.1']
+        : ['-c', '1', '-W', '1000', '1.1.1.1'];
+      const { stdout } = await execFileAsync('ping', args, { timeout: 1800 });
+      const m = stdout.match(/time[=<]\s*([\d.]+)\s*ms/i);
       return m ? Math.round(Number(m[1])) : null;
     } catch {
       return null;
@@ -221,7 +311,7 @@ export class DeepTelemetryService {
     const ifaces = os.networkInterfaces();
     for (const [name, list] of Object.entries(ifaces)) {
       if (!list) continue;
-      if (/^(utun|ppp|ipsec|wg)/i.test(name)) {
+      if (/^(utun|ppp|ipsec|wg)|vpn|wireguard|tailscale|nordlynx/i.test(name)) {
         if (list.some((i) => i.family === 'IPv4' && !i.internal)) {
           return true;
         }
@@ -244,6 +334,40 @@ export class DeepTelemetryService {
     let runningApps: string[] = [];
     let micInputPct = 50;
     let darkMode = true;
+
+    if (IS_WIN) {
+      try {
+        const ps = `
+Add-Type 'using System; using System.Text; using System.Runtime.InteropServices; public class WinInfo { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int c); }'
+$h = [WinInfo]::GetForegroundWindow()
+$sb = New-Object System.Text.StringBuilder 256
+[WinInfo]::GetWindowText($h, $sb, 256) | Out-Null
+$title = $sb.ToString()
+$apps = (Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | Select-Object -ExpandProperty ProcessName -Unique | Select-Object -First 16) -join '||'
+$dm = (Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
+$isDark = if ($dm -eq 1) { 'false' } else { 'true' }
+Write-Output ($title + '###' + $apps + '###' + $isDark)
+`;
+        const out = await runPowerShell(ps, 2500);
+        const [winTitle, appsStr, dmStr] = out.trim().split('###');
+        activeWindowTitle = (winTitle || '').trim();
+        runningApps = (appsStr || '')
+          .split('||')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        darkMode = dmStr !== 'false';
+      } catch {
+        // Ignore
+      }
+      return {
+        activeWindowTitle,
+        activeBrowserUrl,
+        activeBrowserTitle,
+        runningApps,
+        micInputPct,
+        darkMode,
+      };
+    }
 
     try {
       const script = `
@@ -276,7 +400,6 @@ export class DeepTelemetryService {
       // Ignore
     }
 
-    // Active browser tab URL & title (Chrome / Safari / Arc)
     for (const browser of ['Google Chrome', 'Safari', 'Arc'] as const) {
       if (!runningApps.includes(browser)) continue;
       try {

@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import si from 'systeminformation';
+import { IS_WIN } from '../platform/win32.js';
 import type { DockerContainer, HeavyProcess } from '../types/protocol.js';
 
 const execFileAsync = promisify(execFile);
 
 const PROTECTED_PROCESSES = new Set([
+  // macOS
   'kernel_task',
   'launchd',
   'WindowServer',
@@ -15,6 +18,17 @@ const PROTECTED_PROCESSES = new Set([
   'SystemUIServer',
   'mds',
   'mds_stores',
+  // Windows
+  'System',
+  'Idle',
+  'System Idle Process',
+  'explorer.exe',
+  'dwm.exe',
+  'csrss.exe',
+  'wininit.exe',
+  'services.exe',
+  'lsass.exe',
+  'svchost.exe',
 ]);
 
 export class ProcessAndDockerService {
@@ -38,6 +52,29 @@ export class ProcessAndDockerService {
 
   async scanProcesses(): Promise<HeavyProcess[]> {
     try {
+      if (IS_WIN) {
+        const res = await si.processes();
+        const list = res.list
+          .filter(
+            (p) =>
+              p.pid > 4 &&
+              p.pid !== process.pid &&
+              !PROTECTED_PROCESSES.has(p.name) &&
+              (p.cpu > 0.1 || p.mem > 0.5),
+          )
+          .sort((a, b) => b.cpu - a.cpu)
+          .slice(0, 6)
+          .map((p) => ({
+            pid: p.pid,
+            name: p.name.replace(/\.exe$/i, ''),
+            cpuPct: Number((p.cpu || 0).toFixed(1)),
+            memPct: Number((p.mem || 0).toFixed(1)),
+          }));
+        this.latestProcesses = list;
+        this.onProcesses(list);
+        return list;
+      }
+
       const { stdout } = await execFileAsync('ps', ['-Ao', 'pid,pcpu,pmem,comm', '-r'], {
         timeout: 2000,
         maxBuffer: 1024 * 1024,
@@ -82,7 +119,11 @@ export class ProcessAndDockerService {
       return { ok: false, message: `Process PID ${pid} is not in the active hog list` };
     }
     try {
-      process.kill(pid, 'SIGTERM');
+      if (IS_WIN) {
+        await execFileAsync('taskkill', ['/PID', String(pid), '/F'], { timeout: 3000 });
+      } else {
+        process.kill(pid, 'SIGTERM');
+      }
       await new Promise((r) => setTimeout(r, 300));
       await this.scanProcesses();
       return { ok: true, message: `Killed ${found.name} (PID ${pid})` };

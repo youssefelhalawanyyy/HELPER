@@ -1,10 +1,23 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN, runPowerShell } from '../platform/win32.js';
 import type { DeckProfile, ProfileId } from '../types/protocol.js';
 
 const execFileAsync = promisify(execFile);
 
 export async function getFrontmostAppName(): Promise<string> {
+  if (IS_WIN) {
+    try {
+      const out = await runPowerShell(
+        `Add-Type 'using System; using System.Runtime.InteropServices; public class Fg { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p); }'; $h=[Fg]::GetForegroundWindow(); $pid=0; [Fg]::GetWindowThreadProcessId($h, [ref]$pid) | Out-Null; (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName`,
+        1800,
+      );
+      return out.trim() || 'Windows';
+    } catch {
+      return 'Windows';
+    }
+  }
+
   try {
     const { stdout } = await execFileAsync(
       'osascript',
@@ -41,7 +54,7 @@ export class ActiveAppPoller {
   ) {}
 
   getCurrent(): { appName: string; profileId: ProfileId } {
-    return { appName: this.lastApp || 'macOS', profileId: this.lastProfile };
+    return { appName: this.lastApp || (IS_WIN ? 'Windows' : 'macOS'), profileId: this.lastProfile };
   }
 
   start(intervalMs = 1500): void {

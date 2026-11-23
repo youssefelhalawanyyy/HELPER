@@ -6,26 +6,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE_ROOT = path.resolve(__dirname, '..');
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 4747);
 const PUBLIC_PWA_URL = (process.env.PUBLIC_PWA_URL || 'https://helper-nu-swart.vercel.app').replace(/\/+$/, '');
+const IS_WIN = process.platform === 'win32';
+const NPX_CMD = IS_WIN ? 'npx.cmd' : 'npx';
+const OS_LABEL = IS_WIN ? 'Windows' : process.platform === 'darwin' ? 'Mac' : 'Linux';
 
 let tunnelChild: ChildProcess | null = null;
 let bridgeChild: ChildProcess | null = null;
 let bridgeStarted = false;
 
-console.log('\n🚀 DevDeck Live Launcher — starting free Cloudflare HTTPS tunnel...\n');
+console.log(`\n🚀 DevDeck Live Launcher (${OS_LABEL}) — starting free Cloudflare HTTPS tunnel...\n`);
 
-tunnelChild = spawn('npx', ['-y', 'cloudflared', 'tunnel', '--url', `http://127.0.0.1:${BRIDGE_PORT}`], {
-  cwd: BRIDGE_ROOT,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+tunnelChild = spawn(
+  NPX_CMD,
+  ['-y', 'cloudflared', 'tunnel', '--url', `http://127.0.0.1:${BRIDGE_PORT}`],
+  {
+    cwd: BRIDGE_ROOT,
+    shell: IS_WIN,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
+);
 
 function startBridge(tunnelUrl: string): void {
   if (bridgeStarted) return;
   bridgeStarted = true;
   console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
-  console.log('🔗 Starting DevDeck Mac Bridge with 1-scan Vercel QR code...\n');
+  console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code...\n`);
 
-  bridgeChild = spawn('npx', ['tsx', 'src/index.ts'], {
+  bridgeChild = spawn(NPX_CMD, ['tsx', 'src/index.ts'], {
     cwd: BRIDGE_ROOT,
+    shell: IS_WIN,
     stdio: 'inherit',
     env: {
       ...process.env,

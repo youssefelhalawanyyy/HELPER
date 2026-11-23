@@ -1,15 +1,23 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN } from '../platform/win32.js';
 import { setMacMute } from './hardware.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Triggers macOS Focus / Do Not Disturb.
- * Attempts an optional user-created macOS Shortcut named "DevDeck Focus On" / "DevDeck Focus Off",
- * and falls back cleanly to muting Mac audio during Deep Work Focus sessions.
- */
 export async function setMacFocusMode(enabled: boolean): Promise<{ dndEnabled: boolean; note: string }> {
+  if (IS_WIN) {
+    try {
+      await setMacMute(enabled);
+    } catch {
+      // Ignore
+    }
+    return {
+      dndEnabled: enabled,
+      note: enabled ? 'Focus active (Windows audio muted)' : 'Focus ended (Windows audio restored)',
+    };
+  }
+
   const shortcutName = enabled ? 'DevDeck Focus On' : 'DevDeck Focus Off';
   try {
     await execFileAsync('shortcuts', ['run', shortcutName], { timeout: 3000 });

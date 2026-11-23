@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { type ChildProcess, spawn } from 'node:child_process';
+import { IS_WIN } from '../platform/win32.js';
 import type { LogLine, LogPreset, LogStatus } from '../types/protocol.js';
 
 const ERROR_REGEX = /\b(error|failed|exception|fatal|crash|unhandled|enoent|eaddrinuse|ts\d{4})\b/i;
@@ -65,6 +66,7 @@ export class LogStreamer {
     const cmdLabel = `${preset.command} ${preset.args.join(' ')}`.trim();
     const child = spawn(preset.command, preset.args, {
       cwd,
+      shell: IS_WIN,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, FORCE_COLOR: '0' },
     });
@@ -139,11 +141,17 @@ export function runConfiguredShellCommand(
   cwd: string,
 ): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn('/bin/zsh', ['-lc', command], {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0' },
-    });
+    const child = IS_WIN
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, FORCE_COLOR: '0' },
+        })
+      : spawn('/bin/zsh', ['-lc', command], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, FORCE_COLOR: '0' },
+        });
 
     let combined = '';
     const timer = setTimeout(() => {

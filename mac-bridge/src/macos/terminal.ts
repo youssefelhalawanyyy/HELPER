@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN, sendWinKeystroke } from '../platform/win32.js';
+import { copyToMacClipboard, triggerMacPaste } from './clipboard.js';
+import { focusMacApp } from './remoteControl.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Escapes a string safely for AppleScript double-quoted string literals.
- */
 function escapeAppleScript(str: string): string {
   return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -23,17 +23,24 @@ async function isAppRunning(appName: string): Promise<boolean> {
   }
 }
 
-/**
- * Sends a configured command to the active macOS Terminal (or iTerm2 if running) window
- * via AppleScript. Only invoked for locally configured macro payloads.
- */
 export async function sendToActiveMacTerminal(command: string): Promise<string> {
-  const safeCmd = escapeAppleScript(command.trim());
-  if (!safeCmd) {
+  const clean = command.trim();
+  if (!clean) {
     throw new Error('Empty terminal command');
   }
 
-  // Prefer iTerm2 if it is currently running and has a window
+  if (IS_WIN) {
+    await focusMacApp('Terminal', []);
+    await new Promise((r) => setTimeout(r, 160));
+    await copyToMacClipboard(clean);
+    await triggerMacPaste();
+    await new Promise((r) => setTimeout(r, 80));
+    await sendWinKeystroke('{ENTER}');
+    return `Sent to Windows Terminal: ${clean.slice(0, 48)}`;
+  }
+
+  const safeCmd = escapeAppleScript(clean);
+
   if (await isAppRunning('iTerm2')) {
     const itermScript = `
       tell application "iTerm2"
@@ -48,7 +55,7 @@ export async function sendToActiveMacTerminal(command: string): Promise<string> 
     `;
     try {
       await execFileAsync('osascript', ['-e', itermScript], { timeout: 2500 });
-      return `Sent to iTerm2: ${command.slice(0, 48)}`;
+      return `Sent to iTerm2: ${clean.slice(0, 48)}`;
     } catch {
       // Fall back to Apple Terminal
     }
@@ -65,5 +72,5 @@ export async function sendToActiveMacTerminal(command: string): Promise<string> 
     end tell
   `;
   await execFileAsync('osascript', ['-e', terminalScript], { timeout: 2500 });
-  return `Sent to Terminal: ${command.slice(0, 48)}`;
+  return `Sent to Terminal: ${clean.slice(0, 48)}`;
 }

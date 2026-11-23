@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN, sendWinKeystroke, sendWinVirtualKey } from '../platform/win32.js';
 import { captureSelectionToClipboard, lockMacScreen, toggleMacMute } from './hardware.js';
 
 const execFileAsync = promisify(execFile);
@@ -44,6 +45,42 @@ const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
   'system.paste': 'tell application "System Events" to keystroke "v" using {command down}',
 };
 
+const WINDOWS_SHORTCUTS: Record<string, string> = {
+  // Antigravity IDE (Windows uses Ctrl)
+  'antigravity.agentChat': '^l',
+  'antigravity.newAgent': '^+l',
+  'antigravity.acceptChanges': '^{ENTER}',
+  'antigravity.rejectChanges': '^{BACKSPACE}',
+  'antigravity.toggleTerminal': '^`',
+  'antigravity.commandPalette': '^+p',
+
+  // VS Code / Cursor
+  'vscode.format': '+%f',
+  'vscode.toggleTerminal': '^`',
+  'vscode.commandPalette': '^+p',
+  'vscode.saveAll': '^ks',
+  'vscode.quickOpen': '^p',
+  'vscode.toggleSidebar': '^b',
+
+  // Chrome / Edge
+  'chrome.hardReload': '^+r',
+  'chrome.devTools': '^+i',
+  'chrome.responsiveToggle': '^+m',
+  'chrome.newTab': '^t',
+  'chrome.closeTab': '^w',
+  'chrome.console': '^+j',
+
+  // Terminal
+  'terminal.clear': 'cls{ENTER}',
+  'terminal.killProcess': '^c',
+  'terminal.newTab': '^+t',
+  'terminal.repeatLast': '{UP}{ENTER}',
+
+  // General Windows
+  'system.copy': '^c',
+  'system.paste': '^v',
+};
+
 export function isKnownShortcut(shortcutId: string): boolean {
   return (
     shortcutId in APPLESCRIPT_SHORTCUTS ||
@@ -55,15 +92,30 @@ export function isKnownShortcut(shortcutId: string): boolean {
 export async function runShortcut(shortcutId: string): Promise<string> {
   if (shortcutId === 'system.screenshotSelection') {
     captureSelectionToClipboard();
-    return 'Screenshot selection active → will copy to Mac clipboard';
+    return IS_WIN
+      ? 'Windows Snipping Tool active → will copy to clipboard'
+      : 'Screenshot selection active → will copy to Mac clipboard';
   }
   if (shortcutId === 'system.toggleMute') {
     const muted = await toggleMacMute();
-    return muted ? 'Mac muted' : 'Mac unmuted';
+    return muted ? 'Audio muted' : 'Audio unmuted';
   }
   if (shortcutId === 'system.lockScreen') {
     await lockMacScreen();
     return 'Display locked';
+  }
+
+  if (IS_WIN) {
+    if (shortcutId === 'system.spotlight') {
+      await sendWinVirtualKey('0x5B'); // VK_LWIN -> Start Search
+      return 'Opened Windows Search';
+    }
+    const expr = WINDOWS_SHORTCUTS[shortcutId];
+    if (!expr) {
+      throw new Error(`Unknown shortcut identifier: ${shortcutId}`);
+    }
+    await sendWinKeystroke(expr);
+    return `Triggered ${shortcutId}`;
   }
 
   const script = APPLESCRIPT_SHORTCUTS[shortcutId];

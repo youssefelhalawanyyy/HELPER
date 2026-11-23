@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { IS_WIN, runPowerShell, sendWinKeystroke } from '../platform/win32.js';
 import type { ClipboardItem } from '../types/protocol.js';
 
 const execFileAsync = promisify(execFile);
@@ -13,6 +14,14 @@ export function expandSnippetTokens(raw: string): string {
 }
 
 export function copyToMacClipboard(text: string): Promise<void> {
+  if (IS_WIN) {
+    const b64 = Buffer.from(text, 'utf8').toString('base64');
+    return runPowerShell(
+      `$bytes = [Convert]::FromBase64String('${b64}'); Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString($bytes))`,
+      2500,
+    ).then(() => undefined);
+  }
+
   return new Promise((resolve, reject) => {
     const child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'pipe'] });
     let err = '';
@@ -29,6 +38,15 @@ export function copyToMacClipboard(text: string): Promise<void> {
 }
 
 export async function readMacClipboard(): Promise<string> {
+  if (IS_WIN) {
+    try {
+      const out = await runPowerShell('Get-Clipboard -Raw -Format Text -ErrorAction SilentlyContinue', 1500);
+      return out.replace(/\r\n/g, '\n');
+    } catch {
+      return '';
+    }
+  }
+
   try {
     const { stdout } = await execFileAsync('pbpaste', [], { timeout: 1000, maxBuffer: 512 * 1024 });
     return stdout;
@@ -38,6 +56,10 @@ export async function readMacClipboard(): Promise<string> {
 }
 
 export async function triggerMacPaste(): Promise<void> {
+  if (IS_WIN) {
+    await sendWinKeystroke('^v');
+    return;
+  }
   await execFileAsync(
     'osascript',
     ['-e', 'tell application "System Events" to keystroke "v" using {command down}'],

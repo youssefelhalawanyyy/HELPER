@@ -821,6 +821,7 @@ wss.on('connection', (ws, req) => {
     type: 'hello',
     payload: {
       hostname: os.hostname(),
+      platform: process.platform,
       lanIp,
       bridgePort: BRIDGE_PORT,
       pwaPort: PWA_PORT,

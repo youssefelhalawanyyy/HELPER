@@ -199,6 +199,7 @@ export interface MediaState {
 
 export interface BridgeHello {
   hostname: string;
+  platform?: string;
   lanIp: string;
   bridgePort: number;
   pwaPort: number;

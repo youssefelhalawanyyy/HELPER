@@ -584,6 +584,8 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
 
   const ag = deck.antigravityState;
   const prog = deck.agentProgress;
+  const isWindowsHost = deck.hello?.platform === 'win32';
+  const modKey = isWindowsHost ? 'Ctrl+' : '⌘';
   const isWorking = ag.statusLabel === 'WORKING' || prog.active;
   const turns = ag.chatTurns ?? [];
   const terminalRuns = ag.terminalRuns ?? [];
@@ -1113,7 +1115,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             <div className="deck-scroll h-full space-y-2 overflow-y-auto pr-0.5">
               <div className="flex items-center gap-1">
                 <Sparkles className="h-3 w-3 text-[#a78bfa]" />
-                <span className="sub !text-[8.5px]">One-Tap IDE Slash (⌘L)</span>
+                <span className="sub !text-[8.5px]">One-Tap IDE Slash ({modKey}L)</span>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {SLASH_COMMANDS.map((item) => (
@@ -1174,7 +1176,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             className="flex items-center justify-center gap-1 rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 py-2 text-[9.5px] font-extrabold text-[#ff5d6c]"
           >
             <XCircle className="h-3.5 w-3.5" />
-            REJECT ⌘⌫
+            REJECT {modKey}⌫
           </motion.button>
           <motion.button
             type="button"
@@ -1190,7 +1192,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             style={{ boxShadow: '0 2px 0 #14664a' }}
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
-            ACCEPT ⌘↵
+            ACCEPT {modKey}↵
           </motion.button>
         </div>
       </div>
