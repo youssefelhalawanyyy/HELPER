@@ -387,7 +387,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
             line.includes(':') &&
             !line.trim().endsWith(': OK') &&
             line.includes('.plist') &&
-            !/operation not permitted|permission denied|no such file/i.test(line)
+            !/operation not permitted|permission denied|not readable|does not exist|not a regular file/i.test(line)
           ) {
             corruptedFilesCount += 1;
             const fileName = path.basename(line.split(':')[0].trim());
@@ -565,10 +565,10 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         });
       }
 
-      // 3. RAM / Memory Pressure
-      if (ramPct >= 82 || swapUsedGb >= 2) {
-        const crit = ramPct >= 92 || swapUsedGb >= 4;
-        score -= crit ? 24 : 14;
+      // 3. RAM / Memory Pressure (realistic thresholds for 8GB+ macOS & Windows)
+      if (ramPct >= 86 || (ramPct >= 80 && swapUsedGb >= 5)) {
+        const crit = ramPct >= 93;
+        score -= crit ? 20 : 10;
         const hogText = topRam.length
           ? ` Heavy apps: ${topRam.map((p) => `${p.name.replace(/\.exe$/i, '')} (${p.mem.toFixed(0)}%)`).join(', ')}.`
           : '';
@@ -1060,7 +1060,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
                 line.includes(':') &&
                 !line.trim().endsWith(': OK') &&
                 line.includes('.plist') &&
-                !/operation not permitted|permission denied|no such file/i.test(line)
+                !/operation not permitted|permission denied|not readable|does not exist|not a regular file/i.test(line)
               ) {
                 const filePath = line.split(':')[0].trim();
                 const base = path.basename(filePath);
