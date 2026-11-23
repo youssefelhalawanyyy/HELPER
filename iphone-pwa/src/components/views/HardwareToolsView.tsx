@@ -81,11 +81,21 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const lastSendRef = useRef(0);
   const faceDownTriggeredRef = useRef(false);
 
-  // Trackpad pointer tracking
+  // Trackpad pointer filtering (EMA low-pass + macOS velocity acceleration + 60Hz RAF)
+  const [sensitivity, setSensitivity] = useState<'precision' | 'balanced' | 'fast'>('balanced');
   const padLastRef = useRef<{ x: number; y: number } | null>(null);
-  const padMovedRef = useRef(false);
-  const padAccumRef = useRef({ dx: 0, dy: 0 });
-  const padLastEmitRef = useRef(0);
+  const padEmaRef = useRef({ vx: 0, vy: 0 });
+  const padSubpixelRef = useRef({ rx: 0, ry: 0 });
+  const padPendingRef = useRef({ dx: 0, dy: 0 });
+  const padMovedDistRef = useRef(0);
+  const padRafRef = useRef<number | null>(null);
+  const padActiveRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (padRafRef.current) cancelAnimationFrame(padRafRef.current);
+    };
+  }, []);
 
   const handleDialChange = (nextVal: number, delta: number) => {
     setDialVal(nextVal);
@@ -190,61 +200,128 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
         {/* Left: Smooth Multi-Touch Wireless Trackpad */}
         <div className="tile flex flex-col gap-2 p-3">
           <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <MousePointer2 className="h-4 w-4 text-[#22d3ee]" />
               <span className="disp text-[22px]">Trackpad</span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playClick();
-                setSubTab('controls');
-              }}
-              className="flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-[9.5px] font-bold text-zinc-200"
-            >
-              <Sliders className="h-3 w-3 text-[#fbbf24]" />
-              Dial &amp; Snap
-            </button>
+            <div className="flex items-center gap-1">
+              {(['precision', 'balanced', 'fast'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    setSensitivity(s);
+                  }}
+                  className="rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
+                  style={{
+                    background: sensitivity === s ? '#22d3ee' : 'rgba(255,255,255,0.06)',
+                    color: sensitivity === s ? '#041317' : '#7c8190',
+                  }}
+                >
+                  {s === 'precision' ? 'Slow' : s === 'balanced' ? 'Mid' : 'Fast'}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setSubTab('controls');
+                }}
+                className="ml-1 flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-[9.5px] font-bold text-zinc-200"
+              >
+                <Sliders className="h-3 w-3 text-[#fbbf24]" />
+                Dial
+              </button>
+            </div>
           </div>
 
           <div
             data-no-swipe="true"
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
+              padActiveRef.current = true;
               padLastRef.current = { x: e.clientX, y: e.clientY };
-              padMovedRef.current = false;
-              padAccumRef.current = { dx: 0, dy: 0 };
+              padEmaRef.current = { vx: 0, vy: 0 };
+              padSubpixelRef.current = { rx: 0, ry: 0 };
+              padPendingRef.current = { dx: 0, dy: 0 };
+              padMovedDistRef.current = 0;
+
+              const flushLoop = () => {
+                if (!padActiveRef.current) {
+                  padRafRef.current = null;
+                  return;
+                }
+                const { dx, dy } = padPendingRef.current;
+                padPendingRef.current = { dx: 0, dy: 0 };
+
+                if (dx !== 0 || dy !== 0) {
+                  // Sub-pixel carry keeps micro-movements silky without truncation jitter
+                  const totalX = dx + padSubpixelRef.current.rx;
+                  const totalY = dy + padSubpixelRef.current.ry;
+                  const outX = Math.trunc(totalX * 10) / 10;
+                  const outY = Math.trunc(totalY * 10) / 10;
+                  padSubpixelRef.current = { rx: totalX - outX, ry: totalY - outY };
+                  if (Math.abs(outX) >= 0.2 || Math.abs(outY) >= 0.2) {
+                    deck.sendEvent({ type: 'trackpad:move', payload: { dx: outX, dy: outY } });
+                  }
+                }
+                padRafRef.current = requestAnimationFrame(flushLoop);
+              };
+              if (!padRafRef.current) padRafRef.current = requestAnimationFrame(flushLoop);
             }}
             onPointerMove={(e) => {
               if (!padLastRef.current) return;
-              const dx = (e.clientX - padLastRef.current.x) * 2.1;
-              const dy = (e.clientY - padLastRef.current.y) * 2.1;
+              const rawScreenDx = e.clientX - padLastRef.current.x;
+              const rawScreenDy = e.clientY - padLastRef.current.y;
               padLastRef.current = { x: e.clientX, y: e.clientY };
-              if (Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5) padMovedRef.current = true;
-              padAccumRef.current.dx += dx;
-              padAccumRef.current.dy += dy;
 
-              if (Date.now() - padLastEmitRef.current > 40) {
-                padLastEmitRef.current = Date.now();
-                const sendX = Math.round(padAccumRef.current.dx);
-                const sendY = Math.round(padAccumRef.current.dy);
-                padAccumRef.current = { dx: 0, dy: 0 };
-                if (sendX !== 0 || sendY !== 0) {
-                  deck.sendEvent({ type: 'trackpad:move', payload: { dx: sendX, dy: sendY } });
-                }
-              }
+              // Auto-align coordinates when phone is held portrait inside 90deg landscape lock
+              const isPortrait = window.innerHeight > window.innerWidth;
+              const rawDx = isPortrait ? rawScreenDy : rawScreenDx;
+              const rawDy = isPortrait ? -rawScreenDx : rawScreenDy;
+
+              padMovedDistRef.current += Math.hypot(rawDx, rawDy);
+
+              // Deadzone suppresses capacitive micro-jitter when resting finger
+              if (Math.hypot(rawDx, rawDy) < 0.35) return;
+
+              // Exponential Moving Average (EMA) low-pass filter
+              const alpha = 0.48;
+              const fx = padEmaRef.current.vx * (1 - alpha) + rawDx * alpha;
+              const fy = padEmaRef.current.vy * (1 - alpha) + rawDy * alpha;
+              padEmaRef.current = { vx: fx, vy: fy };
+
+              // macOS-style non-linear velocity acceleration curve
+              const speed = Math.hypot(fx, fy);
+              const mult = sensitivity === 'precision' ? 0.72 : sensitivity === 'fast' ? 1.45 : 1.05;
+              const gain = (0.9 + Math.min(2.8, Math.pow(speed, 0.72) * 0.42)) * mult;
+
+              padPendingRef.current.dx += fx * gain;
+              padPendingRef.current.dy += fy * gain;
             }}
             onPointerUp={() => {
-              if (!padMovedRef.current) {
+              padActiveRef.current = false;
+              if (padRafRef.current) {
+                cancelAnimationFrame(padRafRef.current);
+                padRafRef.current = null;
+              }
+              if (padMovedDistRef.current < 7) {
                 soundEngine.playClick();
                 deck.sendEvent({ type: 'trackpad:click', payload: { button: 'left' } });
               }
               padLastRef.current = null;
             }}
+            onPointerCancel={() => {
+              padActiveRef.current = false;
+              padLastRef.current = null;
+            }}
             className="grid flex-1 touch-none place-items-center rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.08),rgba(0,0,0,0.85))]"
           >
-            <span className="sub pointer-events-none">Drag to move cursor · tap to click</span>
+            <span className="sub pointer-events-none">
+              Native 60Hz filtered touchpad · drag to glide · tap to click
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

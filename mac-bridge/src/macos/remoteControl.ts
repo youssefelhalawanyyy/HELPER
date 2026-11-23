@@ -1,7 +1,14 @@
-import { execFile } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BRIDGE_ROOT = path.resolve(__dirname, '../..');
+const NATIVE_SRC = path.join(BRIDGE_ROOT, 'native', 'mouse_daemon.c');
+const NATIVE_BIN = path.join(BRIDGE_ROOT, 'data', 'mouse_daemon');
 
 const FAVORITE_APPS = new Set([
   'Antigravity',
@@ -29,6 +36,49 @@ const FAVORITE_APPS = new Set([
   'Microsoft PowerPoint',
 ]);
 
+// Persistent native CoreGraphics mouse daemon (<0.1ms per event -> silky 120Hz touchpad feel)
+let mouseDaemon: ChildProcess | null = null;
+let daemonCompileAttempted = false;
+let daemonReadyPromise: Promise<ChildProcess | null> | null = null;
+
+async function ensureMouseDaemon(): Promise<ChildProcess | null> {
+  if (mouseDaemon && !mouseDaemon.killed && mouseDaemon.stdin?.writable) {
+    return mouseDaemon;
+  }
+  if (daemonReadyPromise) return daemonReadyPromise;
+
+  daemonReadyPromise = (async () => {
+    try {
+      if (!fs.existsSync(NATIVE_BIN)) {
+        if (daemonCompileAttempted || !fs.existsSync(NATIVE_SRC)) return null;
+        daemonCompileAttempted = true;
+        fs.mkdirSync(path.dirname(NATIVE_BIN), { recursive: true });
+        await execFileAsync(
+          'clang',
+          ['-O2', '-framework', 'ApplicationServices', NATIVE_SRC, '-o', NATIVE_BIN],
+          { timeout: 10_000 },
+        );
+      }
+
+      const proc = spawn(NATIVE_BIN, [], { stdio: ['pipe', 'ignore', 'ignore'] });
+      proc.on('exit', () => {
+        if (mouseDaemon === proc) mouseDaemon = null;
+      });
+      mouseDaemon = proc;
+      return proc;
+    } catch {
+      return null;
+    } finally {
+      daemonReadyPromise = null;
+    }
+  })();
+
+  return daemonReadyPromise;
+}
+
+// Pre-warm native daemon on bridge startup
+void ensureMouseDaemon();
+
 export async function focusMacApp(appName: string, runningApps: string[]): Promise<string> {
   const clean = appName.trim();
   const allowed = FAVORITE_APPS.has(clean) || runningApps.includes(clean);
@@ -36,7 +86,6 @@ export async function focusMacApp(appName: string, runningApps: string[]): Promi
     throw new Error(`App "${clean}" is not in the allowed launcher list`);
   }
 
-  // Handle Antigravity IDE app bundle naming variants automatically
   if (clean === 'Antigravity' || clean === 'Google Antigravity') {
     for (const candidate of ['Antigravity', 'Google Antigravity']) {
       try {
@@ -54,17 +103,22 @@ export async function focusMacApp(appName: string, runningApps: string[]): Promi
 }
 
 export async function moveMacCursor(dx: number, dy: number): Promise<void> {
-  const clampedX = Math.max(-180, Math.min(180, Math.round(dx)));
-  const clampedY = Math.max(-180, Math.min(180, Math.round(dy)));
-  if (clampedX === 0 && clampedY === 0) return;
+  const clampedX = Math.max(-220, Math.min(220, dx));
+  const clampedY = Math.max(-220, Math.min(220, dy));
+  if (Math.abs(clampedX) < 0.15 && Math.abs(clampedY) < 0.15) return;
 
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(`M ${clampedX.toFixed(2)} ${clampedY.toFixed(2)}\n`);
+    return;
+  }
+
+  // Fallback to JXA if clang wasn't available
   const jxa = `
     ObjC.import('ApplicationServices');
     const curEv = $.CGEventCreate($());
     const pos = $.CGEventGetLocation(curEv);
-    const nx = Math.max(0, pos.x + ${clampedX});
-    const ny = Math.max(0, pos.y + ${clampedY});
-    const moveEv = $.CGEventCreateMouseEvent($(), $.kCGEventMouseMoved, {x: nx, y: ny}, $.kCGMouseButtonLeft);
+    const moveEv = $.CGEventCreateMouseEvent($(), $.kCGEventMouseMoved, {x: Math.max(0, pos.x + ${Math.round(clampedX)}), y: Math.max(0, pos.y + ${Math.round(clampedY)})}, $.kCGMouseButtonLeft);
     if (moveEv) $.CGEventPost($.kCGHIDEventTap, moveEv);
   `;
   try {
@@ -75,10 +129,15 @@ export async function moveMacCursor(dx: number, dy: number): Promise<void> {
 }
 
 export async function clickMacCursor(button: 'left' | 'right'): Promise<void> {
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(`C ${button === 'right' ? 'R' : 'L'}\n`);
+    return;
+  }
+
   const downType = button === 'right' ? '$.kCGEventRightMouseDown' : '$.kCGEventLeftMouseDown';
   const upType = button === 'right' ? '$.kCGEventRightMouseUp' : '$.kCGEventLeftMouseUp';
   const btn = button === 'right' ? '$.kCGMouseButtonRight' : '$.kCGMouseButtonLeft';
-
   const jxa = `
     ObjC.import('ApplicationServices');
     const curEv = $.CGEventCreate($());
@@ -99,10 +158,10 @@ export async function sendPresentationKey(
   action: 'next' | 'prev' | 'start' | 'escape',
 ): Promise<string> {
   const scriptMap: Record<typeof action, string> = {
-    next: 'tell application "System Events" to key code 124', // Right Arrow
-    prev: 'tell application "System Events" to key code 123', // Left Arrow
+    next: 'tell application "System Events" to key code 124',
+    prev: 'tell application "System Events" to key code 123',
     start: 'tell application "System Events" to keystroke "p" using {option down, command down}',
-    escape: 'tell application "System Events" to key code 53', // Escape
+    escape: 'tell application "System Events" to key code 53',
   };
   await execFileAsync('osascript', ['-e', scriptMap[action]], { timeout: 1500 });
   return `Slide: ${action}`;
