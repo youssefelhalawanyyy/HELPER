@@ -8,6 +8,7 @@ import {
   BatteryCharging,
   ClipboardList,
   Coffee,
+  Cpu,
   Home,
   Link2,
   MonitorSmartphone,
@@ -24,6 +25,7 @@ import { SnippetDrawer } from '@/components/shell/SnippetDrawer';
 import { HardwareToolsView } from '@/components/views/HardwareToolsView';
 import { LaunchControlView } from '@/components/views/LaunchControlView';
 import { LiveMonitorView } from '@/components/views/LiveMonitorView';
+import { MacInspectorView } from '@/components/views/MacInspectorView';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
@@ -31,14 +33,15 @@ import { useWakeLock } from '@/hooks/useWakeLock';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
-export type DeckViewId = 'deck' | 'monitor' | 'launch' | 'hardware' | 'preview';
+export type DeckViewId = 'deck' | 'monitor' | 'mac' | 'launch' | 'hardware' | 'preview';
 
 const NAV_ITEMS: Array<{ id: DeckViewId; label: string; icon: typeof Home }> = [
   { id: 'deck', label: 'Deck', icon: Home },
   { id: 'monitor', label: 'Monitor', icon: Activity },
+  { id: 'mac', label: 'Mac System & Dock', icon: Cpu },
   { id: 'launch', label: 'Launch', icon: Rocket },
-  { id: 'hardware', label: 'Hardware', icon: Sliders },
-  { id: 'preview', label: 'Ambient', icon: MonitorSmartphone },
+  { id: 'hardware', label: 'Hardware & Trackpad', icon: Sliders },
+  { id: 'preview', label: 'Desk Clock & Ambient', icon: MonitorSmartphone },
 ];
 
 export function DeckShell() {
@@ -357,6 +360,12 @@ export function DeckShell() {
                       />
                     )}
                     {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
+                    {activeView === 'mac' && (
+                      <MacInspectorView
+                        deck={deck}
+                        onNavigateToMonitor={() => setActiveView('monitor')}
+                      />
+                    )}
                     {activeView === 'launch' && <LaunchControlView deck={deck} />}
                     {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
                     {activeView === 'preview' && <PreviewAmbientView deck={deck} />}

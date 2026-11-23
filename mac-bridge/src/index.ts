@@ -24,7 +24,16 @@ import {
   wakeMacDisplay,
 } from './macos/hardware.js';
 import { CaffeineManager } from './macos/caffeine.js';
+import { DeepTelemetryService } from './macos/deepTelemetry.js';
 import { controlMacMedia, getMediaState } from './macos/media.js';
+import {
+  clickMacCursor,
+  focusMacApp,
+  moveMacCursor,
+  sendPresentationKey,
+  toggleMacDarkMode,
+  toggleMacMicMute,
+} from './macos/remoteControl.js';
 import { isKnownShortcut, runShortcut } from './macos/shortcuts.js';
 import { sendToActiveMacTerminal } from './macos/terminal.js';
 import { snapFrontmostWindow } from './macos/windowSnap.js';
@@ -125,6 +134,12 @@ const processService = new ProcessAndDockerService(
   (available, containers) => broadcast({ type: 'docker:update', payload: { available, containers } }),
 );
 
+const deepTelemetry = new DeepTelemetryService(
+  () => configStore.getAll().projectDir,
+  lanIp,
+  (data) => broadcast({ type: 'mac:telemetry', payload: data }),
+);
+
 // Start background pollers
 statsService.start(2000);
 activeAppPoller.start(1500);
@@ -132,6 +147,7 @@ portService.start(3500);
 gitService.start(5000);
 clipboardTracker.start(1500);
 processService.start(4500);
+deepTelemetry.start(6000);
 
 // --- Express Routes ---
 app.use(
@@ -457,6 +473,82 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'app:focus': {
+      try {
+        const resMsg = await focusMacApp(
+          msg.payload.appName,
+          deepTelemetry.getLatest().runningApps,
+        );
+        reply(msg.payload.requestId, true, resMsg);
+      } catch (err) {
+        reply(msg.payload.requestId, false, err instanceof Error ? err.message : 'App launch failed');
+      }
+      return;
+    }
+
+    case 'trackpad:move': {
+      void moveMacCursor(msg.payload.dx, msg.payload.dy);
+      return;
+    }
+
+    case 'trackpad:click': {
+      void clickMacCursor(msg.payload.button);
+      return;
+    }
+
+    case 'presentation:key': {
+      try {
+        const resMsg = await sendPresentationKey(msg.payload.action);
+        reply(msg.payload.requestId, true, resMsg);
+      } catch (err) {
+        reply(msg.payload.requestId, false, err instanceof Error ? err.message : 'Slide key failed');
+      }
+      return;
+    }
+
+    case 'system:toggleDarkMode': {
+      try {
+        const dark = await toggleMacDarkMode();
+        await deepTelemetry.refresh();
+        reply(msg.payload.requestId, true, dark ? 'macOS Dark Mode ON' : 'macOS Light Mode ON');
+      } catch (err) {
+        reply(msg.payload.requestId, false, err instanceof Error ? err.message : 'Toggle failed');
+      }
+      return;
+    }
+
+    case 'system:toggleMic': {
+      try {
+        const res = await toggleMacMicMute();
+        await deepTelemetry.refresh();
+        reply(msg.payload.requestId, true, res.micMuted ? 'Mac Mic MUTED' : 'Mac Mic LIVE');
+      } catch (err) {
+        reply(msg.payload.requestId, false, err instanceof Error ? err.message : 'Mic toggle failed');
+      }
+      return;
+    }
+
+    case 'script:run': {
+      const scripts = deepTelemetry.getLatest().projectScripts;
+      const found = scripts.find((s) => s.name === msg.payload.scriptName);
+      if (!found) {
+        reply(msg.payload.requestId, false, `Script "${msg.payload.scriptName}" not found in package.json`);
+        return;
+      }
+      logStreamer.startPreset(
+        { id: `pkg-${found.name}`, label: `npm run ${found.name}`, command: 'npm', args: ['run', found.name] },
+        configStore.getAll().projectDir,
+      );
+      reply(msg.payload.requestId, true, `Streaming npm run ${found.name}`);
+      return;
+    }
+
+    case 'telemetry:refresh': {
+      await deepTelemetry.refresh();
+      reply(msg.payload.requestId, true, 'Mac telemetry refreshed');
+      return;
+    }
+
     case 'voice:transcript': {
       const { requestId, text, autoPaste } = msg.payload;
       if (!text.trim()) {
@@ -568,6 +660,7 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'caffeine:state', payload: { active: caffeineManager.isActive() } });
   sendTo(ws, { type: 'processes:update', payload: { processes: processService.getLatestProcesses() } });
   sendTo(ws, { type: 'docker:update', payload: processService.getLatestDocker() });
+  sendTo(ws, { type: 'mac:telemetry', payload: deepTelemetry.getLatest() });
   sendTo(ws, {
     type: 'preview:url',
     payload: { url: configStore.getAll().previewUrl, label: 'Local Dev' },
@@ -634,5 +727,6 @@ process.on('SIGINT', () => {
   logStreamer.stop();
   caffeineManager.stop();
   processService.stop();
+  deepTelemetry.stop();
   server.close(() => process.exit(0));
 });

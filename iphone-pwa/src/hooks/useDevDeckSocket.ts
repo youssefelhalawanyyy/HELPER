@@ -16,6 +16,7 @@ import type {
   HeavyProcess,
   LogLine,
   LogStatus,
+  MacDeepTelemetry,
   MediaState,
   ProfileId,
   ServerEvent,
@@ -188,6 +189,7 @@ export function useDevDeckSocket() {
     available: false,
     containers: [],
   });
+  const [macTelemetry, setMacTelemetry] = useState<MacDeepTelemetry | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -299,6 +301,9 @@ export function useDevDeckSocket() {
               break;
             case 'docker:update':
               setDocker(msg.payload);
+              break;
+            case 'mac:telemetry':
+              setMacTelemetry(msg.payload);
               break;
             case 'action:result':
               showToast(msg.payload.ok, msg.payload.message);
@@ -442,6 +447,7 @@ export function useDevDeckSocket() {
     caffeineActive,
     processes,
     docker,
+    macTelemetry,
     toast,
     sendEvent,
     pairWithPin,

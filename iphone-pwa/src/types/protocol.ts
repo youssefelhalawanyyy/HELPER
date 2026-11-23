@@ -77,6 +77,51 @@ export interface DockerContainer {
 
 export type WindowSnapPosition = 'left' | 'right' | 'maximize' | 'center' | 'top' | 'bottom';
 
+export interface BluetoothDeviceInfo {
+  name: string;
+  connected: boolean;
+  batteryPct: number | null;
+}
+
+export interface RecentFileInfo {
+  name: string;
+  folder: 'Downloads' | 'Desktop';
+  sizeKb: number;
+  mtime: number;
+}
+
+export interface ProjectScriptInfo {
+  name: string;
+  command: string;
+}
+
+export interface MacDeepTelemetry {
+  batteryHealthPct: number | null;
+  batteryCycles: number | null;
+  batteryTimeRemaining: string;
+  batteryWattage: number | null;
+  cpuCores: number[];
+  uptimeSec: number;
+  displays: string[];
+  bluetoothDevices: BluetoothDeviceInfo[];
+  wifiSsid: string;
+  wifiSignalDbm: number | null;
+  pingMs: number | null;
+  vpnActive: boolean;
+  lanIp: string;
+  activeWindowTitle: string;
+  activeBrowserUrl: string;
+  activeBrowserTitle: string;
+  runningApps: string[];
+  recentFiles: RecentFileInfo[];
+  projectScripts: ProjectScriptInfo[];
+  micInputPct: number;
+  micMuted: boolean;
+  audioOutputDevice: string;
+  darkMode: boolean;
+  ts: number;
+}
+
 export interface ActivePort {
   port: number;
   pid: number;
@@ -185,6 +230,7 @@ export type ServerEvent =
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
   | { type: 'docker:update'; payload: { available: boolean; containers: DockerContainer[] } }
+  | { type: 'mac:telemetry'; payload: MacDeepTelemetry }
   | { type: 'action:result'; payload: { requestId: string; ok: boolean; message: string; data?: unknown } };
 
 export type ClientEvent =
@@ -212,6 +258,14 @@ export type ClientEvent =
   | { type: 'processes:refresh'; payload: { requestId: string } }
   | { type: 'docker:action'; payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' } }
   | { type: 'docker:refresh'; payload: { requestId: string } }
+  | { type: 'app:focus'; payload: { requestId: string; appName: string } }
+  | { type: 'trackpad:move'; payload: { dx: number; dy: number } }
+  | { type: 'trackpad:click'; payload: { button: 'left' | 'right' } }
+  | { type: 'presentation:key'; payload: { requestId: string; action: 'next' | 'prev' | 'start' | 'escape' } }
+  | { type: 'system:toggleDarkMode'; payload: { requestId: string } }
+  | { type: 'system:toggleMic'; payload: { requestId: string } }
+  | { type: 'script:run'; payload: { requestId: string; scriptName: string } }
+  | { type: 'telemetry:refresh'; payload: { requestId: string } }
   | { type: 'voice:transcript'; payload: { requestId: string; text: string; autoPaste: boolean } }
   | { type: 'focus:start'; payload: { requestId: string; durationMin: number } }
   | { type: 'focus:stop'; payload: { requestId: string } }
