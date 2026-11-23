@@ -1,5 +1,11 @@
-const CACHE_NAME = 'devdeck-shell-v2';
-const PRECACHE_URLS = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/apple-touch-icon.png'];
+const CACHE_NAME = 'devdeck-shell-v3';
+const PRECACHE_URLS = [
+  '/',
+  '/manifest.json',
+  '/keepawake.mp4',
+  '/icons/icon-192.png',
+  '/icons/apple-touch-icon.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
