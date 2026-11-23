@@ -278,9 +278,15 @@ export function DeckShell() {
         >
           {/* Ultra-Slim Top Status Bar */}
           <header className="flex h-6 shrink-0 items-center gap-1.5 text-[10px] font-bold">
-            <span className="sub mr-0.5 !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">
-              DevDeck
-            </span>
+            <div className="mr-0.5 flex items-center gap-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icons/icon-192.png"
+                alt="DevDeck logo"
+                className="h-5 w-5 rounded-[5px] border border-[#22d3ee]/40 object-cover shadow-[0_0_8px_rgba(34,211,238,0.35)]"
+              />
+              <span className="sub !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">DevDeck</span>
+            </div>
 
             <button
               type="button"

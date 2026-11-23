@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'DevDeck — Mac Coding Companion',
-  description: 'OLED-optimized hardware macro deck & live developer dashboard for iPhone 14',
+  title: 'DevDeck — Mac & PC Coding Companion',
+  description: 'OLED hardware macro deck, Antigravity IDE live mirror & PC/Mac Doctor for iPhone',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -11,8 +11,11 @@ export const metadata: Metadata = {
     title: 'DevDeck',
   },
   icons: {
-    icon: '/icons/icon.svg',
-    apple: '/icons/icon.svg',
+    icon: [
+      { url: '/icons/favicon-64.png', sizes: '64x64', type: 'image/png' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 };
 

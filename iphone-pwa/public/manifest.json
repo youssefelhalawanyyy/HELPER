@@ -1,7 +1,7 @@
 {
-  "name": "DevDeck — Mac Coding Companion",
+  "name": "DevDeck — Mac & PC Coding Companion",
   "short_name": "DevDeck",
-  "description": "OLED-optimized hardware macro deck & live Mac developer dashboard for iPhone 14",
+  "description": "OLED hardware macro deck, Antigravity IDE live mirror, trackpad & PC/Mac Doctor for iPhone",
   "start_url": "/",
   "display": "standalone",
   "orientation": "landscape",
@@ -9,10 +9,21 @@
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "/icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
     }
   ]
 }
