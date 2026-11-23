@@ -519,12 +519,22 @@ export function PairingOverlay({
                   </div>
                 </div>
 
-                <div className="text-[9.5px] leading-snug text-[#7c8190]">
-                  {hostOs === 'windows'
-                    ? 'Tip: Run as Admin on Windows for full Defender + SFC/DISM repair.'
-                    : mode === 'tunnel'
-                      ? 'Scan the terminal QR with iPhone Camera for 1-tap pairing.'
-                      : 'Fastest for Chrome on this computer (no tunnel needed).'}
+                <div className="flex items-center justify-between gap-2 text-[9.5px] leading-snug text-[#7c8190]">
+                  <span>
+                    {hostOs === 'windows'
+                      ? 'Run as Admin for full Defender + SFC repair.'
+                      : mode === 'tunnel'
+                        ? 'Scan terminal QR for 1-tap pairing.'
+                        : 'Fastest on this computer (no tunnel).'}
+                  </span>
+                  <a
+                    href={`/setup#${hostOs}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="shrink-0 font-bold text-[#22d3ee] hover:underline"
+                  >
+                    Full Setup Guide ↗
+                  </a>
                 </div>
               </div>
             </div>
