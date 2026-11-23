@@ -36,6 +36,8 @@ import type { ClientEvent, ServerEvent } from './types/protocol.js';
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 4747);
 const PWA_PORT = Number(process.env.PWA_PORT || 3000);
+const PUBLIC_PWA_URL = (process.env.PUBLIC_PWA_URL || 'https://helper-nu-swart.vercel.app').replace(/\/+$/, '');
+const PUBLIC_BRIDGE_URL = (process.env.PUBLIC_BRIDGE_URL || '').replace(/\/+$/, '');
 
 const configStore = new ConfigStore();
 const auth = new AuthManager(configStore.getToken());
@@ -515,18 +517,22 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(BRIDGE_PORT, '0.0.0.0', () => {
-  const pairUrl = `http://${lanIp}:${PWA_PORT}/?host=${encodeURIComponent(lanIp)}&port=${BRIDGE_PORT}&token=${encodeURIComponent(auth.token)}`;
+  const bridgeHost = PUBLIC_BRIDGE_URL || lanIp;
+  const bridgePortParam = PUBLIC_BRIDGE_URL ? 443 : BRIDGE_PORT;
+  const pairUrl = `${PUBLIC_PWA_URL}/?host=${encodeURIComponent(bridgeHost)}&port=${bridgePortParam}&token=${encodeURIComponent(auth.token)}`;
+  const localUrl = `http://${lanIp}:${PWA_PORT}/?host=${encodeURIComponent(lanIp)}&port=${BRIDGE_PORT}&token=${encodeURIComponent(auth.token)}`;
   console.log('\n╔══════════════════════════════════════════════════════════╗');
   console.log('║                  DEVDECK MAC BRIDGE v1.0                 ║');
   console.log('╠══════════════════════════════════════════════════════════╣');
-  console.log(`║  LAN URL   : http://${lanIp}:${PWA_PORT}`.padEnd(59) + '║');
-  console.log(`║  Bridge WS : ws://${lanIp}:${BRIDGE_PORT}/ws`.padEnd(59) + '║');
+  console.log(`║  PWA URL   : ${PUBLIC_PWA_URL}`.padEnd(59) + '║');
+  console.log(`║  Bridge WS : ${PUBLIC_BRIDGE_URL ? PUBLIC_BRIDGE_URL.replace(/^http/, 'ws') : `ws://${lanIp}:${BRIDGE_PORT}`}/ws`.padEnd(59) + '║');
   console.log(`║  Pair PIN  : ${auth.pin}`.padEnd(59) + '║');
   console.log(`║  Webhook   : http://${lanIp}:${BRIDGE_PORT}/hook/<path>`.padEnd(59) + '║');
   console.log('╚══════════════════════════════════════════════════════════╝\n');
-  console.log('Scan with iPhone 14 Camera to pair instantly:\n');
+  console.log('Scan with iPhone 14 Camera to open DevDeck on Vercel:\n');
   qrcode.generate(pairUrl, { small: true });
-  console.log(`\nDirect Pair URL:\n${pairUrl}\n`);
+  console.log(`\nVercel Pair URL:\n${pairUrl}`);
+  console.log(`\nLocal Wi-Fi Pair URL (when running npm run dev):\n${localUrl}\n`);
 });
 
 process.on('SIGINT', () => {
