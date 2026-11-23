@@ -197,8 +197,16 @@ export function useDevDeckSocket() {
   });
   const [antigravityState, setAntigravityState] = useState<AntigravityLiveState>({
     active: false,
+    statusLabel: 'IDLE',
     lastActivityTs: 0,
     conversationId: '',
+    model: '',
+    stepCount: 0,
+    contextTokens: 0,
+    currentFocus: '',
+    lastUserPrompt: '',
+    steps: [],
+    recentEvents: [],
     artifactName: '',
     artifactPreview: '',
     diffFiles: [],

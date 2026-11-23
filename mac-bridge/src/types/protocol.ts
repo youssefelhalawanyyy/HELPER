@@ -237,10 +237,31 @@ export interface GitDiffFile {
   removed: number;
 }
 
+export interface AntigravityStepItem {
+  title: string;
+  status: string;
+}
+
+export interface AntigravityFeedEvent {
+  id: string;
+  kind: 'user' | 'tool' | 'agent';
+  label: string;
+  detail: string;
+  ts: number;
+}
+
 export interface AntigravityLiveState {
   active: boolean;
+  statusLabel: 'WORKING' | 'WAITING' | 'IDLE';
   lastActivityTs: number;
   conversationId: string;
+  model: string;
+  stepCount: number;
+  contextTokens: number;
+  currentFocus: string;
+  lastUserPrompt: string;
+  steps: AntigravityStepItem[];
+  recentEvents: AntigravityFeedEvent[];
   artifactName: string;
   artifactPreview: string;
   diffFiles: GitDiffFile[];

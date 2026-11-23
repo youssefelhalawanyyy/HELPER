@@ -1,13 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
+  Activity,
   Bot,
   CheckCircle2,
+  Circle,
   ExternalLink,
   FileCode2,
   FileDiff,
+  Loader2,
   Sparkles,
+  Terminal,
+  User,
   XCircle,
 } from 'lucide-react';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
@@ -16,28 +22,38 @@ import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 const SLASH_COMMANDS = [
-  { cmd: '/plan', desc: 'Step-by-step plan', color: '#22d3ee' },
-  { cmd: '/boost', desc: 'Deep thinking', color: '#a78bfa' },
-  { cmd: '/goal', desc: 'Overnight loop', color: '#34d399' },
-  { cmd: '/compact', desc: 'Free context', color: '#fbbf24' },
-  { cmd: '/grill-me', desc: 'Design Q&A', color: '#f472b6' },
-  { cmd: '/learn', desc: 'Persist rule', color: '#60a5fa' },
+  { cmd: '/plan', desc: 'Step plan', color: '#22d3ee' },
+  { cmd: '/boost', desc: 'Deep mode', color: '#a78bfa' },
+  { cmd: '/goal', desc: 'Auto loop', color: '#34d399' },
+  { cmd: '/compact', desc: 'Trim ctx', color: '#fbbf24' },
+  { cmd: '/grill-me', desc: 'Q&A spec', color: '#f472b6' },
+  { cmd: '/learn', desc: 'Save rule', color: '#60a5fa' },
 ];
 
+function formatTokens(n: number): string {
+  if (!n) return '--';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+  return String(n);
+}
+
 export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
+  const [centerTab, setCenterTab] = useState<'feed' | 'plan'>('feed');
   const ag = deck.antigravityState;
   const prog = deck.agentProgress;
 
+  const isWorking = ag.statusLabel === 'WORKING' || prog.active;
+
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1fr 1.15fr 1fr' }}>
-      {/* Column 1: Live Agent Status, Progress HUD & One-Tap Slash Command Pad */}
+    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1fr 1.25fr 0.95fr' }}>
+      {/* Column 1: Live Agent Status, Real Telemetry, Current Focus & Slash Pad */}
       <div className="tile flex min-h-0 flex-col justify-between gap-2 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full bg-gradient-to-r from-[#2563eb] to-[#22d3ee]" />
 
         <div className="flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5">
             <Bot className="h-4 w-4 text-[#22d3ee]" />
-            <span className="disp text-[22px]">Mission</span>
+            <span className="disp text-[21px]">Antigravity</span>
           </div>
           <button
             type="button"
@@ -45,10 +61,10 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               soundEngine.playClick();
               deck.sendEvent({
                 type: 'app:focus',
-                payload: { requestId: makeRequestId(), appName: 'Antigravity' },
+                payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
               });
             }}
-            className="flex items-center gap-1 rounded-full bg-[#2563eb] px-2.5 py-0.5 text-[9.5px] font-extrabold text-white"
+            className="flex items-center gap-1 rounded-full bg-[#2563eb] px-2.5 py-0.5 text-[9px] font-extrabold text-white"
             style={{ boxShadow: '0 0 12px #2563eb88' }}
           >
             <ExternalLink className="h-2.5 w-2.5" />
@@ -56,30 +72,49 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           </button>
         </div>
 
-        {/* Live Agent Activity & MCP Progress HUD */}
-        <div className="rounded-xl border border-white/[0.07] bg-black/65 p-2.5">
+        {/* Live Agent Telemetry Card (100% real data from transcript.jsonl) */}
+        <div className="rounded-xl border border-white/[0.07] bg-black/65 p-2">
           <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase">
-              <i
-                className={`h-2 w-2 rounded-full ${ag.active || prog.active ? 'anim-ping bg-[#34d399]' : 'bg-zinc-600'}`}
-              />
-              <span style={{ color: ag.active || prog.active ? '#34d399' : '#8b90a0' }}>
-                {prog.active ? prog.title || 'Agent Working' : ag.active ? 'Agent Active' : 'Agent Idle'}
+            <span className="flex items-center gap-1.5 text-[9.5px] font-extrabold uppercase">
+              <span className="relative h-2 w-2">
+                {isWorking && (
+                  <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />
+                )}
+                <i
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: isWorking
+                      ? '#34d399'
+                      : ag.statusLabel === 'WAITING'
+                        ? '#22d3ee'
+                        : '#6b7080',
+                  }}
+                />
+              </span>
+              <span
+                style={{
+                  color: isWorking
+                    ? '#34d399'
+                    : ag.statusLabel === 'WAITING'
+                      ? '#22d3ee'
+                      : '#8b90a0',
+                }}
+              >
+                {prog.active ? prog.title : ag.statusLabel}
               </span>
             </span>
-            {prog.active && (
-              <span className="num text-[10px] font-extrabold text-[#22d3ee]">
-                {Math.round(prog.percent)}%
-              </span>
-            )}
+
+            <span className="num font-mono-tech text-[9.5px] font-bold text-[#a78bfa]">
+              #{ag.stepCount || 0} · {formatTokens(ag.contextTokens)} ctx
+            </span>
           </div>
-          <div className="mt-1 truncate text-[10px] text-zinc-300">
+
+          <div className="mt-1 truncate text-[10px] font-medium text-zinc-200">
             {prog.active
               ? prog.step
-              : ag.conversationId
-                ? `Brain: ${ag.conversationId.slice(0, 12)}…`
-                : 'Ready for Antigravity MCP'}
+              : ag.currentFocus || ag.lastUserPrompt || 'Waiting for active conversation…'}
           </div>
+
           {prog.active && (
             <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
               <div
@@ -88,20 +123,37 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               />
             </div>
           )}
+
+          {ag.steps.length > 0 && (
+            <div className="mt-1.5 space-y-0.5 border-t border-white/[0.06] pt-1">
+              {ag.steps.slice(0, 3).map((s, idx) => (
+                <div key={idx} className="flex items-center gap-1.5 text-[9px]">
+                  {s.status === 'done' ? (
+                    <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-[#34d399]" />
+                  ) : s.status === 'in_progress' ? (
+                    <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-[#22d3ee]" />
+                  ) : (
+                    <Circle className="h-2.5 w-2.5 shrink-0 text-zinc-600" />
+                  )}
+                  <span className="truncate text-zinc-300">{s.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* One-Tap Antigravity Slash Command Pad */}
-        <div className="flex flex-1 flex-col justify-end">
+        {/* One-Tap Slash Command Pad */}
+        <div>
           <div className="mb-1 flex items-center gap-1">
             <Sparkles className="h-3 w-3 text-[#a78bfa]" />
-            <span className="sub !text-[8.5px]">One-Tap Slash Commands (⌘L + Paste)</span>
+            <span className="sub !text-[8.5px]">Slash Commands (IDE ⌘L)</span>
           </div>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1">
             {SLASH_COMMANDS.map((item) => (
               <motion.button
                 key={item.cmd}
                 type="button"
-                whileTap={{ scale: 0.93 }}
+                whileTap={{ scale: 0.92 }}
                 transition={DECK_SPRING}
                 onClick={() => {
                   soundEngine.playClick();
@@ -110,37 +162,112 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                     payload: { requestId: makeRequestId(), command: item.cmd },
                   });
                 }}
-                className="rounded-xl border border-white/[0.07] bg-white/[0.04] px-2.5 py-1.5 text-left hover:border-white/25"
+                className="rounded-lg border border-white/[0.07] bg-white/[0.04] px-1.5 py-1 text-left hover:border-white/25"
               >
-                <div className="font-mono-tech text-[11px] font-extrabold" style={{ color: item.color }}>
+                <div
+                  className="font-mono-tech truncate text-[10px] font-extrabold"
+                  style={{ color: item.color }}
+                >
                   {item.cmd}
                 </div>
-                <div className="truncate text-[8.5px] text-[#7c8190]">{item.desc}</div>
+                <div className="truncate text-[8px] text-[#7c8190]">{item.desc}</div>
               </motion.button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Column 2: Active Brain Artifact Reader (implementation_plan.md / task.md) */}
+      {/* Column 2: Real-Time Agent Feed (transcript.jsonl) OR Active Plan */}
       <div className="tile flex min-h-0 flex-col p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#a78bfa]" />
         <div className="mb-1.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <FileCode2 className="h-4 w-4 shrink-0 text-[#a78bfa]" />
-            <span className="disp truncate text-[20px]">Active Plan</span>
+          <div className="flex gap-1 rounded-full bg-black/70 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setCenterTab('feed');
+              }}
+              className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase"
+              style={{
+                background: centerTab === 'feed' ? '#1f222c' : 'transparent',
+                color: centerTab === 'feed' ? '#22d3ee' : '#7c8190',
+              }}
+            >
+              <Activity className="h-3 w-3" />
+              Live Feed
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setCenterTab('plan');
+              }}
+              className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9.5px] font-extrabold uppercase"
+              style={{
+                background: centerTab === 'plan' ? '#1f222c' : 'transparent',
+                color: centerTab === 'plan' ? '#a78bfa' : '#7c8190',
+              }}
+            >
+              <FileCode2 className="h-3 w-3" />
+              Plan
+            </button>
           </div>
-          <span className="font-mono-tech truncate text-[9px] text-[#a78bfa]">
-            {ag.artifactName || 'none'}
+          <span className="font-mono-tech truncate text-[8.5px] text-[#7c8190]">
+            {centerTab === 'plan' ? ag.artifactName || 'none' : `${ag.recentEvents.length} live`}
           </span>
         </div>
 
-        <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/75 p-2.5 text-[9.5px] leading-relaxed whitespace-pre-wrap text-zinc-200">
-          {ag.artifactPreview || 'No active implementation_plan.md or task.md found in ~/.gemini/antigravity/brain/ yet.'}
-        </div>
+        {centerTab === 'feed' ? (
+          <div className="deck-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+            {ag.recentEvents.map((ev) => (
+              <div
+                key={ev.id}
+                className="flex items-start gap-2 rounded-xl border border-white/[0.06] bg-black/60 px-2.5 py-1.5"
+              >
+                <span className="mt-0.5 shrink-0">
+                  {ev.kind === 'user' ? (
+                    <User className="h-3 w-3 text-[#fbbf24]" />
+                  ) : ev.kind === 'tool' ? (
+                    <Terminal className="h-3 w-3 text-[#22d3ee]" />
+                  ) : (
+                    <Bot className="h-3 w-3 text-[#34d399]" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span
+                      className="font-mono-tech text-[9.5px] font-extrabold"
+                      style={{
+                        color:
+                          ev.kind === 'user'
+                            ? '#fbbf24'
+                            : ev.kind === 'tool'
+                              ? '#22d3ee'
+                              : '#34d399',
+                      }}
+                    >
+                      {ev.label}
+                    </span>
+                  </div>
+                  <p className="truncate text-[10px] text-zinc-300">{ev.detail}</p>
+                </div>
+              </div>
+            ))}
+            {ag.recentEvents.length === 0 && (
+              <div className="sub grid h-full place-items-center text-center">
+                Connect Mac bridge to stream live Antigravity transcript
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/75 p-2.5 text-[9.5px] leading-relaxed whitespace-pre-wrap text-zinc-200">
+            {ag.artifactPreview || 'No implementation_plan.md or task.md in active conversation.'}
+          </div>
+        )}
       </div>
 
-      {/* Column 3: Live Agent Diff Viewer + Accept / Reject */}
+      {/* Column 3: Live Git Diff + Accept / Reject */}
       <div className="tile flex min-h-0 flex-col gap-2 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#34d399]" />
         <div className="flex items-center justify-between">
@@ -169,12 +296,11 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           ))}
           {ag.diffFiles.length === 0 && (
             <div className="sub grid h-full place-items-center text-center">
-              Working tree clean — agent edits appear here live
+              Working tree clean — agent edits appear live
             </div>
           )}
         </div>
 
-        {/* One-Tap Accept / Reject Diff Buttons */}
         <div className="grid grid-cols-2 gap-1.5">
           <motion.button
             type="button"
