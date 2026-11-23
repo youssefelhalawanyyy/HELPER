@@ -209,6 +209,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
           </div>
 
           <div
+            data-no-swipe="true"
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
               padLastRef.current = { x: e.clientX, y: e.clientY };

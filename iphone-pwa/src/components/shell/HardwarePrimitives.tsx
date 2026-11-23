@@ -172,6 +172,7 @@ export function BrushedDial({
   return (
     <div
       ref={ref}
+      data-no-swipe="true"
       role="slider"
       aria-label={label}
       aria-valuenow={Math.round(value)}

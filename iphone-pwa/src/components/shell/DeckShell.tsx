@@ -1,27 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Activity,
   Battery,
   BatteryCharging,
   Bot,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
-  Clock,
   Coffee,
-  Cpu,
-  Home,
-  Link2,
-  MousePointer2,
-  Rocket,
   Volume2,
   VolumeX,
   Zap,
 } from 'lucide-react';
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
-import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
 import { PairingOverlay } from '@/components/shell/PairingOverlay';
 import { SnippetDrawer } from '@/components/shell/SnippetDrawer';
 import { AntigravityMissionView } from '@/components/views/AntigravityMissionView';
@@ -45,35 +39,78 @@ export type DeckViewId =
   | 'preview'
   | 'launch';
 
-const NAV_ITEMS: Array<{ id: DeckViewId; label: string; icon: typeof Home }> = [
-  { id: 'deck', label: 'Deck', icon: Home },
-  { id: 'antigravity', label: 'Antigravity', icon: Bot },
-  { id: 'monitor', label: 'Monitor', icon: Activity },
-  { id: 'mac', label: 'Mac & Dock', icon: Cpu },
-  { id: 'hardware', label: 'Trackpad & Snap', icon: MousePointer2 },
-  { id: 'preview', label: 'Desk Clock', icon: Clock },
-  { id: 'launch', label: 'Launch', icon: Rocket },
+const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
+  { id: 'deck', label: 'Deck', accent: '#34d399' },
+  { id: 'antigravity', label: 'Antigravity', accent: '#22d3ee' },
+  { id: 'monitor', label: 'Monitor', accent: '#f472b6' },
+  { id: 'mac', label: 'Mac & Dock', accent: '#a78bfa' },
+  { id: 'hardware', label: 'Trackpad & Snap', accent: '#fbbf24' },
+  { id: 'preview', label: 'Desk Clock', accent: '#60a5fa' },
+  { id: 'launch', label: 'Launch', accent: '#fbbf24' },
 ];
+
+const PAGE_VARIANTS = {
+  enter: (dir: number) => ({
+    x: dir > 0 ? 160 : -160,
+    opacity: 0,
+    scale: 0.96,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+    scale: 1,
+  },
+  exit: (dir: number) => ({
+    x: dir > 0 ? -160 : 160,
+    opacity: 0,
+    scale: 0.96,
+  }),
+};
 
 export function DeckShell() {
   const deck = useDevDeckSocket();
   const wakeLock = useWakeLock();
-  const [activeView, setActiveView] = useState<DeckViewId>('deck');
+  const [pageIdx, setPageIdx] = useState(0);
+  const [direction, setDirection] = useState(1);
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
   const [viewport, setViewport] = useState({ scale: 1, portrait: false });
 
+  // Swipe gesture tracking (works in both landscape & 90deg-rotated portrait)
+  const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
+
+  const activePage = PAGES[pageIdx];
+  const activeView = activePage.id;
+
+  const goToIndex = useCallback(
+    (nextIdx: number) => {
+      const clamped = Math.max(0, Math.min(PAGES.length - 1, nextIdx));
+      if (clamped === pageIdx) return;
+      setDirection(clamped > pageIdx ? 1 : -1);
+      setPageIdx(clamped);
+      soundEngine.playDetent();
+    },
+    [pageIdx],
+  );
+
+  const goToView = useCallback(
+    (id: DeckViewId) => {
+      const idx = PAGES.findIndex((p) => p.id === id);
+      if (idx >= 0) goToIndex(idx);
+    },
+    [goToIndex],
+  );
+
   useEffect(() => {
-    // Progressive enhancement where Screen Orientation Lock API is supported
     try {
       const orient = screen.orientation as ScreenOrientation & {
         lock?: (o: string) => Promise<void>;
       };
       void orient?.lock?.('landscape')?.catch(() => {});
     } catch {
-      // iOS Safari falls back to CSS 90deg landscape lock below
+      // iOS Safari uses CSS 90deg lock below
     }
 
     const updateViewport = () => {
@@ -92,6 +129,42 @@ export function DeckShell() {
     };
   }, []);
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1 || pairingModalOpen || snippetsOpen || deck.agentQuestion) return;
+    const target = e.target as HTMLElement | null;
+    const blocked = Boolean(
+      target?.closest('[data-no-swipe="true"], input, textarea, select, iframe'),
+    );
+    swipeStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      blocked,
+    };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start || start.blocked || e.changedTouches.length === 0) return;
+
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+
+    // When rotated 90deg clockwise in portrait, the stage's horizontal axis is physical Y
+    const stageDx = viewport.portrait ? endY - start.y : endX - start.x;
+    const stageDy = viewport.portrait ? -(endX - start.x) : endY - start.y;
+
+    if (Math.abs(stageDx) > 48 && Math.abs(stageDx) > Math.abs(stageDy) * 1.25) {
+      if (stageDx < 0) {
+        // Swipe left -> next page
+        goToIndex(pageIdx + 1);
+      } else {
+        // Swipe right -> previous page
+        goToIndex(pageIdx - 1);
+      }
+    }
+  };
+
   const toggleSound = () => {
     const next = !soundOn;
     setSoundOn(next);
@@ -102,12 +175,11 @@ export function DeckShell() {
   const isConnected = deck.status === 'connected';
   const isReconnecting = deck.status === 'reconnecting' || deck.status === 'connecting';
 
-  // 100% real telemetry/event ticker (zero fake placeholder logs)
   const tickerItems = useMemo(() => {
     if (!isConnected) {
       return [
-        ['#ff5d6c', 'Not connected to Mac bridge — click PAIR MAC to link'],
-        ['#22d3ee', 'Start bridge: npm run dev:bridge (port 4747)'],
+        ['#ff5d6c', 'Not connected — tap PAIR MAC to link'],
+        ['#22d3ee', 'Swipe left / right to switch pages'],
       ] as Array<[string, string]>;
     }
     const items: Array<[string, string]> = [];
@@ -120,14 +192,14 @@ export function DeckShell() {
             : l.level === 'warn'
               ? '#fbbf24'
               : '#22d3ee',
-        l.text.slice(0, 80),
+        l.text.slice(0, 72),
       ]);
     }
     if (items.length === 0) {
-      items.push(['#34d399', `Connected to ${deck.hello?.hostname || 'Mac'}`]);
-      items.push(['#22d3ee', `Active app: ${deck.activeApp.appName}`]);
+      items.push(['#34d399', `${deck.hello?.hostname || 'Mac'} linked`]);
+      items.push(['#22d3ee', `Active: ${deck.activeApp.appName}`]);
       items.push(['#fbbf24', `Git: ${deck.gitStatus.repoName} (${deck.gitStatus.branch})`]);
-      items.push(['#a78bfa', `Listening dev ports: ${deck.ports.length}`]);
+      items.push(['#a78bfa', `Dev ports: ${deck.ports.length}`]);
     }
     return items;
   }, [
@@ -150,6 +222,8 @@ export function DeckShell() {
   return (
     <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-black">
       <div
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
         className="relative shrink-0 overflow-hidden bg-black"
         style={{
           width: 844,
@@ -160,376 +234,367 @@ export function DeckShell() {
           transformOrigin: 'center center',
         }}
       >
-          <div className="flex h-full">
-            {/* Slim 50px Left Navigation Rail */}
-            <nav
-              aria-label="Screens"
-              className="flex w-[50px] shrink-0 flex-col items-center gap-1.5 py-2.5"
+        {/* Safe-area padded full-width layout (clear of iPhone 14 Dynamic Island / Notch on left & right) */}
+        <div className="flex h-full flex-col gap-2 py-2 pr-4 pl-8">
+          {/* Ultra-Slim Top Status Bar */}
+          <header className="flex h-6 shrink-0 items-center gap-1.5 text-[10px] font-bold">
+            <span className="sub mr-0.5 !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">
+              DevDeck
+            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setPairingModalOpen(true);
+              }}
+              className="flex h-5 items-center gap-1.5 rounded-full px-2.5"
+              style={{
+                background: isConnected
+                  ? 'rgba(52,211,153,.12)'
+                  : isReconnecting
+                    ? 'rgba(251,191,36,.14)'
+                    : 'rgba(255,93,108,.14)',
+                color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+              }}
             >
-              {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
-                const selected = activeView === id;
-                return (
-                  <motion.button
-                    key={id}
-                    type="button"
-                    aria-label={label}
-                    title={label}
-                    whileTap={{ scale: 0.85 }}
-                    transition={DECK_SPRING}
-                    onClick={() => {
-                      soundEngine.playClick();
-                      setActiveView(id);
-                    }}
-                    className="relative grid h-8 w-8 place-items-center rounded-xl transition-colors"
-                    style={{
-                      color: selected ? '#ffffff' : '#6b7080',
-                      background: selected ? '#1d1e24' : 'transparent',
-                    }}
-                  >
-                    {selected && (
-                      <motion.i
-                        layoutId="rail-pip"
-                        className="absolute top-1.5 bottom-1.5 -left-[9px] w-[3px] rounded-full bg-[#34d399]"
-                      />
-                    )}
-                    <Icon className="h-[15px] w-[15px]" />
-                  </motion.button>
-                );
-              })}
+              <span className="relative h-1.5 w-1.5">
+                <i
+                  className="anim-ping absolute inset-0 rounded-full"
+                  style={{
+                    background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                  }}
+                />
+                <i
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                  }}
+                />
+              </span>
+              <span className="max-w-[96px] truncate">
+                {isConnected
+                  ? deck.hello?.hostname || 'CONNECTED'
+                  : isReconnecting
+                    ? 'RECONNECTING…'
+                    : 'PAIR MAC'}
+              </span>
+            </button>
 
-              <div className="flex-1" />
+            <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
+              CPU <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
+            </span>
+            <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
+              RAM{' '}
+              <b className="ml-1">
+                {isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}G` : '--'}
+              </b>
+            </span>
 
-              <motion.button
-                type="button"
-                aria-label="Quick Snippets"
-                title="Quick Snippets"
-                whileTap={{ scale: 0.85 }}
-                onClick={() => {
-                  soundEngine.playClick();
-                  setSnippetsOpen(true);
+            {isConnected && deck.stats.batteryPct !== null && (
+              <span
+                className="num flex h-5 items-center gap-0.5 rounded-full bg-white/[0.06] px-2"
+                style={{
+                  color: deck.stats.batteryCharging
+                    ? '#34d399'
+                    : deck.stats.batteryPct <= 20
+                      ? '#ff5d6c'
+                      : '#f2f3f7',
                 }}
-                className="grid h-8 w-8 place-items-center rounded-xl text-[#22d3ee] hover:bg-white/[0.06]"
               >
-                <ClipboardList className="h-[15px] w-[15px]" />
-              </motion.button>
-
-              <motion.button
-                type="button"
-                aria-label="Toggle sound"
-                whileTap={{ scale: 0.85 }}
-                onClick={toggleSound}
-                className="grid h-8 w-8 place-items-center text-[#6b7080] hover:text-white"
-              >
-                {soundOn ? (
-                  <Volume2 className="h-[15px] w-[15px]" />
+                {deck.stats.batteryCharging ? (
+                  <BatteryCharging className="h-3 w-3" />
                 ) : (
-                  <VolumeX className="h-[15px] w-[15px]" />
+                  <Battery className="h-3 w-3" />
                 )}
-              </motion.button>
-
-              <motion.button
-                type="button"
-                aria-label="Pair Mac"
-                title="Pair Mac"
-                whileTap={{ scale: 0.85 }}
-                onClick={() => {
-                  soundEngine.playClick();
-                  setPairingModalOpen(true);
-                }}
-                className="grid h-8 w-8 place-items-center text-[#6b7080] hover:text-[#34d399]"
-              >
-                <Link2 className="h-[15px] w-[15px]" />
-              </motion.button>
-            </nav>
-
-            {/* Right Main Column */}
-            <div className="flex min-w-0 flex-1 flex-col gap-2 py-2 pr-2.5">
-              {/* Ultra-Slim Top Bar */}
-              <header className="flex h-6 shrink-0 items-center gap-2 text-[10px] font-bold">
-                <span className="sub mr-1 !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">
-                  DevDeck
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setPairingModalOpen(true);
-                  }}
-                  className="flex h-5 items-center gap-1.5 rounded-full px-2.5"
-                  style={{
-                    background: isConnected
-                      ? 'rgba(52,211,153,.12)'
-                      : isReconnecting
-                        ? 'rgba(251,191,36,.14)'
-                        : 'rgba(255,93,108,.14)',
-                    color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                  }}
-                >
-                  <span className="relative h-1.5 w-1.5">
-                    <i
-                      className="anim-ping absolute inset-0 rounded-full"
-                      style={{
-                        background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                      }}
-                    />
-                    <i
-                      className="absolute inset-0 rounded-full"
-                      style={{
-                        background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                      }}
-                    />
-                  </span>
-                  <span>
-                    {isConnected
-                      ? deck.hello?.hostname || 'CONNECTED'
-                      : isReconnecting
-                        ? 'RECONNECTING…'
-                        : 'PAIR MAC'}
-                  </span>
-                </button>
-
-                <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2.5 text-[#f2f3f7]">
-                  CPU <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
-                </span>
-                <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2.5 text-[#f2f3f7]">
-                  RAM{' '}
-                  <b className="ml-1">
-                    {isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}GB` : '--'}
-                  </b>
-                </span>
-
-                {deck.focusState.active && (
-                  <span className="num flex h-5 items-center rounded-full bg-[#fbbf24]/15 px-2.5 text-[#fbbf24]">
-                    FOCUS {formatTimer(deck.focusState.remainingSec)}
-                  </span>
-                )}
-
-                <div className="flex-1" />
-
-                {isConnected && deck.stats.batteryPct !== null && (
-                  <span
-                    className="num flex h-5 items-center gap-1 rounded-full bg-white/[0.06] px-2 text-[10px]"
-                    style={{
-                      color:
-                        deck.stats.batteryCharging
-                          ? '#34d399'
-                          : deck.stats.batteryPct <= 20
-                            ? '#ff5d6c'
-                            : '#f2f3f7',
-                    }}
-                  >
-                    {deck.stats.batteryCharging ? (
-                      <BatteryCharging className="h-3 w-3" />
-                    ) : (
-                      <Battery className="h-3 w-3" />
-                    )}
-                    {deck.stats.batteryPct}%
-                  </span>
-                )}
-
-                <motion.button
-                  type="button"
-                  whileTap={{ scale: 0.92 }}
-                  title={wakeLock.active ? 'Keep Mac & Screen Awake' : 'Toggle Mac Caffeine'}
-                  onClick={() => {
-                    soundEngine.playClick();
-                    deck.sendEvent({
-                      type: 'hardware:caffeine',
-                      payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
-                    });
-                  }}
-                  className="flex h-5 items-center gap-1 rounded-full px-2.5 text-[9.5px] font-extrabold"
-                  style={{
-                    background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
-                    color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
-                    boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
-                  }}
-                >
-                  <Coffee className="h-[10px] w-[10px]" />
-                  CAFFEINE
-                </motion.button>
-
-                <motion.button
-                  type="button"
-                  whileTap={{ scale: 0.92 }}
-                  aria-pressed={activeView === 'antigravity'}
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setAntigravityMode(true);
-                    setActiveView('antigravity');
-                    if (isConnected) {
-                      deck.sendEvent({
-                        type: 'app:focus',
-                        payload: { requestId: makeRequestId(), appName: 'Antigravity' },
-                      });
-                    }
-                  }}
-                  className="flex h-5 items-center gap-1 rounded-full px-3 text-white"
-                  style={{
-                    background:
-                      activeView === 'antigravity' || deck.antigravityState.active
-                        ? '#2563eb'
-                        : '#23252d',
-                    boxShadow:
-                      activeView === 'antigravity' || deck.antigravityState.active
-                        ? '0 0 14px #2563eb88'
-                        : 'none',
-                  }}
-                >
-                  <Zap className="h-[10px] w-[10px] fill-current" />
-                  ANTIGRAVITY IDE
-                </motion.button>
-              </header>
-
-              {/* Live Antigravity Agent Progress HUD (shows instantly across EVERY tab) */}
-              <AnimatePresence>
-                {deck.agentProgress.active && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="flex items-center gap-2 rounded-full border border-[#22d3ee]/35 bg-[#08171d] px-3 py-1 text-[10px]"
-                  >
-                    <Bot className="h-3 w-3 shrink-0 animate-pulse text-[#22d3ee]" />
-                    <span className="font-bold text-white">{deck.agentProgress.title}</span>
-                    <span className="truncate text-zinc-400">{deck.agentProgress.step}</span>
-                    <div className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-[#34d399] transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.max(4, deck.agentProgress.percent))}%` }}
-                      />
-                    </div>
-                    <span className="num font-extrabold text-[#34d399]">
-                      {Math.round(deck.agentProgress.percent)}%
-                    </span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Main Interactive Canvas */}
-              <main className="relative min-h-0 flex-1">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeView}
-                    initial={{ opacity: 0, x: 14 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -14 }}
-                    transition={{ duration: 0.16 }}
-                    className="h-full"
-                  >
-                    {activeView === 'deck' && (
-                      <SmartDeckView
-                        deck={deck}
-                        antigravityPinned={antigravityMode}
-                        onNavigateToMonitor={() => setActiveView('monitor')}
-                        onOpenPairing={() => setPairingModalOpen(true)}
-                      />
-                    )}
-                    {activeView === 'antigravity' && <AntigravityMissionView deck={deck} />}
-                    {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
-                    {activeView === 'mac' && (
-                      <MacInspectorView
-                        deck={deck}
-                        onNavigateToMonitor={() => setActiveView('monitor')}
-                      />
-                    )}
-                    {activeView === 'launch' && <LaunchControlView deck={deck} />}
-                    {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
-                    {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
-                  </motion.div>
-                </AnimatePresence>
-              </main>
-
-              {/* Bottom Live Dev Log Marquee Ticker */}
-              <footer className="flex h-5 shrink-0 items-center overflow-hidden rounded-full border border-white/[0.07] bg-[#101114]">
-                <span className="sub z-10 grid h-full place-items-center bg-white/[0.06] px-2.5 !text-[8.5px]">
-                  Dev log
-                </span>
-                <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#f2f3f7]">
-                  {[0, 1].map((dup) => (
-                    <span key={dup} className="flex">
-                      {tickerItems.map(([color, text], i) => (
-                        <span key={`${dup}-${i}`} className="flex items-center gap-1.5 px-4">
-                          <i className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-                          {text}
-                        </span>
-                      ))}
-                    </span>
-                  ))}
-                </div>
-              </footer>
-            </div>
-          </div>
-
-          {/* Full-frame Edge Glow Pulse */}
-          <AnimatePresence>
-            {deck.alertFlash && (
-              <motion.div
-                key={deck.alertFlash.id}
-                initial={{ opacity: 0.92 }}
-                animate={{ opacity: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.7 }}
-                className="pointer-events-none absolute inset-0 z-50"
-                style={{
-                  borderRadius: 24,
-                  boxShadow: `inset 0 0 0 2px ${flashColor}, inset 0 0 50px ${flashColor}55`,
-                }}
-              />
+                {deck.stats.batteryPct}%
+              </span>
             )}
-          </AnimatePresence>
 
-          {/* Subtle Action Toast */}
+            {deck.focusState.active && (
+              <span className="num flex h-5 items-center rounded-full bg-[#fbbf24]/15 px-2 text-[#fbbf24]">
+                {formatTimer(deck.focusState.remainingSec)}
+              </span>
+            )}
+
+            <div className="flex-1" />
+
+            {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
+            <motion.button
+              type="button"
+              aria-label="Quick Snippets"
+              whileTap={{ scale: 0.9 }}
+              onClick={() => {
+                soundEngine.playClick();
+                setSnippetsOpen(true);
+              }}
+              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#22d3ee]"
+            >
+              <ClipboardList className="h-3 w-3" />
+            </motion.button>
+
+            <motion.button
+              type="button"
+              aria-label="Toggle sound"
+              whileTap={{ scale: 0.9 }}
+              onClick={toggleSound}
+              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0]"
+            >
+              {soundOn ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
+            </motion.button>
+
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              title={wakeLock.active ? 'Keep Mac & Screen Awake' : 'Toggle Mac Caffeine'}
+              onClick={() => {
+                soundEngine.playClick();
+                deck.sendEvent({
+                  type: 'hardware:caffeine',
+                  payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
+                });
+              }}
+              className="flex h-5 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold"
+              style={{
+                background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
+                color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
+                boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
+              }}
+            >
+              <Coffee className="h-[10px] w-[10px]" />
+              CAFFEINE
+            </motion.button>
+
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              aria-pressed={activeView === 'antigravity'}
+              onClick={() => {
+                soundEngine.playClick();
+                setAntigravityMode(true);
+                goToView('antigravity');
+                if (isConnected) {
+                  deck.sendEvent({
+                    type: 'app:focus',
+                    payload: { requestId: makeRequestId(), appName: 'Antigravity' },
+                  });
+                }
+              }}
+              className="flex h-5 items-center gap-1 rounded-full px-2.5 text-white"
+              style={{
+                background:
+                  activeView === 'antigravity' || deck.antigravityState.active
+                    ? '#2563eb'
+                    : '#23252d',
+                boxShadow:
+                  activeView === 'antigravity' || deck.antigravityState.active
+                    ? '0 0 14px #2563eb88'
+                    : 'none',
+              }}
+            >
+              <Zap className="h-[10px] w-[10px] fill-current" />
+              ANTIGRAVITY IDE
+            </motion.button>
+          </header>
+
+          {/* Live Antigravity Agent Progress HUD (instant across EVERY page) */}
           <AnimatePresence>
-            {deck.toast && (
+            {deck.agentProgress.active && (
               <motion.div
-                key={deck.toast.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                className="pointer-events-none absolute right-3 bottom-8 z-40 max-w-[340px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
-                style={{
-                  background: deck.toast.ok ? '#0b1e16' : '#240c10',
-                  borderColor: deck.toast.ok ? '#34d39955' : '#ff5d6c66',
-                  color: deck.toast.ok ? '#34d399' : '#ff5d6c',
-                }}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="flex items-center gap-2 rounded-full border border-[#22d3ee]/35 bg-[#08171d] px-3 py-1 text-[10px]"
               >
-                {deck.toast.message}
+                <Bot className="h-3 w-3 shrink-0 animate-pulse text-[#22d3ee]" />
+                <span className="font-bold text-white">{deck.agentProgress.title}</span>
+                <span className="truncate text-zinc-400">{deck.agentProgress.step}</span>
+                <div className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-[#34d399] transition-all duration-300"
+                    style={{ width: `${Math.min(100, Math.max(4, deck.agentProgress.percent))}%` }}
+                  />
+                </div>
+                <span className="num font-extrabold text-[#34d399]">
+                  {Math.round(deck.agentProgress.percent)}%
+                </span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Quick Snippet Injector Slide-Over Drawer (locked inside landscape stage) */}
-          <SnippetDrawer
-            open={snippetsOpen}
-            snippets={deck.config?.snippets ?? []}
-            onClose={() => setSnippetsOpen(false)}
-            onSend={deck.sendEvent}
-          />
+          {/* Smooth Directional Swipe Carousel Canvas */}
+          <main className="relative min-h-0 flex-1 overflow-hidden">
+            <AnimatePresence mode="popLayout" custom={direction} initial={false}>
+              <motion.div
+                key={activeView}
+                custom={direction}
+                variants={PAGE_VARIANTS}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.85 }}
+                className="h-full w-full"
+              >
+                {activeView === 'deck' && (
+                  <SmartDeckView
+                    deck={deck}
+                    antigravityPinned={antigravityMode}
+                    onNavigateToMonitor={() => goToView('monitor')}
+                    onOpenPairing={() => setPairingModalOpen(true)}
+                  />
+                )}
+                {activeView === 'antigravity' && <AntigravityMissionView deck={deck} />}
+                {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
+                {activeView === 'mac' && (
+                  <MacInspectorView
+                    deck={deck}
+                    onNavigateToMonitor={() => goToView('monitor')}
+                  />
+                )}
+                {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
+                {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
+                {activeView === 'launch' && <LaunchControlView deck={deck} />}
+              </motion.div>
+            </AnimatePresence>
+          </main>
 
-          {/* Live MCP Agent Notification Card */}
-          <AgentNotificationBanner
-            notification={deck.agentNotification}
-            onDismiss={deck.dismissAgentNotification}
-            onSend={deck.sendEvent}
-          />
+          {/* Bottom Bar: Interactive Swipe Page Dots + Live Dev Log Marquee */}
+          <footer className="flex h-6 shrink-0 items-center gap-2">
+            {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
+            <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/[0.08] bg-[#101114] px-2 py-0.5">
+              <button
+                type="button"
+                aria-label="Previous page"
+                disabled={pageIdx === 0}
+                onClick={() => goToIndex(pageIdx - 1)}
+                className="text-zinc-400 hover:text-white disabled:opacity-25"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
 
-          {/* Global Instant Two-Way ask_iphone Overlay */}
-          <AgentQuestionOverlay question={deck.agentQuestion} onSend={deck.sendEvent} />
+              <span
+                className="min-w-[82px] text-center text-[9.5px] font-extrabold uppercase tracking-wider"
+                style={{ color: activePage.accent }}
+              >
+                {activePage.label}
+              </span>
 
-          {/* On-Demand Pairing Overlay */}
-          <PairingOverlay
-            open={pairingModalOpen}
-            status={deck.status}
-            currentPairing={deck.pairing}
-            onClose={() => setPairingModalOpen(false)}
-            onPairWithPin={deck.pairWithPin}
-            onDisconnect={() => {
-              deck.clearPairing();
-              setPairingModalOpen(false);
-            }}
-          />
+              <div className="flex items-center gap-1 px-1">
+                {PAGES.map((p, idx) => {
+                  const active = idx === pageIdx;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      aria-label={`Go to ${p.label}`}
+                      onClick={() => goToIndex(idx)}
+                      className="h-1.5 rounded-full transition-all duration-300"
+                      style={{
+                        width: active ? 16 : 6,
+                        background: active ? p.accent : 'rgba(255,255,255,0.2)',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                aria-label="Next page"
+                disabled={pageIdx === PAGES.length - 1}
+                onClick={() => goToIndex(pageIdx + 1)}
+                className="text-zinc-400 hover:text-white disabled:opacity-25"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Live Dev Log Marquee */}
+            <div className="flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-full border border-white/[0.07] bg-[#101114]">
+              <span className="sub z-10 grid h-full place-items-center bg-white/[0.06] px-2.5 !text-[8.5px]">
+                Dev log
+              </span>
+              <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#f2f3f7]">
+                {[0, 1].map((dup) => (
+                  <span key={dup} className="flex">
+                    {tickerItems.map(([color, text], i) => (
+                      <span key={`${dup}-${i}`} className="flex items-center gap-1.5 px-4">
+                        <i className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                        {text}
+                      </span>
+                    ))}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </footer>
+        </div>
+
+        {/* Full-frame Edge Glow Pulse */}
+        <AnimatePresence>
+          {deck.alertFlash && (
+            <motion.div
+              key={deck.alertFlash.id}
+              initial={{ opacity: 0.92 }}
+              animate={{ opacity: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.7 }}
+              className="pointer-events-none absolute inset-0 z-50"
+              style={{
+                borderRadius: 24,
+                boxShadow: `inset 0 0 0 2px ${flashColor}, inset 0 0 50px ${flashColor}55`,
+              }}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Subtle Action Toast */}
+        <AnimatePresence>
+          {deck.toast && (
+            <motion.div
+              key={deck.toast.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="pointer-events-none absolute right-4 bottom-9 z-40 max-w-[340px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
+              style={{
+                background: deck.toast.ok ? '#0b1e16' : '#240c10',
+                borderColor: deck.toast.ok ? '#34d39955' : '#ff5d6c66',
+                color: deck.toast.ok ? '#34d399' : '#ff5d6c',
+              }}
+            >
+              {deck.toast.message}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Overlays locked inside the 844x390 landscape stage */}
+        <SnippetDrawer
+          open={snippetsOpen}
+          snippets={deck.config?.snippets ?? []}
+          onClose={() => setSnippetsOpen(false)}
+          onSend={deck.sendEvent}
+        />
+
+        <AgentNotificationBanner
+          notification={deck.agentNotification}
+          onDismiss={deck.dismissAgentNotification}
+          onSend={deck.sendEvent}
+        />
+
+        <AgentQuestionOverlay question={deck.agentQuestion} onSend={deck.sendEvent} />
+
+        <PairingOverlay
+          open={pairingModalOpen}
+          status={deck.status}
+          currentPairing={deck.pairing}
+          onClose={() => setPairingModalOpen(false)}
+          onPairWithPin={deck.pairWithPin}
+          onDisconnect={() => {
+            deck.clearPairing();
+            setPairingModalOpen(false);
+          }}
+        />
       </div>
     </div>
   );
