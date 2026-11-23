@@ -79,24 +79,36 @@ async function callGeminiJson(
   apiKey: string,
   systemInstruction: string,
   history: GeminiTurn[],
+  onLine?: (line: string) => void,
 ): Promise<AiStepResponse> {
   let lastErr = 'Gemini request failed';
 
   for (const model of MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 18_000);
     try {
+      const generationConfig: Record<string, unknown> = {
+        temperature: 0.2,
+        maxOutputTokens: 1024,
+        responseMimeType: 'application/json',
+      };
+      // Disable slow extended thinking on Flash models so each repair step replies in ~1-2s
+      if (/gemini-3|2\.5-flash/i.test(model)) {
+        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: history,
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: 'application/json',
-          },
+          generationConfig,
         }),
       });
+      clearTimeout(timer);
 
       const data = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -105,7 +117,10 @@ async function callGeminiJson(
 
       if (!res.ok) {
         lastErr = data.error?.message || `HTTP ${res.status}`;
-        if (res.status === 503 || res.status === 429 || res.status === 404) continue;
+        onLine?.(`⚠ ${model}: ${lastErr.slice(0, 90)} — trying fallback…`);
+        if (res.status === 503 || res.status === 429 || res.status === 404 || res.status === 400) {
+          continue;
+        }
         throw new Error(lastErr);
       }
 
@@ -114,7 +129,10 @@ async function callGeminiJson(
       const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
       return JSON.parse(cleaned) as AiStepResponse;
     } catch (err) {
-      lastErr = err instanceof Error ? err.message : String(err);
+      clearTimeout(timer);
+      const msg = err instanceof Error ? (err.name === 'AbortError' ? 'Timed out after 18s' : err.message) : String(err);
+      lastErr = msg;
+      onLine?.(`⚠ ${model}: ${msg.slice(0, 90)}`);
     }
   }
 
@@ -150,7 +168,7 @@ function runShellStreaming(
 
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      onLine('⚠ Command timed out after 45s');
+      onLine('⚠ Command timed out after 15s (continuing)');
       resolve({ code: -1, output: out });
     }, timeoutMs);
 
@@ -246,10 +264,10 @@ When finished:
   const collectedNotFixed: string[] = [...priorNotFixed];
   let finalResult: AiStepResponse | null = null;
 
-  const MAX_STEPS = 8;
+  const MAX_STEPS = 5;
   for (let step = 1; step <= MAX_STEPS; step += 1) {
     onStatus(`AI Step ${step}/${MAX_STEPS}: Analyzing system…`);
-    const decision = await callGeminiJson(apiKey, systemInstruction, history);
+    const decision = await callGeminiJson(apiKey, systemInstruction, history, onLine);
 
     history.push({ role: 'model', parts: [{ text: JSON.stringify(decision) }] });
 
@@ -276,7 +294,7 @@ When finished:
 
     onStatus(`AI Step ${step}/${MAX_STEPS}: Running repair command…`);
     onLine(`$ ${cmd}`);
-    const execRes = await runShellStreaming(cmd, onLine, 45_000);
+    const execRes = await runShellStreaming(cmd, onLine, 15_000);
     onLine(`[exit ${execRes.code}]`);
 
     if (execRes.code === 0 && decision.summaryOfFix) {
@@ -301,7 +319,7 @@ When finished:
   // If AI didn't return done: true on the last loop, request the final summary cleanly
   if (!finalResult || !finalResult.done) {
     onStatus('AI generating plain-English rescue report…');
-    finalResult = await callGeminiJson(apiKey, systemInstruction, history);
+    finalResult = await callGeminiJson(apiKey, systemInstruction, history, onLine);
   }
 
   return {
