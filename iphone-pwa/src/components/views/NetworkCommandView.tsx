@@ -24,8 +24,9 @@ import {
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
+import { runPhoneDirectScan, runPhoneDirectSpeedTest } from '@/lib/phoneNetworkScanner';
 import { soundEngine } from '@/lib/soundEngine';
-import type { NetworkFixAction } from '@/types/protocol';
+import type { NetworkCommandState, NetworkFixAction } from '@/types/protocol';
 
 function gradeColor(grade: string): string {
   if (grade === 'ULTRA') return '#34d399';
@@ -39,21 +40,28 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
   const [rightTab, setRightTab] = useState<'ai' | 'devices' | 'log'>('ai');
   const [showPass, setShowPass] = useState(false);
   const [pendingLocal, setPendingLocal] = useState(false);
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [phoneNet, setPhoneNet] = useState<NetworkCommandState>(deck.networkState);
   const pendingTimerRef = useRef<number | null>(null);
   const autoScannedRef = useRef(false);
-  const net = deck.networkState;
+
+  const bridgeConnected = deck.status === 'connected';
+  const usePhoneDirect = !bridgeConnected || phoneMode;
+  const net = usePhoneDirect ? phoneNet : deck.networkState;
   const accent = gradeColor(net.grade);
   const busy = net.scanning || net.testingSpeed || net.fixing;
 
+  // If the bridge ever pushes real network data, exit phone-direct fallback automatically
   useEffect(() => {
-    if (busy || net.updatedAt > 0) {
+    if (deck.networkState.updatedAt > 0 || deck.networkState.scanning || deck.networkState.testingSpeed || deck.networkState.fixing) {
+      setPhoneMode(false);
       setPendingLocal(false);
       if (pendingTimerRef.current) {
         window.clearTimeout(pendingTimerRef.current);
         pendingTimerRef.current = null;
       }
     }
-  }, [busy, net.updatedAt]);
+  }, [deck.networkState.updatedAt, deck.networkState.scanning, deck.networkState.testingSpeed, deck.networkState.fixing]);
 
   useEffect(() => {
     return () => {
@@ -61,49 +69,98 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
     };
   }, []);
 
-  const markPending = () => {
+  const triggerWithFallback = (sendBridge: () => boolean, fallbackToPhone: () => Promise<void>) => {
+    if (usePhoneDirect) {
+      setPhoneMode(true);
+      void fallbackToPhone();
+      return;
+    }
+    if (!sendBridge()) {
+      setPhoneMode(true);
+      void fallbackToPhone();
+      return;
+    }
     setPendingLocal(true);
     if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
     pendingTimerRef.current = window.setTimeout(() => {
       setPendingLocal(false);
-      deck.showToast(false, 'Computer bridge outdated — press Ctrl+C and restart npm run live');
-    }, 3000);
+      setPhoneMode(true);
+      deck.showToast(true, 'Switched to Phone-Direct Network Mode');
+      void fallbackToPhone();
+    }, 2200);
   };
 
   useEffect(() => {
     if (autoScannedRef.current) return;
-    if (deck.status === 'connected' && net.updatedAt === 0 && !net.scanning) {
+    if (net.updatedAt === 0 && !net.scanning) {
       autoScannedRef.current = true;
-      deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } });
+      if (bridgeConnected) {
+        triggerWithFallback(
+          () => deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } }),
+          () => runPhoneDirectScan(setPhoneNet),
+        );
+      } else {
+        setPhoneMode(true);
+        void runPhoneDirectScan(setPhoneNet);
+      }
     }
-  }, [deck, net.updatedAt, net.scanning]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridgeConnected]);
 
   const runScan = () => {
     soundEngine.playClick();
-    if (deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } })) {
-      markPending();
-    }
+    triggerWithFallback(
+      () => deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } }),
+      () => runPhoneDirectScan(setPhoneNet),
+    );
   };
 
   const runSpeed = () => {
     soundEngine.playClick();
     setRightTab('ai');
-    if (deck.sendEvent({ type: 'network:speedtest', payload: { requestId: makeRequestId() } })) {
-      markPending();
-    }
+    triggerWithFallback(
+      () => deck.sendEvent({ type: 'network:speedtest', payload: { requestId: makeRequestId() } }),
+      () => runPhoneDirectSpeedTest(setPhoneNet),
+    );
   };
 
   const runFix = (action: NetworkFixAction) => {
     soundEngine.playClick();
     if (action === 'ai_analyze' || action === 'full_net_fix') setRightTab('ai');
     else setRightTab('log');
-    if (deck.sendEvent({ type: 'network:fix', payload: { requestId: makeRequestId(), action } })) {
-      markPending();
-    }
+
+    const phoneFallback = async () => {
+      if (action === 'full_net_fix' || action === 'ai_analyze') {
+        await runPhoneDirectSpeedTest(setPhoneNet);
+        return;
+      }
+      setRightTab('ai');
+      const tip =
+        action === 'boost_dns'
+          ? 'On iPhone: Settings → Wi-Fi → tap (i) → Configure DNS → Manual → add 1.1.1.1 & 8.8.8.8.'
+          : action === 'flush_dns'
+            ? 'On iPhone: Toggle Airplane Mode ON for 5 seconds, then OFF to flush DNS cache.'
+            : 'On iPhone: Settings → Wi-Fi → tap (i) → tap "Renew Lease" to get a fresh IP.';
+      setPhoneNet((prev) => ({
+        ...prev,
+        aiTips: [tip, ...prev.aiTips.filter((t) => t !== tip)],
+        fixLog: [...prev.fixLog.slice(-60), `[Phone-Direct] ${tip}`],
+      }));
+      deck.showToast(true, 'Phone-Direct guide added to Summary');
+    };
+
+    triggerWithFallback(
+      () => deck.sendEvent({ type: 'network:fix', payload: { requestId: makeRequestId(), action } }),
+      phoneFallback,
+    );
   };
 
   const handleRevealPassword = () => {
     soundEngine.playClick();
+    if (usePhoneDirect) {
+      deck.showToast(false, 'Wi-Fi password requires paired Mac/PC bridge (iOS blocks browser keychain)');
+      return;
+    }
     if (net.wifiPassword) {
       setShowPass((v) => !v);
       return;
@@ -130,6 +187,11 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
             <span className="disp text-[19px]">NetOps Pro</span>
           </div>
           <div className="flex items-center gap-1">
+            {usePhoneDirect && (
+              <span className="rounded-full bg-[#22d3ee]/15 px-1.5 py-0.5 text-[7.5px] font-extrabold text-[#22d3ee]">
+                PHONE DIRECT
+              </span>
+            )}
             {net.vpnActive && (
               <span className="flex items-center gap-0.5 rounded-full bg-[#a78bfa]/20 px-1.5 py-0.5 text-[8px] font-extrabold text-[#c4b5fd]">
                 <Shield className="h-2.5 w-2.5" />
