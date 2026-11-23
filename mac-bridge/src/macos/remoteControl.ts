@@ -11,6 +11,7 @@ const NATIVE_SRC = path.join(BRIDGE_ROOT, 'native', 'mouse_daemon.c');
 const NATIVE_BIN = path.join(BRIDGE_ROOT, 'data', 'mouse_daemon');
 
 const FAVORITE_APPS = new Set([
+  'Antigravity IDE',
   'Antigravity',
   'Google Antigravity',
   'Visual Studio Code',
@@ -86,11 +87,11 @@ export async function focusMacApp(appName: string, runningApps: string[]): Promi
     throw new Error(`App "${clean}" is not in the allowed launcher list`);
   }
 
-  if (clean === 'Antigravity' || clean === 'Google Antigravity') {
-    for (const candidate of ['Antigravity', 'Google Antigravity']) {
+  if (clean === 'Antigravity' || clean === 'Antigravity IDE' || clean === 'Google Antigravity') {
+    for (const candidate of ['/Applications/Antigravity IDE.app', 'Antigravity IDE', 'Antigravity']) {
       try {
         await execFileAsync('open', ['-a', candidate], { timeout: 2500 });
-        return `Opened ${candidate} IDE`;
+        return 'Opened Antigravity IDE';
       } catch {
         // Try next candidate
       }

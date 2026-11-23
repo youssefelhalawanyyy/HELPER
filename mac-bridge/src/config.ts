@@ -25,7 +25,7 @@ const DEFAULT_PROFILES: DeckProfile[] = [
   {
     id: 'antigravity',
     name: 'Antigravity',
-    matchApps: ['Antigravity', 'Google Antigravity'],
+    matchApps: ['Antigravity IDE', 'Antigravity', 'Google Antigravity'],
     accent: 'cyan',
   },
   {
