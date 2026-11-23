@@ -103,14 +103,14 @@ export async function focusMacApp(appName: string, runningApps: string[]): Promi
   return `Opened ${clean}`;
 }
 
-export async function moveMacCursor(dx: number, dy: number): Promise<void> {
-  const clampedX = Math.max(-220, Math.min(220, dx));
-  const clampedY = Math.max(-220, Math.min(220, dy));
-  if (Math.abs(clampedX) < 0.15 && Math.abs(clampedY) < 0.15) return;
+export async function moveMacCursor(dx: number, dy: number, drag = false): Promise<void> {
+  const clampedX = Math.max(-280, Math.min(280, dx));
+  const clampedY = Math.max(-280, Math.min(280, dy));
+  if (Math.abs(clampedX) < 0.1 && Math.abs(clampedY) < 0.1) return;
 
   const daemon = await ensureMouseDaemon();
   if (daemon?.stdin?.writable) {
-    daemon.stdin.write(`M ${clampedX.toFixed(2)} ${clampedY.toFixed(2)}\n`);
+    daemon.stdin.write(`${drag ? 'G' : 'M'} ${clampedX.toFixed(2)} ${clampedY.toFixed(2)}\n`);
     return;
   }
 
@@ -152,6 +152,23 @@ export async function clickMacCursor(button: 'left' | 'right'): Promise<void> {
     await execFileAsync('osascript', ['-l', 'JavaScript', '-e', jxa], { timeout: 1000 });
   } catch {
     // Requires Accessibility permission
+  }
+}
+
+export async function setMacMouseDrag(down: boolean): Promise<void> {
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(down ? 'D\n' : 'U\n');
+  }
+}
+
+export async function scrollMacSmooth(dx: number, dy: number): Promise<void> {
+  const cx = Math.max(-160, Math.min(160, Math.round(dx)));
+  const cy = Math.max(-160, Math.min(160, Math.round(dy)));
+  if (cx === 0 && cy === 0) return;
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(`S ${cx} ${cy}\n`);
   }
 }
 

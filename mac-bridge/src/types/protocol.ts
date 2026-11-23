@@ -330,8 +330,10 @@ export type ClientEvent =
   | { type: 'docker:action'; payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' } }
   | { type: 'docker:refresh'; payload: { requestId: string } }
   | { type: 'app:focus'; payload: { requestId: string; appName: string } }
-  | { type: 'trackpad:move'; payload: { dx: number; dy: number } }
+  | { type: 'trackpad:move'; payload: { dx: number; dy: number; drag?: boolean } }
   | { type: 'trackpad:click'; payload: { button: 'left' | 'right' } }
+  | { type: 'trackpad:drag'; payload: { down: boolean } }
+  | { type: 'trackpad:scroll'; payload: { dx: number; dy: number } }
   | { type: 'presentation:key'; payload: { requestId: string; action: 'next' | 'prev' | 'start' | 'escape' } }
   | { type: 'system:toggleDarkMode'; payload: { requestId: string } }
   | { type: 'system:toggleMic'; payload: { requestId: string } }

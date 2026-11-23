@@ -29,6 +29,44 @@ import type { WindowSnapPosition } from '@/types/protocol';
 
 type DialMode = 'volume' | 'brightness' | 'scroll';
 type HardwareTab = 'controls' | 'remote';
+type TrackpadPreset = 'smooth' | 'macbook' | 'turbo';
+
+/**
+ * Industry-standard One-Euro Filter (Casiez et al.) for adaptive touchpad smoothing:
+ * heavy jitter rejection at low speed, near-zero phase lag at high speed.
+ */
+class OneEuro1D {
+  private prevX: number | null = null;
+  private prevDx = 0;
+
+  reset() {
+    this.prevX = null;
+    this.prevDx = 0;
+  }
+
+  private alpha(cutoff: number, dt: number): number {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / Math.max(0.001, dt));
+  }
+
+  filter(x: number, dt: number, minCutoff: number, beta: number): number {
+    if (this.prevX === null) {
+      this.prevX = x;
+      this.prevDx = 0;
+      return x;
+    }
+    const dx = (x - this.prevX) / Math.max(0.004, dt);
+    const aD = this.alpha(1.0, dt);
+    const edX = aD * dx + (1 - aD) * this.prevDx;
+    this.prevDx = edX;
+
+    const cutoff = minCutoff + beta * Math.abs(edX);
+    const a = this.alpha(cutoff, dt);
+    const out = a * x + (1 - a) * this.prevX;
+    this.prevX = out;
+    return out;
+  }
+}
 
 async function compressImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -81,12 +119,16 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const lastSendRef = useRef(0);
   const faceDownTriggeredRef = useRef(false);
 
-  // Trackpad pointer filtering (EMA low-pass + macOS velocity acceleration + 60Hz RAF)
-  const [sensitivity, setSensitivity] = useState<'precision' | 'balanced' | 'fast'>('balanced');
-  const padLastRef = useRef<{ x: number; y: number } | null>(null);
-  const padEmaRef = useRef({ vx: 0, vy: 0 });
+  // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger scroll + drag lock)
+  const [padPreset, setPadPreset] = useState<TrackpadPreset>('macbook');
+  const [dragLock, setDragLock] = useState(false);
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const twoFingerRef = useRef(false);
+  const padFilterX = useRef(new OneEuro1D());
+  const padFilterY = useRef(new OneEuro1D());
+  const padLastTsRef = useRef(0);
   const padSubpixelRef = useRef({ rx: 0, ry: 0 });
-  const padPendingRef = useRef({ dx: 0, dy: 0 });
+  const padPendingRef = useRef({ dx: 0, dy: 0, sx: 0, sy: 0 });
   const padMovedDistRef = useRef(0);
   const padRafRef = useRef<number | null>(null);
   const padActiveRef = useRef(false);
@@ -206,21 +248,27 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               <span className="disp text-[22px]">Trackpad</span>
             </div>
             <div className="flex items-center gap-1">
-              {(['precision', 'balanced', 'fast'] as const).map((s) => (
+              {(
+                [
+                  ['smooth', 'Smooth'],
+                  ['macbook', 'MacBook'],
+                  ['turbo', 'Turbo'],
+                ] as const
+              ).map(([id, label]) => (
                 <button
-                  key={s}
+                  key={id}
                   type="button"
                   onClick={() => {
                     soundEngine.playClick();
-                    setSensitivity(s);
+                    setPadPreset(id);
                   }}
                   className="rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
                   style={{
-                    background: sensitivity === s ? '#22d3ee' : 'rgba(255,255,255,0.06)',
-                    color: sensitivity === s ? '#041317' : '#7c8190',
+                    background: padPreset === id ? '#22d3ee' : 'rgba(255,255,255,0.06)',
+                    color: padPreset === id ? '#041317' : '#7c8190',
                   }}
                 >
-                  {s === 'precision' ? 'Slow' : s === 'balanced' ? 'Mid' : 'Fast'}
+                  {label}
                 </button>
               ))}
               <button
@@ -241,30 +289,46 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             data-no-swipe="true"
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
+              pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+              if (pointersRef.current.size >= 2) {
+                twoFingerRef.current = true;
+              } else {
+                twoFingerRef.current = false;
+                padMovedDistRef.current = 0;
+                padFilterX.current.reset();
+                padFilterY.current.reset();
+                padSubpixelRef.current = { rx: 0, ry: 0 };
+                padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
+                padLastTsRef.current = performance.now();
+              }
+
               padActiveRef.current = true;
-              padLastRef.current = { x: e.clientX, y: e.clientY };
-              padEmaRef.current = { vx: 0, vy: 0 };
-              padSubpixelRef.current = { rx: 0, ry: 0 };
-              padPendingRef.current = { dx: 0, dy: 0 };
-              padMovedDistRef.current = 0;
 
               const flushLoop = () => {
                 if (!padActiveRef.current) {
                   padRafRef.current = null;
                   return;
                 }
-                const { dx, dy } = padPendingRef.current;
-                padPendingRef.current = { dx: 0, dy: 0 };
+                const { dx, dy, sx, sy } = padPendingRef.current;
+                padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
 
-                if (dx !== 0 || dy !== 0) {
-                  // Sub-pixel carry keeps micro-movements silky without truncation jitter
+                if (sx !== 0 || sy !== 0) {
+                  deck.sendEvent({
+                    type: 'trackpad:scroll',
+                    payload: { dx: Math.round(sx), dy: Math.round(sy) },
+                  });
+                } else if (dx !== 0 || dy !== 0) {
                   const totalX = dx + padSubpixelRef.current.rx;
                   const totalY = dy + padSubpixelRef.current.ry;
                   const outX = Math.trunc(totalX * 10) / 10;
                   const outY = Math.trunc(totalY * 10) / 10;
                   padSubpixelRef.current = { rx: totalX - outX, ry: totalY - outY };
-                  if (Math.abs(outX) >= 0.2 || Math.abs(outY) >= 0.2) {
-                    deck.sendEvent({ type: 'trackpad:move', payload: { dx: outX, dy: outY } });
+                  if (Math.abs(outX) >= 0.15 || Math.abs(outY) >= 0.15) {
+                    deck.sendEvent({
+                      type: 'trackpad:move',
+                      payload: { dx: outX, dy: outY, drag: dragLock },
+                    });
                   }
                 }
                 padRafRef.current = requestAnimationFrame(flushLoop);
@@ -272,59 +336,90 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               if (!padRafRef.current) padRafRef.current = requestAnimationFrame(flushLoop);
             }}
             onPointerMove={(e) => {
-              if (!padLastRef.current) return;
-              const rawScreenDx = e.clientX - padLastRef.current.x;
-              const rawScreenDy = e.clientY - padLastRef.current.y;
-              padLastRef.current = { x: e.clientX, y: e.clientY };
+              const prev = pointersRef.current.get(e.pointerId);
+              if (!prev) return;
 
-              // Auto-align coordinates when phone is held portrait inside 90deg landscape lock
+              const rawScreenDx = e.clientX - prev.x;
+              const rawScreenDy = e.clientY - prev.y;
+              pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
               const isPortrait = window.innerHeight > window.innerWidth;
               const rawDx = isPortrait ? rawScreenDy : rawScreenDx;
               const rawDy = isPortrait ? -rawScreenDx : rawScreenDy;
+              const dist = Math.hypot(rawDx, rawDy);
+              padMovedDistRef.current += dist;
 
-              padMovedDistRef.current += Math.hypot(rawDx, rawDy);
+              // Two-finger smooth macOS scroll
+              if (pointersRef.current.size >= 2) {
+                padPendingRef.current.sx += rawDx * 1.35;
+                padPendingRef.current.sy += rawDy * 1.55;
+                return;
+              }
 
-              // Deadzone suppresses capacitive micro-jitter when resting finger
-              if (Math.hypot(rawDx, rawDy) < 0.35) return;
+              // Micro-tremor deadzone when resting fingertip
+              if (dist < 0.25) return;
 
-              // Exponential Moving Average (EMA) low-pass filter
-              const alpha = 0.48;
-              const fx = padEmaRef.current.vx * (1 - alpha) + rawDx * alpha;
-              const fy = padEmaRef.current.vy * (1 - alpha) + rawDy * alpha;
-              padEmaRef.current = { vx: fx, vy: fy };
+              const now = performance.now();
+              const dt = Math.max(0.004, Math.min(0.05, (now - padLastTsRef.current) / 1000));
+              padLastTsRef.current = now;
 
-              // macOS-style non-linear velocity acceleration curve
-              const speed = Math.hypot(fx, fy);
-              const mult = sensitivity === 'precision' ? 0.72 : sensitivity === 'fast' ? 1.45 : 1.05;
-              const gain = (0.9 + Math.min(2.8, Math.pow(speed, 0.72) * 0.42)) * mult;
+              // One-Euro filter tuning per preset
+              const cfg =
+                padPreset === 'smooth'
+                  ? { minCutoff: 1.4, beta: 0.045, baseGain: 1.0, accel: 0.42, maxGain: 3.4 }
+                  : padPreset === 'turbo'
+                    ? { minCutoff: 3.2, beta: 0.14, baseGain: 1.45, accel: 0.65, maxGain: 5.2 }
+                    : { minCutoff: 2.1, beta: 0.085, baseGain: 1.15, accel: 0.52, maxGain: 4.4 };
+
+              const fx = padFilterX.current.filter(rawDx, dt, cfg.minCutoff, cfg.beta);
+              const fy = padFilterY.current.filter(rawDy, dt, cfg.minCutoff, cfg.beta);
+
+              // Apple-style ballistic velocity acceleration curve
+              const velocityPxPerSec = Math.hypot(fx, fy) / dt;
+              const speedNorm = Math.min(24, velocityPxPerSec / 110);
+              const gain = Math.min(
+                cfg.maxGain,
+                cfg.baseGain + Math.pow(speedNorm, 1.15) * cfg.accel,
+              );
 
               padPendingRef.current.dx += fx * gain;
               padPendingRef.current.dy += fy * gain;
             }}
-            onPointerUp={() => {
-              padActiveRef.current = false;
-              if (padRafRef.current) {
-                cancelAnimationFrame(padRafRef.current);
-                padRafRef.current = null;
+            onPointerUp={(e) => {
+              pointersRef.current.delete(e.pointerId);
+              if (pointersRef.current.size === 0) {
+                padActiveRef.current = false;
+                if (padRafRef.current) {
+                  cancelAnimationFrame(padRafRef.current);
+                  padRafRef.current = null;
+                }
+                if (padMovedDistRef.current < 8) {
+                  soundEngine.playClick();
+                  deck.sendEvent({
+                    type: 'trackpad:click',
+                    payload: { button: twoFingerRef.current ? 'right' : 'left' },
+                  });
+                }
+                twoFingerRef.current = false;
               }
-              if (padMovedDistRef.current < 7) {
-                soundEngine.playClick();
-                deck.sendEvent({ type: 'trackpad:click', payload: { button: 'left' } });
+            }}
+            onPointerCancel={(e) => {
+              pointersRef.current.delete(e.pointerId);
+              if (pointersRef.current.size === 0) {
+                padActiveRef.current = false;
               }
-              padLastRef.current = null;
             }}
-            onPointerCancel={() => {
-              padActiveRef.current = false;
-              padLastRef.current = null;
-            }}
-            className="grid flex-1 touch-none place-items-center rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.08),rgba(0,0,0,0.85))]"
+            className="grid flex-1 touch-none place-items-center rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.09),rgba(0,0,0,0.88))]"
           >
-            <span className="sub pointer-events-none">
-              Native 60Hz filtered touchpad · drag to glide · tap to click
-            </span>
+            <div className="pointer-events-none text-center">
+              <div className="sub">1-Finger Move &amp; Tap · 2-Finger Scroll &amp; Right-Click</div>
+              <div className="mt-0.5 text-[9px] text-[#22d3ee]/70">
+                One-Euro Filter · 120Hz Native CoreGraphics Interpolation
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <motion.button
               type="button"
               whileTap={{ scale: 0.95 }}
@@ -332,7 +427,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 deck.sendEvent({ type: 'trackpad:click', payload: { button: 'left' } });
               }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10.5px] font-extrabold text-white"
+              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10px] font-extrabold text-white"
             >
               LEFT CLICK
             </motion.button>
@@ -341,9 +436,27 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               whileTap={{ scale: 0.95 }}
               onClick={() => {
                 soundEngine.playClick();
+                const next = !dragLock;
+                setDragLock(next);
+                deck.sendEvent({ type: 'trackpad:drag', payload: { down: next } });
+              }}
+              className="rounded-xl border py-2 text-[10px] font-extrabold"
+              style={{
+                background: dragLock ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.06)',
+                borderColor: dragLock ? '#34d399' : 'rgba(255,255,255,0.1)',
+                color: dragLock ? '#34d399' : '#fbbf24',
+              }}
+            >
+              {dragLock ? 'DRAGGING…' : 'DRAG HOLD'}
+            </motion.button>
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                soundEngine.playClick();
                 deck.sendEvent({ type: 'trackpad:click', payload: { button: 'right' } });
               }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10.5px] font-extrabold text-[#22d3ee]"
+              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10px] font-extrabold text-[#22d3ee]"
             >
               RIGHT CLICK
             </motion.button>

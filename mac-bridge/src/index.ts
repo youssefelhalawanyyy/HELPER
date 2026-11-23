@@ -30,7 +30,9 @@ import {
   clickMacCursor,
   focusMacApp,
   moveMacCursor,
+  scrollMacSmooth,
   sendPresentationKey,
+  setMacMouseDrag,
   toggleMacDarkMode,
   toggleMacMicMute,
 } from './macos/remoteControl.js';
@@ -542,12 +544,22 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     }
 
     case 'trackpad:move': {
-      void moveMacCursor(msg.payload.dx, msg.payload.dy);
+      void moveMacCursor(msg.payload.dx, msg.payload.dy, msg.payload.drag);
       return;
     }
 
     case 'trackpad:click': {
       void clickMacCursor(msg.payload.button);
+      return;
+    }
+
+    case 'trackpad:drag': {
+      void setMacMouseDrag(msg.payload.down);
+      return;
+    }
+
+    case 'trackpad:scroll': {
+      void scrollMacSmooth(msg.payload.dx, msg.payload.dy);
       return;
     }
 
