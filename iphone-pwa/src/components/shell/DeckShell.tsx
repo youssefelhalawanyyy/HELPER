@@ -6,22 +6,25 @@ import {
   Activity,
   Battery,
   BatteryCharging,
+  Bot,
   ClipboardList,
+  Clock,
   Coffee,
   Cpu,
   Home,
   Link2,
-  MonitorSmartphone,
+  MousePointer2,
   Rocket,
-  Sliders,
   Volume2,
   VolumeX,
   Zap,
 } from 'lucide-react';
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
+import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
 import { PairingOverlay } from '@/components/shell/PairingOverlay';
 import { SnippetDrawer } from '@/components/shell/SnippetDrawer';
+import { AntigravityMissionView } from '@/components/views/AntigravityMissionView';
 import { HardwareToolsView } from '@/components/views/HardwareToolsView';
 import { LaunchControlView } from '@/components/views/LaunchControlView';
 import { LiveMonitorView } from '@/components/views/LiveMonitorView';
@@ -33,15 +36,23 @@ import { useWakeLock } from '@/hooks/useWakeLock';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
-export type DeckViewId = 'deck' | 'monitor' | 'mac' | 'launch' | 'hardware' | 'preview';
+export type DeckViewId =
+  | 'deck'
+  | 'antigravity'
+  | 'monitor'
+  | 'mac'
+  | 'hardware'
+  | 'preview'
+  | 'launch';
 
 const NAV_ITEMS: Array<{ id: DeckViewId; label: string; icon: typeof Home }> = [
   { id: 'deck', label: 'Deck', icon: Home },
+  { id: 'antigravity', label: 'Antigravity', icon: Bot },
   { id: 'monitor', label: 'Monitor', icon: Activity },
-  { id: 'mac', label: 'Mac System & Dock', icon: Cpu },
+  { id: 'mac', label: 'Mac & Dock', icon: Cpu },
+  { id: 'hardware', label: 'Trackpad & Snap', icon: MousePointer2 },
+  { id: 'preview', label: 'Desk Clock', icon: Clock },
   { id: 'launch', label: 'Launch', icon: Rocket },
-  { id: 'hardware', label: 'Hardware & Trackpad', icon: Sliders },
-  { id: 'preview', label: 'Desk Clock & Ambient', icon: MonitorSmartphone },
 ];
 
 export function DeckShell() {
@@ -150,7 +161,7 @@ export function DeckShell() {
                       soundEngine.playClick();
                       setActiveView(id);
                     }}
-                    className="relative grid h-9 w-9 place-items-center rounded-xl transition-colors"
+                    className="relative grid h-8 w-8 place-items-center rounded-xl transition-colors"
                     style={{
                       color: selected ? '#ffffff' : '#6b7080',
                       background: selected ? '#1d1e24' : 'transparent',
@@ -159,10 +170,10 @@ export function DeckShell() {
                     {selected && (
                       <motion.i
                         layoutId="rail-pip"
-                        className="absolute top-2 bottom-2 -left-[7px] w-[3px] rounded-full bg-[#34d399]"
+                        className="absolute top-1.5 bottom-1.5 -left-[9px] w-[3px] rounded-full bg-[#34d399]"
                       />
                     )}
-                    <Icon className="h-[17px] w-[17px]" />
+                    <Icon className="h-[15px] w-[15px]" />
                   </motion.button>
                 );
               })}
@@ -323,22 +334,59 @@ export function DeckShell() {
                 <motion.button
                   type="button"
                   whileTap={{ scale: 0.92 }}
-                  aria-pressed={antigravityMode}
+                  aria-pressed={activeView === 'antigravity'}
                   onClick={() => {
                     soundEngine.playClick();
-                    setAntigravityMode((v) => !v);
-                    setActiveView('deck');
+                    setAntigravityMode(true);
+                    setActiveView('antigravity');
+                    if (isConnected) {
+                      deck.sendEvent({
+                        type: 'app:focus',
+                        payload: { requestId: makeRequestId(), appName: 'Antigravity' },
+                      });
+                    }
                   }}
                   className="flex h-5 items-center gap-1 rounded-full px-3 text-white"
                   style={{
-                    background: antigravityMode ? '#2563eb' : '#23252d',
-                    boxShadow: antigravityMode ? '0 0 14px #2563eb88' : 'none',
+                    background:
+                      activeView === 'antigravity' || deck.antigravityState.active
+                        ? '#2563eb'
+                        : '#23252d',
+                    boxShadow:
+                      activeView === 'antigravity' || deck.antigravityState.active
+                        ? '0 0 14px #2563eb88'
+                        : 'none',
                   }}
                 >
                   <Zap className="h-[10px] w-[10px] fill-current" />
-                  ANTIGRAVITY
+                  ANTIGRAVITY IDE
                 </motion.button>
               </header>
+
+              {/* Live Antigravity Agent Progress HUD (shows instantly across EVERY tab) */}
+              <AnimatePresence>
+                {deck.agentProgress.active && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="flex items-center gap-2 rounded-full border border-[#22d3ee]/35 bg-[#08171d] px-3 py-1 text-[10px]"
+                  >
+                    <Bot className="h-3 w-3 shrink-0 animate-pulse text-[#22d3ee]" />
+                    <span className="font-bold text-white">{deck.agentProgress.title}</span>
+                    <span className="truncate text-zinc-400">{deck.agentProgress.step}</span>
+                    <div className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-[#34d399] transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(4, deck.agentProgress.percent))}%` }}
+                      />
+                    </div>
+                    <span className="num font-extrabold text-[#34d399]">
+                      {Math.round(deck.agentProgress.percent)}%
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Main Interactive Canvas */}
               <main className="relative min-h-0 flex-1">
@@ -359,6 +407,7 @@ export function DeckShell() {
                         onOpenPairing={() => setPairingModalOpen(true)}
                       />
                     )}
+                    {activeView === 'antigravity' && <AntigravityMissionView deck={deck} />}
                     {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
                     {activeView === 'mac' && (
                       <MacInspectorView
@@ -448,6 +497,9 @@ export function DeckShell() {
         onDismiss={deck.dismissAgentNotification}
         onSend={deck.sendEvent}
       />
+
+      {/* Global Instant Two-Way ask_iphone Overlay (shows over ANY screen) */}
+      <AgentQuestionOverlay question={deck.agentQuestion} onSend={deck.sendEvent} />
 
       {/* On-Demand Pairing Overlay */}
       <PairingOverlay

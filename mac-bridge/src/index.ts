@@ -39,13 +39,20 @@ import { sendToActiveMacTerminal } from './macos/terminal.js';
 import { snapFrontmostWindow } from './macos/windowSnap.js';
 import { createApiRouter } from './routes/api.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
+import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
 import { LogStreamer, runConfiguredShellCommand } from './services/logStreamer.js';
 import { PortService } from './services/portService.js';
 import { ProcessAndDockerService } from './services/processService.js';
 import { StatsService } from './services/statsService.js';
-import type { ClientEvent, ServerEvent } from './types/protocol.js';
+import type {
+  AgentProgress,
+  AgentQuestion,
+  ClientEvent,
+  ServerEvent,
+  SpeedTestState,
+} from './types/protocol.js';
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 4747);
 const PWA_PORT = Number(process.env.PWA_PORT || 3000);
@@ -140,6 +147,28 @@ const deepTelemetry = new DeepTelemetryService(
   (data) => broadcast({ type: 'mac:telemetry', payload: data }),
 );
 
+const antigravityService = new AntigravityService(
+  () => configStore.getAll().projectDir,
+  (state) => broadcast({ type: 'antigravity:state', payload: state }),
+);
+
+// Live bidirectional Antigravity MCP state
+let activeQuestion: AgentQuestion | null = null;
+const pendingQuestionResolvers = new Map<
+  string,
+  { resolve: (answer: string) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
+>();
+let latestProgress: AgentProgress = { title: '', step: '', percent: 0, active: false, ts: 0 };
+let latestScan: { filePath: string; filename: string; ts: number } | null = null;
+let latestVoice: { text: string; ts: number } | null = null;
+let latestSpeedTest: SpeedTestState = {
+  running: false,
+  downMbps: null,
+  upMbps: null,
+  pingMs: null,
+  ts: 0,
+};
+
 // Start background pollers
 statsService.start(2000);
 activeAppPoller.start(1500);
@@ -148,6 +177,7 @@ gitService.start(5000);
 clipboardTracker.start(1500);
 processService.start(4500);
 deepTelemetry.start(6000);
+antigravityService.start(2500);
 
 // --- Express Routes ---
 app.use(
@@ -157,7 +187,8 @@ app.use(
     config: configStore,
     lanIp,
     bridgePort: BRIDGE_PORT,
-    onScanSaved: async (filePath) => {
+    onScanSaved: async (filePath, filename) => {
+      latestScan = { filePath, filename, ts: Date.now() };
       await copyToMacClipboard(filePath);
       clipboardTracker.record(filePath);
       broadcast({
@@ -183,6 +214,30 @@ app.use(
       });
       return clients.size;
     },
+    onAgentAsk: (question, timeoutMs) =>
+      new Promise<string>((resolve, reject) => {
+        activeQuestion = question;
+        broadcast({ type: 'agent:question', payload: question });
+        broadcast({
+          type: 'alert:flash',
+          payload: { kind: 'warning', message: `Antigravity asks: ${question.question.slice(0, 56)}` },
+        });
+        const timer = setTimeout(() => {
+          pendingQuestionResolvers.delete(question.id);
+          if (activeQuestion?.id === question.id) {
+            activeQuestion = null;
+            broadcast({ type: 'agent:question', payload: null });
+          }
+          reject(new Error('Timed out waiting for tap on iPhone'));
+        }, timeoutMs);
+        pendingQuestionResolvers.set(question.id, { resolve, reject, timer });
+      }),
+    onAgentProgress: (progress) => {
+      latestProgress = progress;
+      broadcast({ type: 'agent:progress', payload: progress });
+      return clients.size;
+    },
+    getLatestInput: () => ({ latestScan, latestVoice }),
   }),
 );
 
@@ -545,7 +600,74 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
 
     case 'telemetry:refresh': {
       await deepTelemetry.refresh();
-      reply(msg.payload.requestId, true, 'Mac telemetry refreshed');
+      await antigravityService.refresh();
+      reply(msg.payload.requestId, true, 'Mac & Antigravity telemetry refreshed');
+      return;
+    }
+
+    case 'agent:answer': {
+      const { requestId, questionId, answer } = msg.payload;
+      const pending = pendingQuestionResolvers.get(questionId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingQuestionResolvers.delete(questionId);
+        pending.resolve(answer);
+      }
+      if (activeQuestion?.id === questionId) {
+        activeQuestion = null;
+        broadcast({ type: 'agent:question', payload: null });
+      }
+      reply(requestId, true, `Sent "${answer}" to Antigravity`);
+      return;
+    }
+
+    case 'antigravity:slash': {
+      const { requestId, command } = msg.payload;
+      const allowed = new Set(['/plan', '/boost', '/goal', '/compact', '/grill-me', '/learn', '/teamwork']);
+      if (!allowed.has(command)) {
+        reply(requestId, false, `Slash command "${command}" is not allowed`);
+        return;
+      }
+      try {
+        await focusMacApp('Antigravity', deepTelemetry.getLatest().runningApps);
+        await new Promise((r) => setTimeout(r, 140));
+        await runShortcut('antigravity.agentChat');
+        await new Promise((r) => setTimeout(r, 100));
+        await copyToMacClipboard(`${command} `);
+        await triggerMacPaste();
+        reply(requestId, true, `Injected ${command} into Antigravity Chat`);
+      } catch (err) {
+        reply(requestId, false, err instanceof Error ? err.message : 'Slash command failed');
+      }
+      return;
+    }
+
+    case 'speedtest:run': {
+      if (latestSpeedTest.running) {
+        reply(msg.payload.requestId, false, 'Speed test already running');
+        return;
+      }
+      latestSpeedTest = { ...latestSpeedTest, running: true, error: undefined, ts: Date.now() };
+      broadcast({ type: 'speedtest:state', payload: latestSpeedTest });
+      reply(msg.payload.requestId, true, 'Running Mac internet speed test…');
+      void runMacSpeedTest()
+        .then((res) => {
+          latestSpeedTest = { running: false, ...res, ts: Date.now() };
+          broadcast({ type: 'speedtest:state', payload: latestSpeedTest });
+          broadcast({
+            type: 'alert:flash',
+            payload: { kind: 'success', message: `Speed: ↓${res.downMbps} Mbps · ↑${res.upMbps} Mbps` },
+          });
+        })
+        .catch((err) => {
+          latestSpeedTest = {
+            ...latestSpeedTest,
+            running: false,
+            error: err instanceof Error ? err.message : 'Speed test failed',
+            ts: Date.now(),
+          };
+          broadcast({ type: 'speedtest:state', payload: latestSpeedTest });
+        });
       return;
     }
 
@@ -555,6 +677,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
         reply(requestId, false, 'Empty transcript');
         return;
       }
+      latestVoice = { text: text.trim(), ts: Date.now() };
       await copyToMacClipboard(text);
       clipboardTracker.record(text);
       if (autoPaste) {
@@ -661,6 +784,12 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'processes:update', payload: { processes: processService.getLatestProcesses() } });
   sendTo(ws, { type: 'docker:update', payload: processService.getLatestDocker() });
   sendTo(ws, { type: 'mac:telemetry', payload: deepTelemetry.getLatest() });
+  sendTo(ws, { type: 'antigravity:state', payload: antigravityService.getLatest() });
+  sendTo(ws, { type: 'agent:progress', payload: latestProgress });
+  sendTo(ws, { type: 'speedtest:state', payload: latestSpeedTest });
+  if (activeQuestion) {
+    sendTo(ws, { type: 'agent:question', payload: activeQuestion });
+  }
   sendTo(ws, {
     type: 'preview:url',
     payload: { url: configStore.getAll().previewUrl, label: 'Local Dev' },
@@ -728,5 +857,6 @@ process.on('SIGINT', () => {
   caffeineManager.stop();
   processService.stop();
   deepTelemetry.stop();
+  antigravityService.stop();
   server.close(() => process.exit(0));
 });

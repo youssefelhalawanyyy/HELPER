@@ -6,6 +6,9 @@ import { soundEngine } from '@/lib/soundEngine';
 import type {
   ActivePort,
   AgentNotification,
+  AgentProgress,
+  AgentQuestion,
+  AntigravityLiveState,
   BridgeHello,
   ClientEvent,
   ClipboardItem,
@@ -20,6 +23,7 @@ import type {
   MediaState,
   ProfileId,
   ServerEvent,
+  SpeedTestState,
   SystemStats,
   WebhookEvent,
 } from '@/types/protocol';
@@ -183,6 +187,31 @@ export function useDevDeckSocket() {
   const [previewUrl, setPreviewUrl] = useState('http://localhost:3000');
   const [alertFlash, setAlertFlash] = useState<AlertFlash | null>(null);
   const [agentNotification, setAgentNotification] = useState<AgentNotification | null>(null);
+  const [agentQuestion, setAgentQuestion] = useState<AgentQuestion | null>(null);
+  const [agentProgress, setAgentProgress] = useState<AgentProgress>({
+    title: '',
+    step: '',
+    percent: 0,
+    active: false,
+    ts: 0,
+  });
+  const [antigravityState, setAntigravityState] = useState<AntigravityLiveState>({
+    active: false,
+    lastActivityTs: 0,
+    conversationId: '',
+    artifactName: '',
+    artifactPreview: '',
+    diffFiles: [],
+    totalAdded: 0,
+    totalRemoved: 0,
+  });
+  const [speedTest, setSpeedTest] = useState<SpeedTestState>({
+    running: false,
+    downMbps: null,
+    upMbps: null,
+    pingMs: null,
+    ts: 0,
+  });
   const [caffeineActive, setCaffeineActive] = useState(false);
   const [processes, setProcesses] = useState<HeavyProcess[]>([]);
   const [docker, setDocker] = useState<{ available: boolean; containers: DockerContainer[] }>({
@@ -292,6 +321,19 @@ export function useDevDeckSocket() {
               break;
             case 'agent:notification':
               setAgentNotification(msg.payload);
+              break;
+            case 'agent:question':
+              setAgentQuestion(msg.payload);
+              if (msg.payload) soundEngine.playSuccessChime();
+              break;
+            case 'agent:progress':
+              setAgentProgress(msg.payload);
+              break;
+            case 'antigravity:state':
+              setAntigravityState(msg.payload);
+              break;
+            case 'speedtest:state':
+              setSpeedTest(msg.payload);
               break;
             case 'caffeine:state':
               setCaffeineActive(msg.payload.active);
@@ -444,6 +486,10 @@ export function useDevDeckSocket() {
     previewUrl,
     alertFlash,
     agentNotification,
+    agentQuestion,
+    agentProgress,
+    antigravityState,
+    speedTest,
     caffeineActive,
     processes,
     docker,

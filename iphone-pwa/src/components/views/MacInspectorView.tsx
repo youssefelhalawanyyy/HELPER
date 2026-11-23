@@ -7,7 +7,9 @@ import {
   Bluetooth,
   ExternalLink,
   FileText,
+  Gauge,
   Globe,
+  Loader2,
   Mic,
   MicOff,
   Moon,
@@ -24,14 +26,16 @@ import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 const FAVORITE_DOCK_APPS = [
-  { name: 'Antigravity', label: 'Antigravity' },
+  { name: 'Antigravity', label: 'Antigravity IDE' },
+  { name: 'Anghami', label: 'Anghami' },
   { name: 'Google Chrome', label: 'Chrome' },
   { name: 'Safari', label: 'Safari' },
-  { name: 'Terminal', label: 'Terminal' },
   { name: 'Spotify', label: 'Spotify' },
+  { name: 'Terminal', label: 'Terminal' },
+  { name: 'WhatsApp', label: 'WhatsApp' },
   { name: 'Finder', label: 'Finder' },
   { name: 'Notes', label: 'Notes' },
-  { name: 'WhatsApp', label: 'WhatsApp' },
+  { name: 'Calendar', label: 'Calendar' },
 ];
 
 function formatUptime(sec: number): string {
@@ -157,16 +161,37 @@ export function MacInspectorView({
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
         <div className="disp text-[22px]">Control &amp; Dock</div>
 
-        {/* Network + Audio Strip */}
+        {/* Network + Speed Test Strip */}
         <div className="grid grid-cols-2 gap-1.5 text-[10px]">
           <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
-            <div className="flex items-center gap-1 font-bold text-[#22d3ee]">
-              <Wifi className="h-3 w-3" />
-              <span className="truncate">{t?.wifiSsid || 'Wi-Fi'}</span>
+            <div className="flex items-center justify-between gap-1 font-bold text-[#22d3ee]">
+              <span className="flex min-w-0 items-center gap-1">
+                <Wifi className="h-3 w-3 shrink-0" />
+                <span className="truncate">{t?.wifiSsid || 'Wi-Fi'}</span>
+              </span>
+              <button
+                type="button"
+                disabled={deck.speedTest.running}
+                onClick={() => {
+                  soundEngine.playClick();
+                  deck.sendEvent({ type: 'speedtest:run', payload: { requestId: makeRequestId() } });
+                }}
+                className="flex shrink-0 items-center gap-0.5 rounded-full bg-[#22d3ee]/20 px-1.5 py-0.5 text-[8px] font-extrabold text-[#22d3ee]"
+              >
+                {deck.speedTest.running ? (
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                ) : (
+                  <Gauge className="h-2.5 w-2.5" />
+                )}
+                TEST
+              </button>
             </div>
             <div className="num mt-0.5 text-[9px] text-[#8b90a0]">
-              {t?.pingMs !== null && t?.pingMs !== undefined ? `${t.pingMs}ms` : '--'}
-              {t?.wifiSignalDbm ? ` · ${t.wifiSignalDbm}dBm` : ''}
+              {deck.speedTest.downMbps !== null
+                ? `↓${deck.speedTest.downMbps} ↑${deck.speedTest.upMbps ?? 0} Mbps`
+                : t?.pingMs !== null && t?.pingMs !== undefined
+                  ? `${t.pingMs}ms${t.wifiSignalDbm ? ` · ${t.wifiSignalDbm}dBm` : ''}`
+                  : 'Tap TEST for speed'}
             </div>
           </div>
 

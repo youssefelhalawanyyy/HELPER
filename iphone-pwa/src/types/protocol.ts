@@ -211,6 +211,47 @@ export interface AgentNotification {
   ts: number;
 }
 
+export interface AgentQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  ts: number;
+}
+
+export interface AgentProgress {
+  title: string;
+  step: string;
+  percent: number;
+  active: boolean;
+  ts: number;
+}
+
+export interface GitDiffFile {
+  file: string;
+  added: number;
+  removed: number;
+}
+
+export interface AntigravityLiveState {
+  active: boolean;
+  lastActivityTs: number;
+  conversationId: string;
+  artifactName: string;
+  artifactPreview: string;
+  diffFiles: GitDiffFile[];
+  totalAdded: number;
+  totalRemoved: number;
+}
+
+export interface SpeedTestState {
+  running: boolean;
+  downMbps: number | null;
+  upMbps: number | null;
+  pingMs: number | null;
+  error?: string;
+  ts: number;
+}
+
 export type ServerEvent =
   | { type: 'hello'; payload: BridgeHello }
   | { type: 'config:sync'; payload: DevDeckPublicConfig }
@@ -227,6 +268,10 @@ export type ServerEvent =
   | { type: 'preview:url'; payload: { url: string; label: string } }
   | { type: 'alert:flash'; payload: { kind: 'success' | 'error' | 'warning'; message: string } }
   | { type: 'agent:notification'; payload: AgentNotification }
+  | { type: 'agent:question'; payload: AgentQuestion | null }
+  | { type: 'agent:progress'; payload: AgentProgress }
+  | { type: 'antigravity:state'; payload: AntigravityLiveState }
+  | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
   | { type: 'docker:update'; payload: { available: boolean; containers: DockerContainer[] } }
@@ -271,4 +316,7 @@ export type ClientEvent =
   | { type: 'focus:stop'; payload: { requestId: string } }
   | { type: 'clipboard:copy'; payload: { requestId: string; text: string; autoPaste?: boolean } }
   | { type: 'media:control'; payload: { requestId: string; action: 'playpause' | 'next' | 'prev' } }
-  | { type: 'preview:set'; payload: { requestId: string; url: string } };
+  | { type: 'preview:set'; payload: { requestId: string; url: string } }
+  | { type: 'agent:answer'; payload: { requestId: string; questionId: string; answer: string } }
+  | { type: 'antigravity:slash'; payload: { requestId: string; command: string } }
+  | { type: 'speedtest:run'; payload: { requestId: string } };

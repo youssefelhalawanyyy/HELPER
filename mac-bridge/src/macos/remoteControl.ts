@@ -11,10 +11,15 @@ const FAVORITE_APPS = new Set([
   'Safari',
   'Arc',
   'Spotify',
+  'Anghami',
   'Music',
   'Finder',
   'Notes',
   'WhatsApp',
+  'Calendar',
+  'Messages',
+  'Mail',
+  'System Settings',
   'Terminal',
   'iTerm',
   'iTerm2',
@@ -30,8 +35,22 @@ export async function focusMacApp(appName: string, runningApps: string[]): Promi
   if (!allowed) {
     throw new Error(`App "${clean}" is not in the allowed launcher list`);
   }
+
+  // Handle Antigravity IDE app bundle naming variants automatically
+  if (clean === 'Antigravity' || clean === 'Google Antigravity') {
+    for (const candidate of ['Antigravity', 'Google Antigravity']) {
+      try {
+        await execFileAsync('open', ['-a', candidate], { timeout: 2500 });
+        return `Opened ${candidate} IDE`;
+      } catch {
+        // Try next candidate
+      }
+    }
+    throw new Error('Antigravity IDE app not found in /Applications');
+  }
+
   await execFileAsync('open', ['-a', clean], { timeout: 2500 });
-  return `Switched to ${clean}`;
+  return `Opened ${clean}`;
 }
 
 export async function moveMacCursor(dx: number, dy: number): Promise<void> {
