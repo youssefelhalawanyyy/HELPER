@@ -56,8 +56,26 @@ export interface SystemStats {
   diskPct: number;
   netRxKBs: number;
   netTxKBs: number;
+  batteryPct: number | null;
+  batteryCharging: boolean;
   ts: number;
 }
+
+export interface HeavyProcess {
+  pid: number;
+  name: string;
+  cpuPct: number;
+  memPct: number;
+}
+
+export interface DockerContainer {
+  id: string;
+  name: string;
+  status: string;
+  state: string;
+}
+
+export type WindowSnapPosition = 'left' | 'right' | 'maximize' | 'center' | 'top' | 'bottom';
 
 export interface ActivePort {
   port: number;
@@ -164,6 +182,9 @@ export type ServerEvent =
   | { type: 'preview:url'; payload: { url: string; label: string } }
   | { type: 'alert:flash'; payload: { kind: 'success' | 'error' | 'warning'; message: string } }
   | { type: 'agent:notification'; payload: AgentNotification }
+  | { type: 'caffeine:state'; payload: { active: boolean } }
+  | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
+  | { type: 'docker:update'; payload: { available: boolean; containers: DockerContainer[] } }
   | { type: 'action:result'; payload: { requestId: string; ok: boolean; message: string; data?: unknown } };
 
 export type ClientEvent =
@@ -184,6 +205,13 @@ export type ClientEvent =
   | { type: 'hardware:dial'; payload: { mode: 'volume' | 'brightness' | 'scroll'; delta: number; value?: number } }
   | { type: 'hardware:mute'; payload: { requestId: string; muted: boolean } }
   | { type: 'hardware:lock'; payload: { requestId: string } }
+  | { type: 'hardware:wake'; payload: { requestId: string } }
+  | { type: 'hardware:caffeine'; payload: { requestId: string; active: boolean } }
+  | { type: 'window:snap'; payload: { requestId: string; position: WindowSnapPosition } }
+  | { type: 'process:kill'; payload: { requestId: string; pid: number } }
+  | { type: 'processes:refresh'; payload: { requestId: string } }
+  | { type: 'docker:action'; payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' } }
+  | { type: 'docker:refresh'; payload: { requestId: string } }
   | { type: 'voice:transcript'; payload: { requestId: string; text: string; autoPaste: boolean } }
   | { type: 'focus:start'; payload: { requestId: string; durationMin: number } }
   | { type: 'focus:stop'; payload: { requestId: string } }

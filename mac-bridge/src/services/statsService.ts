@@ -13,6 +13,8 @@ export class StatsService {
     diskPct: 0,
     netRxKBs: 0,
     netTxKBs: 0,
+    batteryPct: null,
+    batteryCharging: false,
     ts: Date.now(),
   };
 
@@ -24,11 +26,12 @@ export class StatsService {
 
   private async sample(): Promise<void> {
     try {
-      const [load, mem, disks, net] = await Promise.all([
+      const [load, mem, disks, net, bat] = await Promise.all([
         si.currentLoad(),
         si.mem(),
         si.fsSize(),
         si.networkStats(),
+        si.battery(),
       ]);
 
       const primaryDisk =
@@ -51,6 +54,8 @@ export class StatsService {
         diskPct: Math.round((diskUsed / diskTotal) * 100),
         netRxKBs: Math.round(rxSec / 1024),
         netTxKBs: Math.round(txSec / 1024),
+        batteryPct: bat.hasBattery ? Math.round(bat.percent) : null,
+        batteryCharging: Boolean(bat.isCharging || bat.acConnected),
         ts: Date.now(),
       };
       this.onStats(this.latest);

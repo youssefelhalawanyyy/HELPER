@@ -21,16 +21,20 @@ import {
   scrollMacVertical,
   setMacMute,
   setMacVolume,
+  wakeMacDisplay,
 } from './macos/hardware.js';
+import { CaffeineManager } from './macos/caffeine.js';
 import { controlMacMedia, getMediaState } from './macos/media.js';
 import { isKnownShortcut, runShortcut } from './macos/shortcuts.js';
 import { sendToActiveMacTerminal } from './macos/terminal.js';
+import { snapFrontmostWindow } from './macos/windowSnap.js';
 import { createApiRouter } from './routes/api.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
 import { LogStreamer, runConfiguredShellCommand } from './services/logStreamer.js';
 import { PortService } from './services/portService.js';
+import { ProcessAndDockerService } from './services/processService.js';
 import { StatsService } from './services/statsService.js';
 import type { ClientEvent, ServerEvent } from './types/protocol.js';
 
@@ -112,12 +116,22 @@ const webhookStore = new WebhookStore((ev) => {
   broadcast({ type: 'webhook:event', payload: ev });
 });
 
+const caffeineManager = new CaffeineManager((active) => {
+  broadcast({ type: 'caffeine:state', payload: { active } });
+});
+
+const processService = new ProcessAndDockerService(
+  (processes) => broadcast({ type: 'processes:update', payload: { processes } }),
+  (available, containers) => broadcast({ type: 'docker:update', payload: { available, containers } }),
+);
+
 // Start background pollers
 statsService.start(2000);
 activeAppPoller.start(1500);
 portService.start(3500);
 gitService.start(5000);
 clipboardTracker.start(1500);
+processService.start(4500);
 
 // --- Express Routes ---
 app.use(
@@ -386,7 +400,60 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
 
     case 'hardware:lock': {
       await lockMacScreen();
-      reply(msg.payload.requestId, true, 'Mac screen locked');
+      reply(msg.payload.requestId, true, 'Mac display locked');
+      return;
+    }
+
+    case 'hardware:wake': {
+      await wakeMacDisplay();
+      reply(msg.payload.requestId, true, 'Mac display woken');
+      return;
+    }
+
+    case 'hardware:caffeine': {
+      const active = caffeineManager.setActive(msg.payload.active);
+      reply(msg.payload.requestId, true, active ? 'Caffeine ON — Mac will stay awake' : 'Caffeine OFF');
+      return;
+    }
+
+    case 'window:snap': {
+      try {
+        const resMsg = await snapFrontmostWindow(msg.payload.position);
+        reply(msg.payload.requestId, true, resMsg);
+      } catch (err) {
+        reply(
+          msg.payload.requestId,
+          false,
+          err instanceof Error ? err.message : 'Window snap requires Accessibility permission',
+        );
+      }
+      return;
+    }
+
+    case 'processes:refresh': {
+      await processService.scanProcesses();
+      reply(msg.payload.requestId, true, 'Process list refreshed');
+      return;
+    }
+
+    case 'process:kill': {
+      const res = await processService.killProcess(msg.payload.pid);
+      reply(msg.payload.requestId, res.ok, res.message);
+      if (res.ok) {
+        broadcast({ type: 'alert:flash', payload: { kind: 'warning', message: res.message } });
+      }
+      return;
+    }
+
+    case 'docker:refresh': {
+      await processService.scanDocker();
+      reply(msg.payload.requestId, true, 'Docker containers refreshed');
+      return;
+    }
+
+    case 'docker:action': {
+      const res = await processService.runDockerAction(msg.payload.id, msg.payload.action);
+      reply(msg.payload.requestId, res.ok, res.message);
       return;
     }
 
@@ -498,6 +565,9 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'git:status', payload: gitService.getLatest() });
   sendTo(ws, { type: 'clipboard:update', payload: clipboardTracker.getState() });
   sendTo(ws, { type: 'focus:state', payload: focusService.getState() });
+  sendTo(ws, { type: 'caffeine:state', payload: { active: caffeineManager.isActive() } });
+  sendTo(ws, { type: 'processes:update', payload: { processes: processService.getLatestProcesses() } });
+  sendTo(ws, { type: 'docker:update', payload: processService.getLatestDocker() });
   sendTo(ws, {
     type: 'preview:url',
     payload: { url: configStore.getAll().previewUrl, label: 'Local Dev' },
@@ -562,5 +632,7 @@ process.on('SIGINT', () => {
   gitService.stop();
   clipboardTracker.stop();
   logStreamer.stop();
+  caffeineManager.stop();
+  processService.stop();
   server.close(() => process.exit(0));
 });

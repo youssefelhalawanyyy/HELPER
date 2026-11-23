@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { lockMacScreen, toggleMacMute } from './hardware.js';
+import { captureSelectionToClipboard, lockMacScreen, toggleMacMute } from './hardware.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +53,10 @@ export function isKnownShortcut(shortcutId: string): boolean {
 }
 
 export async function runShortcut(shortcutId: string): Promise<string> {
+  if (shortcutId === 'system.screenshotSelection') {
+    captureSelectionToClipboard();
+    return 'Screenshot selection active → will copy to Mac clipboard';
+  }
   if (shortcutId === 'system.toggleMute') {
     const muted = await toggleMacMute();
     return muted ? 'Mac muted' : 'Mac unmuted';

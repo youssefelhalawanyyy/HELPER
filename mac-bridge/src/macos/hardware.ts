@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -85,4 +85,14 @@ export async function lockMacScreen(): Promise<void> {
       { timeout: 1500 },
     );
   }
+}
+
+export async function wakeMacDisplay(): Promise<void> {
+  await execFileAsync('caffeinate', ['-u', '-t', '2'], { timeout: 2500 });
+}
+
+export function captureSelectionToClipboard(): void {
+  // Interactive selection copied straight to Mac clipboard (-i = interactive, -c = clipboard)
+  const child = spawn('screencapture', ['-i', '-c'], { detached: true, stdio: 'ignore' });
+  child.unref();
 }

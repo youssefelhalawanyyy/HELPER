@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n BRIDGE,PWA -c cyan,emerald \"npm run dev -w mac-bridge\" \"npm run dev -w iphone-pwa\"",
+    "live": "npm run live -w mac-bridge",
     "dev:bridge": "npm run dev -w mac-bridge",
     "dev:pwa": "npm run dev -w iphone-pwa",
     "build": "npm run build -w mac-bridge && npm run build -w iphone-pwa",

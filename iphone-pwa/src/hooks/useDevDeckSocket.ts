@@ -10,8 +10,10 @@ import type {
   ClientEvent,
   ClipboardItem,
   DevDeckPublicConfig,
+  DockerContainer,
   FocusState,
   GitStatus,
+  HeavyProcess,
   LogLine,
   LogStatus,
   MediaState,
@@ -129,6 +131,8 @@ export function useDevDeckSocket() {
     diskPct: 0,
     netRxKBs: 0,
     netTxKBs: 0,
+    batteryPct: null,
+    batteryCharging: false,
     ts: 0,
   });
   const [activeApp, setActiveApp] = useState<{ appName: string; profileId: ProfileId }>({
@@ -178,6 +182,12 @@ export function useDevDeckSocket() {
   const [previewUrl, setPreviewUrl] = useState('http://localhost:3000');
   const [alertFlash, setAlertFlash] = useState<AlertFlash | null>(null);
   const [agentNotification, setAgentNotification] = useState<AgentNotification | null>(null);
+  const [caffeineActive, setCaffeineActive] = useState(false);
+  const [processes, setProcesses] = useState<HeavyProcess[]>([]);
+  const [docker, setDocker] = useState<{ available: boolean; containers: DockerContainer[] }>({
+    available: false,
+    containers: [],
+  });
   const [toast, setToast] = useState<ToastNotice | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -280,6 +290,15 @@ export function useDevDeckSocket() {
               break;
             case 'agent:notification':
               setAgentNotification(msg.payload);
+              break;
+            case 'caffeine:state':
+              setCaffeineActive(msg.payload.active);
+              break;
+            case 'processes:update':
+              setProcesses(msg.payload.processes);
+              break;
+            case 'docker:update':
+              setDocker(msg.payload);
               break;
             case 'action:result':
               showToast(msg.payload.ok, msg.payload.message);
@@ -420,6 +439,9 @@ export function useDevDeckSocket() {
     previewUrl,
     alertFlash,
     agentNotification,
+    caffeineActive,
+    processes,
+    docker,
     toast,
     sendEvent,
     pairWithPin,

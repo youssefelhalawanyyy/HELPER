@@ -1,11 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Flame, Loader2, Lock, ScrollText, Smartphone, Sun, Volume2 } from 'lucide-react';
-import { BrushedDial, HardwareTile } from '@/components/shell/HardwarePrimitives';
+import { motion } from 'framer-motion';
+import {
+  Camera,
+  Flame,
+  LayoutGrid,
+  Loader2,
+  Lock,
+  ScrollText,
+  Smartphone,
+  Sun,
+  Unlock,
+  Volume2,
+} from 'lucide-react';
+import { BrushedDial, DECK_SPRING, HardwareTile } from '@/components/shell/HardwarePrimitives';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
+import type { WindowSnapPosition } from '@/types/protocol';
 
 type DialMode = 'volume' | 'brightness' | 'scroll';
 
@@ -37,6 +50,15 @@ async function compressImageFile(file: File): Promise<string> {
   });
 }
 
+const SNAP_OPTIONS: Array<{ id: WindowSnapPosition; label: string }> = [
+  { id: 'left', label: 'Left ½' },
+  { id: 'right', label: 'Right ½' },
+  { id: 'maximize', label: 'Full' },
+  { id: 'center', label: 'Center' },
+  { id: 'top', label: 'Top ½' },
+  { id: 'bottom', label: 'Bot ½' },
+];
+
 export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const [dialMode, setDialMode] = useState<DialMode>('volume');
   const [dialVal, setDialVal] = useState(deck.mediaState.volume);
@@ -44,6 +66,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const [lastScanFile, setLastScanFile] = useState<string | null>(null);
   const [flipEnabled, setFlipEnabled] = useState(false);
   const [flipAction, setFlipAction] = useState<'mute' | 'lock'>('mute');
+  const [macLocked, setMacLocked] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastSendRef = useRef(0);
   const faceDownTriggeredRef = useRef(false);
@@ -130,6 +153,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             payload: { requestId: makeRequestId(), muted: true },
           });
         } else {
+          setMacLocked(true);
           deck.sendEvent({ type: 'hardware:lock', payload: { requestId: makeRequestId() } });
         }
       } else if (!faceDown && Math.abs(beta) < 120) {
@@ -144,13 +168,19 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
     dialMode === 'volume' ? '#fbbf24' : dialMode === 'brightness' ? '#22d3ee' : '#a78bfa';
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '215px 1fr 1fr', gridTemplateRows: '1fr 1fr' }}>
+    <div
+      className="grid h-full gap-2"
+      style={{ gridTemplateColumns: '195px 1fr 1fr', gridTemplateRows: '1fr 1fr' }}
+    >
       {/* Left Spanning Rotary Smart Dial */}
       <div
-        className="tile flex flex-col items-center justify-between p-3.5"
+        className="tile flex flex-col items-center justify-between p-3"
         style={{ gridRow: '1 / span 2', gridColumn: 1 }}
       >
-        <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full" style={{ background: dialAccent }} />
+        <div
+          className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full"
+          style={{ background: dialAccent }}
+        />
         <div className="flex w-full items-center justify-between">
           <span className="disp text-[22px]">Dial</span>
           <div className="flex gap-1">
@@ -185,32 +215,44 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
           value={dialVal}
           onChange={handleDialChange}
           accent={dialAccent}
-          size={136}
+          size={128}
           label={`Mac ${dialMode} dial`}
         />
 
         <div className="sub">{dialMode} · drag to spin</div>
       </div>
 
-      {/* Camera Desk Scanner */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleScanSelected}
-        className="hidden"
-      />
-      <HardwareTile
-        accent="#34d399"
-        title={'Desk\nScan'}
-        icon={uploadingScan ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
-        active={uploadingScan}
-        onClick={() => fileInputRef.current?.click()}
-        sub={lastScanFile ? `Saved: ${lastScanFile}` : 'Snap whiteboard → /scans'}
-      />
+      {/* Top-Middle: Window Tiling Snap Pad (Built-in Rectangle / Magnet) */}
+      <div className="tile flex flex-col justify-between p-3">
+        <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
+        <div className="flex items-center justify-between">
+          <span className="disp text-[20px]">Window Snap</span>
+          <LayoutGrid className="h-4 w-4 text-[#22d3ee]" />
+        </div>
+        <div className="my-1 grid grid-cols-3 gap-1.5">
+          {SNAP_OPTIONS.map((opt) => (
+            <motion.button
+              key={opt.id}
+              type="button"
+              whileTap={{ scale: 0.9 }}
+              transition={DECK_SPRING}
+              onClick={() => {
+                soundEngine.playClick();
+                deck.sendEvent({
+                  type: 'window:snap',
+                  payload: { requestId: makeRequestId(), position: opt.id },
+                });
+              }}
+              className="rounded-lg border border-white/[0.08] bg-white/[0.05] py-1.5 text-[10px] font-extrabold text-zinc-200 hover:border-[#22d3ee]/50 hover:text-[#22d3ee]"
+            >
+              {opt.label}
+            </motion.button>
+          ))}
+        </div>
+        <div className="sub">Snap active Mac window</div>
+      </div>
 
-      {/* Deep Work Focus */}
+      {/* Top-Right: Deep Work Focus */}
       <HardwareTile
         accent="#fbbf24"
         title={'Deep\nFocus'}
@@ -229,52 +271,83 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
         sub={deck.focusState.active ? 'DND active · tap to stop' : '25m Pomodoro + macOS DND'}
       >
         {deck.focusState.active && (
-          <div className="num text-[24px] font-extrabold text-[#fbbf24]">
+          <div className="num text-[22px] font-extrabold text-[#fbbf24]">
             {formatTimer(deck.focusState.remainingSec)}
           </div>
         )}
       </HardwareTile>
 
-      {/* Flip-to-Mute / Lock Sensor */}
-      <HardwareTile
-        accent="#a78bfa"
-        title={'Flip\nSensor'}
-        icon={<Smartphone className="h-5 w-5" />}
-        active={flipEnabled}
-        onClick={() => void toggleFlip()}
-        sub={flipEnabled ? `Armed · face-down = ${flipAction}` : 'Face-down mute / lock'}
-      >
-        <div
-          className="flex gap-1"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {(['mute', 'lock'] as const).map((a) => (
-            <span
-              key={a}
-              role="button"
-              tabIndex={0}
-              onClick={() => setFlipAction(a)}
-              className="rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase"
-              style={{
-                background: flipAction === a ? '#a78bfa' : 'rgba(255,255,255,.07)',
-                color: flipAction === a ? '#090612' : '#7c8190',
-              }}
-            >
-              {a}
-            </span>
-          ))}
-        </div>
-      </HardwareTile>
+      {/* Bottom-Middle: Desk Scan + Flip Sensor */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleScanSelected}
+        className="hidden"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <HardwareTile
+          accent="#34d399"
+          title={'Desk\nScan'}
+          icon={
+            uploadingScan ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Camera className="h-4 w-4" />
+            )
+          }
+          active={uploadingScan}
+          onClick={() => fileInputRef.current?.click()}
+          sub={lastScanFile ? lastScanFile : '→ /scans'}
+          className="!p-2.5"
+        />
 
-      {/* Instant Lock Mac */}
+        <HardwareTile
+          accent="#a78bfa"
+          title={'Flip\nMode'}
+          icon={<Smartphone className="h-4 w-4" />}
+          active={flipEnabled}
+          onClick={() => void toggleFlip()}
+          sub={flipEnabled ? `Armed (${flipAction})` : 'Face-down'}
+          className="!p-2.5"
+        >
+          <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+            {(['mute', 'lock'] as const).map((a) => (
+              <span
+                key={a}
+                role="button"
+                tabIndex={0}
+                onClick={() => setFlipAction(a)}
+                className="rounded-full px-1.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                style={{
+                  background: flipAction === a ? '#a78bfa' : 'rgba(255,255,255,.07)',
+                  color: flipAction === a ? '#090612' : '#7c8190',
+                }}
+              >
+                {a}
+              </span>
+            ))}
+          </div>
+        </HardwareTile>
+      </div>
+
+      {/* Bottom-Right: Lock Mac -> flips to Open / Wake Mac */}
       <HardwareTile
-        accent="#ff5d6c"
-        title={'Lock\nMac'}
-        icon={<Lock className="h-5 w-5" />}
-        onClick={() =>
-          deck.sendEvent({ type: 'hardware:lock', payload: { requestId: makeRequestId() } })
-        }
-        sub="Instant display sleep"
+        accent={macLocked ? '#34d399' : '#ff5d6c'}
+        title={macLocked ? 'Open\nMac' : 'Lock\nMac'}
+        icon={macLocked ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+        active={macLocked}
+        onClick={() => {
+          if (macLocked) {
+            setMacLocked(false);
+            deck.sendEvent({ type: 'hardware:wake', payload: { requestId: makeRequestId() } });
+          } else {
+            setMacLocked(true);
+            deck.sendEvent({ type: 'hardware:lock', payload: { requestId: makeRequestId() } });
+          }
+        }}
+        sub={macLocked ? 'Tap to wake Mac display' : 'Sleep display · flips to Open Mac'}
       />
     </div>
   );

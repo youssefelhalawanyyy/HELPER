@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
+  Battery,
+  BatteryCharging,
   ClipboardList,
+  Coffee,
   Home,
   Link2,
   MonitorSmartphone,
   Rocket,
   Sliders,
-  Smartphone,
   Volume2,
   VolumeX,
   Zap,
@@ -26,7 +28,7 @@ import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
 import { useWakeLock } from '@/hooks/useWakeLock';
-import { formatTimer } from '@/lib/formatters';
+import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 export type DeckViewId = 'deck' | 'monitor' | 'launch' | 'hardware' | 'preview';
@@ -272,10 +274,48 @@ export function DeckShell() {
 
                 <div className="flex-1" />
 
-                <span className="flex items-center gap-1 text-[#fbbf24]">
-                  <Smartphone className="h-[11px] w-[11px]" />
-                  {wakeLock.active ? 'Screen wake on' : 'Wake ready'}
-                </span>
+                {isConnected && deck.stats.batteryPct !== null && (
+                  <span
+                    className="num flex h-5 items-center gap-1 rounded-full bg-white/[0.06] px-2 text-[10px]"
+                    style={{
+                      color:
+                        deck.stats.batteryCharging
+                          ? '#34d399'
+                          : deck.stats.batteryPct <= 20
+                            ? '#ff5d6c'
+                            : '#f2f3f7',
+                    }}
+                  >
+                    {deck.stats.batteryCharging ? (
+                      <BatteryCharging className="h-3 w-3" />
+                    ) : (
+                      <Battery className="h-3 w-3" />
+                    )}
+                    {deck.stats.batteryPct}%
+                  </span>
+                )}
+
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.92 }}
+                  title={wakeLock.active ? 'Keep Mac & Screen Awake' : 'Toggle Mac Caffeine'}
+                  onClick={() => {
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'hardware:caffeine',
+                      payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
+                    });
+                  }}
+                  className="flex h-5 items-center gap-1 rounded-full px-2.5 text-[9.5px] font-extrabold"
+                  style={{
+                    background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
+                    color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
+                    boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
+                  }}
+                >
+                  <Coffee className="h-[10px] w-[10px]" />
+                  CAFFEINE
+                </motion.button>
 
                 <motion.button
                   type="button"
