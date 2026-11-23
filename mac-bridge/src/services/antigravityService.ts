@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
+  AntigravityChatTurn,
   AntigravityFeedEvent,
   AntigravityLiveState,
   AntigravityStepItem,
+  AntigravityToolItem,
   GitDiffFile,
 } from '../types/protocol.js';
 
@@ -28,11 +30,12 @@ interface TranscriptEntry {
   input_tokens?: number;
   cache_read_tokens?: number;
   output_tokens?: number;
+  thinking?: string;
   content?: string;
   tool_calls?: TranscriptToolCall[];
 }
 
-function readTailLines(filePath: string, maxBytes = 180_000): string[] {
+function readTailLines(filePath: string, maxBytes = 320_000): string[] {
   const st = fs.statSync(filePath);
   const start = Math.max(0, st.size - maxBytes);
   const fd = fs.openSync(filePath, 'r');
@@ -40,26 +43,38 @@ function readTailLines(filePath: string, maxBytes = 180_000): string[] {
     const buf = Buffer.alloc(st.size - start);
     fs.readSync(fd, buf, 0, buf.length, start);
     const lines = buf.toString('utf8').split('\n');
-    if (start > 0) lines.shift(); // Drop partial first line
+    if (start > 0) lines.shift();
     return lines.filter((l) => l.trim().startsWith('{'));
   } finally {
     fs.closeSync(fd);
   }
 }
 
-function summarizeToolCall(tc: TranscriptToolCall): string {
+function summarizeToolCall(tc: TranscriptToolCall): { summary: string; detail: string } {
   const name = tc.name || 'tool';
   const args = tc.args || tc.arguments || {};
-  if (typeof args.Path === 'string') return path.basename(args.Path);
-  if (typeof args.toolSummary === 'string') return args.toolSummary;
-  if (typeof args.CommandLine === 'string') return args.CommandLine.slice(0, 60);
-  if (typeof args.focus === 'string') return args.focus;
-  if (typeof args.query === 'string') return args.query;
-  return name;
+  if (typeof args.Path === 'string') {
+    return { summary: path.basename(args.Path), detail: args.Path };
+  }
+  if (typeof args.toolSummary === 'string') {
+    const cmd = typeof args.CommandLine === 'string' ? args.CommandLine.slice(0, 120) : '';
+    return { summary: args.toolSummary, detail: cmd || args.toolSummary };
+  }
+  if (typeof args.CommandLine === 'string') {
+    return { summary: args.CommandLine.slice(0, 56), detail: args.CommandLine.slice(0, 140) };
+  }
+  if (typeof args.focus === 'string') {
+    return { summary: args.focus, detail: args.focus };
+  }
+  if (typeof args.query === 'string') {
+    return { summary: args.query, detail: args.query };
+  }
+  return { summary: name, detail: name };
 }
 
 export class AntigravityService {
   private timer: NodeJS.Timeout | null = null;
+  private lastDigest = '';
   private latest: AntigravityLiveState = {
     active: false,
     statusLabel: 'IDLE',
@@ -72,6 +87,7 @@ export class AntigravityService {
     lastUserPrompt: '',
     steps: [],
     recentEvents: [],
+    chatTurns: [],
     artifactName: '',
     artifactPreview: '',
     diffFiles: [],
@@ -101,6 +117,7 @@ export class AntigravityService {
       lastUserPrompt: '',
       steps: [] as AntigravityStepItem[],
       recentEvents: [] as AntigravityFeedEvent[],
+      chatTurns: [] as AntigravityChatTurn[],
       artifactName: '',
       artifactPreview: '',
     };
@@ -109,7 +126,6 @@ export class AntigravityService {
     try {
       if (!fs.existsSync(brainRoot)) return empty;
 
-      // Sort UUID conversation folders by actual transcript.jsonl mtime (not parent folder mtime)
       const dirs = fs
         .readdirSync(brainRoot, { withFileTypes: true })
         .filter((d) => d.isDirectory() && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(d.name))
@@ -137,7 +153,7 @@ export class AntigravityService {
           if (st.mtimeMs > latestMtime) latestMtime = st.mtimeMs;
           if (!artifactName) {
             artifactName = doc;
-            artifactPreview = fs.readFileSync(docPath, 'utf8').slice(0, 2200);
+            artifactPreview = fs.readFileSync(docPath, 'utf8').slice(0, 2600);
           }
         }
       }
@@ -149,6 +165,7 @@ export class AntigravityService {
       let lastUserPrompt = '';
       let steps: AntigravityStepItem[] = [];
       const recentEvents: AntigravityFeedEvent[] = [];
+      const chatTurns: AntigravityChatTurn[] = [];
       let lastType = '';
       let lastHadToolCalls = false;
 
@@ -158,22 +175,35 @@ export class AntigravityService {
           try {
             const entry = JSON.parse(raw) as TranscriptEntry;
             const ts = entry.created_at ? Date.parse(entry.created_at) : latestMtime;
-            if (typeof entry.step_index === 'number') stepCount = Math.max(stepCount, entry.step_index);
+            if (typeof entry.step_index === 'number') {
+              stepCount = Math.max(stepCount, entry.step_index);
+            }
             if (entry.model) model = entry.model;
-            if (typeof entry.input_tokens === 'number' || typeof entry.cache_read_tokens === 'number') {
+            if (
+              typeof entry.input_tokens === 'number' ||
+              typeof entry.cache_read_tokens === 'number'
+            ) {
               contextTokens = (entry.input_tokens || 0) + (entry.cache_read_tokens || 0);
             }
 
             if (entry.type === 'USER_INPUT' && entry.content) {
               const reqMatch = entry.content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
-              const cleanPrompt = (reqMatch ? reqMatch[1] : entry.content).trim().replace(/\s+/g, ' ');
-              if (cleanPrompt) {
-                lastUserPrompt = cleanPrompt.slice(0, 140);
+              const rawPrompt = (reqMatch ? reqMatch[1] : entry.content).trim();
+              if (rawPrompt) {
+                const oneLine = rawPrompt.replace(/\s+/g, ' ');
+                lastUserPrompt = oneLine.slice(0, 140);
                 recentEvents.push({
                   id: `u-${entry.step_index}`,
                   kind: 'user',
                   label: 'You',
-                  detail: cleanPrompt.slice(0, 90),
+                  detail: oneLine.slice(0, 95),
+                  ts,
+                });
+                chatTurns.push({
+                  id: `turn-u-${entry.step_index}`,
+                  role: 'user',
+                  text: rawPrompt.slice(0, 700),
+                  tools: [],
                   ts,
                 });
               }
@@ -183,26 +213,60 @@ export class AntigravityService {
               lastType = 'PLANNER_RESPONSE';
               const tcs = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
               lastHadToolCalls = tcs.length > 0;
+              const turnTools: AntigravityToolItem[] = [];
+
               for (const tc of tcs) {
                 const args = tc.args || tc.arguments || {};
                 if (tc.name === 'update_focus' && typeof args.focus === 'string') {
-                  currentFocus = args.focus;
+                  currentFocus = args.focus.replace(/^"|"$/g, '');
                 } else if (tc.name === 'update_steps' && Array.isArray(args.steps)) {
                   steps = (args.steps as Array<{ title?: string; status?: string }>)
                     .filter((s) => typeof s.title === 'string')
                     .map((s) => ({ title: String(s.title), status: String(s.status || 'pending') }));
                 } else if (tc.name) {
+                  const info = summarizeToolCall(tc);
+                  turnTools.push({ name: tc.name, summary: info.summary, detail: info.detail });
                   recentEvents.push({
                     id: `t-${entry.step_index}-${tc.name}-${recentEvents.length}`,
                     kind: 'tool',
                     label: tc.name,
-                    detail: summarizeToolCall(tc),
+                    detail: info.summary,
                     ts,
                   });
                 }
               }
-              if (entry.content && entry.content.trim() && tcs.length === 0) {
-                const firstLine = entry.content.trim().split('\n')[0].replace(/[#*`]/g, '').trim();
+
+              const text = (entry.content || '').trim();
+              const thinking = (entry.thinking || '').trim();
+
+              if (text || turnTools.length > 0 || thinking) {
+                const prev = chatTurns[chatTurns.length - 1];
+                // Merge consecutive agent tool-calling steps into one clean rich chat bubble
+                if (prev && prev.role === 'agent' && !prev.text && turnTools.length > 0) {
+                  prev.tools = [...prev.tools, ...turnTools].slice(-12);
+                  if (thinking) prev.thinking = thinking.slice(0, 320);
+                  if (text) prev.text = text.slice(0, 1800);
+                  prev.ts = ts;
+                } else if (prev && prev.role === 'agent' && !prev.text && text) {
+                  prev.text = text.slice(0, 1800);
+                  if (thinking && !prev.thinking) prev.thinking = thinking.slice(0, 320);
+                  prev.ts = ts;
+                } else {
+                  chatTurns.push({
+                    id: `turn-a-${entry.step_index}`,
+                    role: 'agent',
+                    text: text.slice(0, 1800),
+                    thinking: thinking ? thinking.slice(0, 320) : undefined,
+                    tools: turnTools.slice(0, 12),
+                    model: entry.model,
+                    tokens: entry.output_tokens,
+                    ts,
+                  });
+                }
+              }
+
+              if (text && tcs.length === 0) {
+                const firstLine = text.split('\n')[0].replace(/[#*`]/g, '').trim();
                 recentEvents.push({
                   id: `a-${entry.step_index}`,
                   kind: 'agent',
@@ -213,13 +277,14 @@ export class AntigravityService {
               }
             }
           } catch {
-            // Skip partial or unparseable JSONL line
+            // Skip malformed JSONL line
           }
         }
       }
 
       const ageMs = Date.now() - latestMtime;
-      const active = ageMs < 15_000 || (ageMs < 45_000 && (lastType === 'USER_INPUT' || lastHadToolCalls));
+      const active =
+        ageMs < 15_000 || (ageMs < 45_000 && (lastType === 'USER_INPUT' || lastHadToolCalls));
       const statusLabel: 'WORKING' | 'WAITING' | 'IDLE' = active
         ? 'WORKING'
         : ageMs < 5 * 60_000
@@ -237,7 +302,8 @@ export class AntigravityService {
         currentFocus,
         lastUserPrompt,
         steps,
-        recentEvents: recentEvents.slice(-12).reverse(),
+        recentEvents: recentEvents.slice(-14).reverse(),
+        chatTurns: chatTurns.slice(-16),
         artifactName,
         artifactPreview,
       };
@@ -280,25 +346,16 @@ export class AntigravityService {
     const diff = await this.readGitDiffStat();
     const next: AntigravityLiveState = { ...brain, ...diff };
 
-    const changed =
-      next.stepCount !== this.latest.stepCount ||
-      next.statusLabel !== this.latest.statusLabel ||
-      next.currentFocus !== this.latest.currentFocus ||
-      next.contextTokens !== this.latest.contextTokens ||
-      next.conversationId !== this.latest.conversationId ||
-      next.artifactName !== this.latest.artifactName ||
-      next.totalAdded !== this.latest.totalAdded ||
-      next.totalRemoved !== this.latest.totalRemoved ||
-      this.latest.lastActivityTs === 0;
-
+    const digest = `${next.conversationId}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
     this.latest = next;
-    if (changed) {
+    if (digest !== this.lastDigest) {
+      this.lastDigest = digest;
       this.onUpdate(next);
     }
     return next;
   }
 
-  start(intervalMs = 1500): void {
+  start(intervalMs = 1200): void {
     if (this.timer) return;
     void this.refresh();
     this.timer = setInterval(() => void this.refresh(), intervalMs);

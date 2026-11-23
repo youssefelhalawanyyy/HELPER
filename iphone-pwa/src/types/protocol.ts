@@ -245,6 +245,23 @@ export interface AntigravityFeedEvent {
   ts: number;
 }
 
+export interface AntigravityToolItem {
+  name: string;
+  summary: string;
+  detail: string;
+}
+
+export interface AntigravityChatTurn {
+  id: string;
+  role: 'user' | 'agent';
+  text: string;
+  thinking?: string;
+  tools: AntigravityToolItem[];
+  model?: string;
+  tokens?: number;
+  ts: number;
+}
+
 export interface AntigravityLiveState {
   active: boolean;
   statusLabel: 'WORKING' | 'WAITING' | 'IDLE';
@@ -257,6 +274,7 @@ export interface AntigravityLiveState {
   lastUserPrompt: string;
   steps: AntigravityStepItem[];
   recentEvents: AntigravityFeedEvent[];
+  chatTurns: AntigravityChatTurn[];
   artifactName: string;
   artifactPreview: string;
   diffFiles: GitDiffFile[];
@@ -342,4 +360,5 @@ export type ClientEvent =
   | { type: 'preview:set'; payload: { requestId: string; url: string } }
   | { type: 'agent:answer'; payload: { requestId: string; questionId: string; answer: string } }
   | { type: 'antigravity:slash'; payload: { requestId: string; command: string } }
+  | { type: 'antigravity:prompt'; payload: { requestId: string; text: string; submit?: boolean } }
   | { type: 'speedtest:run'; payload: { requestId: string } };

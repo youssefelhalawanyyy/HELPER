@@ -641,15 +641,40 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
         return;
       }
       try {
-        await focusMacApp('Antigravity', deepTelemetry.getLatest().runningApps);
+        await focusMacApp('Antigravity IDE', deepTelemetry.getLatest().runningApps);
         await new Promise((r) => setTimeout(r, 140));
         await runShortcut('antigravity.agentChat');
         await new Promise((r) => setTimeout(r, 100));
         await copyToMacClipboard(`${command} `);
         await triggerMacPaste();
-        reply(requestId, true, `Injected ${command} into Antigravity Chat`);
+        reply(requestId, true, `Injected ${command} into Antigravity IDE`);
       } catch (err) {
         reply(requestId, false, err instanceof Error ? err.message : 'Slash command failed');
+      }
+      return;
+    }
+
+    case 'antigravity:prompt': {
+      const { requestId, text, submit } = msg.payload;
+      const clean = text.trim();
+      if (!clean) {
+        reply(requestId, false, 'Empty prompt');
+        return;
+      }
+      try {
+        await focusMacApp('Antigravity IDE', deepTelemetry.getLatest().runningApps);
+        await new Promise((r) => setTimeout(r, 140));
+        await runShortcut('antigravity.agentChat');
+        await new Promise((r) => setTimeout(r, 100));
+        await copyToMacClipboard(clean);
+        await triggerMacPaste();
+        if (submit) {
+          await new Promise((r) => setTimeout(r, 80));
+          await runShortcut('antigravity.acceptChanges');
+        }
+        reply(requestId, true, 'Prompt sent to Antigravity IDE');
+      } catch (err) {
+        reply(requestId, false, err instanceof Error ? err.message : 'Prompt send failed');
       }
       return;
     }
