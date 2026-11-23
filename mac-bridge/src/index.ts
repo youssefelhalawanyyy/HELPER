@@ -903,36 +903,61 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(BRIDGE_PORT, '0.0.0.0', () => {
+  const isWin = process.platform === 'win32';
+  const osName = isWin ? 'WINDOWS' : process.platform === 'darwin' ? 'MAC' : 'LINUX';
   const bridgeHost = PUBLIC_BRIDGE_URL || lanIp;
   const bridgePortParam = PUBLIC_BRIDGE_URL ? 443 : BRIDGE_PORT;
   const pairUrl = `${PUBLIC_PWA_URL}/?host=${encodeURIComponent(bridgeHost)}&port=${bridgePortParam}&token=${encodeURIComponent(auth.token)}`;
   const localUrl = `http://${lanIp}:${PWA_PORT}/?host=${encodeURIComponent(lanIp)}&port=${BRIDGE_PORT}&token=${encodeURIComponent(auth.token)}`;
-  const line = (text: string) => `║  ${text.padEnd(60)}║`;
+  const line = (text: string) => `║  ${text.slice(0, 62).padEnd(62)}║`;
+  const aiReady = systemDoctorService.getLatest().aiConfigured;
 
-  console.log('\n╔══════════════════════════════════════════════════════════════╗');
-  console.log('║                    DEVDECK MAC BRIDGE v1.0                   ║');
-  console.log('╠══════════════════════════════════════════════════════════════╣');
-  console.log(line(`PWA URL   : ${PUBLIC_PWA_URL}`));
+  console.log('\n╔════════════════════════════════════════════════════════════════╗');
+  console.log(
+    `║${`DEVDECK ${osName} BRIDGE v1.0`.padStart(32 + Math.floor(`DEVDECK ${osName} BRIDGE v1.0`.length / 2)).padEnd(64)}║`,
+  );
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  console.log(line(`HOST PC    : ${os.hostname()} (${osName})`));
+  console.log(line(`PWA URL    : ${PUBLIC_PWA_URL}`));
+  console.log(line(`SETUP GUIDE: ${PUBLIC_PWA_URL}/setup#${isWin ? 'windows' : 'mac'}`));
   console.log(line(`6-DIGIT PIN: ${auth.pin}`));
-  console.log(line(`WEBHOOK   : http://${lanIp}:${BRIDGE_PORT}/hook/<path>`));
-  console.log('╠══════════════════════════════════════════════════════════════╣');
-  console.log(line('OPTION 1: HTTPS TUNNEL (Vercel / iPhone 14 Safari)'));
-  console.log(line('  1. Open Terminal 2 & run:'));
-  console.log(line('     npx -y cloudflared tunnel --url http://127.0.0.1:4747'));
-  console.log(line('  2. In DevDeck -> Tab: "HTTPS Tunnel (Vercel / iPhone)"'));
-  console.log(line(`  3. Tunnel URL : ${PUBLIC_BRIDGE_URL || 'Paste https://....trycloudflare.com'}`));
-  console.log(line(`  4. 6-Digit PIN: ${auth.pin}`));
-  console.log('╠══════════════════════════════════════════════════════════════╣');
-  console.log(line('OPTION 2: LOCAL MAC / LAN IP (Mac Chrome or Local Wi-Fi)'));
-  console.log(line('  1. In DevDeck -> Tab: "Local Mac / LAN IP"'));
-  console.log(line(`  2. Mac IP     : 127.0.0.1 (this Mac) or ${lanIp} (Wi-Fi)`));
-  console.log(line(`  3. Bridge Port: ${BRIDGE_PORT}`));
-  console.log(line(`  4. 6-Digit PIN: ${auth.pin}`));
-  console.log('╚══════════════════════════════════════════════════════════════╝\n');
-  console.log('Scan QR Code with iPhone 14 Camera:\n');
+  console.log(line(`AI RESCUE  : ${aiReady ? 'READY (Local AI Key Loaded)' : 'Tap SET KEY on iPhone'}`));
+  console.log(line(`WEBHOOK    : http://${lanIp}:${BRIDGE_PORT}/hook/<path>`));
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  console.log(line('OPTION 1: HTTPS TUNNEL (iPhone Safari / Anywhere)'));
+  if (PUBLIC_BRIDGE_URL) {
+    console.log(line('  1. Point iPhone Camera at the QR code below & tap link!'));
+    console.log(line('  2. Or open PWA -> PAIR COMPUTER -> HTTPS Tunnel tab:'));
+    console.log(line(`     Tunnel URL : ${PUBLIC_BRIDGE_URL}`));
+    console.log(line(`     6-Digit PIN: ${auth.pin}`));
+  } else {
+    console.log(line(`  1. Open a 2nd ${isWin ? 'PowerShell' : 'Terminal'} & run:`));
+    console.log(line('     npx -y cloudflared tunnel --url http://127.0.0.1:4747'));
+    console.log(line('     (Tip: Next time run "npm run live" to do this auto!)'));
+    console.log(line('  2. In DevDeck -> PAIR COMPUTER -> HTTPS Tunnel tab'));
+    console.log(line(`  3. Paste https://....trycloudflare.com + PIN: ${auth.pin}`));
+  }
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  console.log(line(`OPTION 2: LOCAL ${osName} / LAN IP (Browser or Local Wi-Fi)`));
+  console.log(line('  1. In DevDeck -> PAIR COMPUTER -> Local PC / IP tab'));
+  console.log(line(`  2. ${isWin ? 'PC IP' : 'Mac IP'}     : 127.0.0.1 (this ${isWin ? 'PC' : 'Mac'}) or ${lanIp} (Wi-Fi)`));
+  console.log(line(`  3. Port / PIN : ${BRIDGE_PORT} / ${auth.pin}`));
+  console.log('╠════════════════════════════════════════════════════════════════╣');
+  if (isWin) {
+    console.log(line('WINDOWS QUICK TIPS:'));
+    console.log(line('  • Firewall : Click "Allow access" on Private networks'));
+    console.log(line('  • PC Rescue: Right-click start-windows.bat -> Run as Admin'));
+    console.log(line('  • Keep this PowerShell / window open while using DevDeck'));
+  } else {
+    console.log(line('MAC QUICK TIPS:'));
+    console.log(line('  • Trackpad/Snap: Enable Terminal in Privacy -> Accessibility'));
+    console.log(line('  • Keep this Terminal window open while using DevDeck'));
+  }
+  console.log('╚════════════════════════════════════════════════════════════════╝\n');
+  console.log('Scan QR Code with iPhone Camera:\n');
   qrcode.generate(pairUrl, { small: true });
-  console.log(`\nVercel Pair URL:\n${pairUrl}`);
-  console.log(`\nLocal Wi-Fi Pair URL (when running npm run dev):\n${localUrl}\n`);
+  console.log(`\n1-Tap Vercel Pair URL:\n${pairUrl}`);
+  console.log(`\nLocal Wi-Fi Pair URL:\n${localUrl}\n`);
 });
 
 process.on('SIGINT', () => {
