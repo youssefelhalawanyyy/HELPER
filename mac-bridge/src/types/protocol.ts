@@ -463,5 +463,5 @@ export type ClientEvent =
   | { type: 'antigravity:diffFile'; payload: { requestId: string; file: string } }
   | { type: 'doctor:scan'; payload: { requestId: string } }
   | { type: 'doctor:repair'; payload: { requestId: string; action: DoctorRepairAction } }
-  | { type: 'doctor:setAiKey'; payload: { requestId: string; apiKey: string } }
+  | { type: 'doctor:setAiKey'; payload: { requestId: string; apiKey: string; silent?: boolean } }
   | { type: 'speedtest:run'; payload: { requestId: string } };

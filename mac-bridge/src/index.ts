@@ -722,9 +722,11 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     }
 
     case 'doctor:setAiKey': {
-      const { requestId, apiKey } = msg.payload;
+      const { requestId, apiKey, silent } = msg.payload;
       const ok = systemDoctorService.setAiKey(apiKey);
-      reply(requestId, ok, ok ? 'AI Repair Key saved locally (gitignored)' : 'Invalid API key');
+      if (!silent) {
+        reply(requestId, ok, ok ? 'AI Repair Key saved locally (gitignored)' : 'Invalid API key');
+      }
       return;
     }
 

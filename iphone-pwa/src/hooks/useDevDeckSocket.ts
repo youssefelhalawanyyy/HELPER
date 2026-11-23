@@ -84,6 +84,7 @@ export interface ToastNotice {
 }
 
 const STORAGE_KEY = 'devdeck.pairing.v1';
+const ENV_DOCTOR_AI_KEY = (process.env.NEXT_PUBLIC_DEVDECK_DOCTOR_AI_KEY || '').trim();
 
 function loadSavedPairing(): PairingConfig | null {
   if (typeof window === 'undefined') return null;
@@ -382,6 +383,18 @@ export function useDevDeckSocket() {
               break;
             case 'doctor:state':
               setDoctorReport(msg.payload);
+              if (!msg.payload.aiConfigured && ENV_DOCTOR_AI_KEY.length >= 12 && ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                  JSON.stringify({
+                    type: 'doctor:setAiKey',
+                    payload: {
+                      requestId: makeRequestId(),
+                      apiKey: ENV_DOCTOR_AI_KEY,
+                      silent: true,
+                    },
+                  }),
+                );
+              }
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
