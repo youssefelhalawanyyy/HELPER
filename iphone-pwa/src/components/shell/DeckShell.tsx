@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Battery,
@@ -18,20 +19,55 @@ import {
 } from 'lucide-react';
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
-import { PairingOverlay } from '@/components/shell/PairingOverlay';
-import { SnippetDrawer } from '@/components/shell/SnippetDrawer';
-import { AntigravityMissionView } from '@/components/views/AntigravityMissionView';
-import { HardwareToolsView } from '@/components/views/HardwareToolsView';
-import { LaunchControlView } from '@/components/views/LaunchControlView';
-import { LiveMonitorView } from '@/components/views/LiveMonitorView';
-import { MacInspectorView } from '@/components/views/MacInspectorView';
-import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
-import { SystemDoctorView } from '@/components/views/SystemDoctorView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
+
+const ViewSkeleton = () => (
+  <div className="tile grid h-full place-items-center p-4">
+    <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#22d3ee]/30 border-t-[#22d3ee]" />
+  </div>
+);
+
+// Lazy-load secondary views & modals for blazing-fast initial load on iPhone Safari
+const PairingOverlay = dynamic(
+  () => import('@/components/shell/PairingOverlay').then((m) => m.PairingOverlay),
+  { ssr: false },
+);
+const SnippetDrawer = dynamic(
+  () => import('@/components/shell/SnippetDrawer').then((m) => m.SnippetDrawer),
+  { ssr: false },
+);
+const AntigravityMissionView = dynamic(
+  () => import('@/components/views/AntigravityMissionView').then((m) => m.AntigravityMissionView),
+  { loading: ViewSkeleton },
+);
+const LiveMonitorView = dynamic(
+  () => import('@/components/views/LiveMonitorView').then((m) => m.LiveMonitorView),
+  { loading: ViewSkeleton },
+);
+const MacInspectorView = dynamic(
+  () => import('@/components/views/MacInspectorView').then((m) => m.MacInspectorView),
+  { loading: ViewSkeleton },
+);
+const HardwareToolsView = dynamic(
+  () => import('@/components/views/HardwareToolsView').then((m) => m.HardwareToolsView),
+  { loading: ViewSkeleton },
+);
+const PreviewAmbientView = dynamic(
+  () => import('@/components/views/PreviewAmbientView').then((m) => m.PreviewAmbientView),
+  { loading: ViewSkeleton },
+);
+const LaunchControlView = dynamic(
+  () => import('@/components/views/LaunchControlView').then((m) => m.LaunchControlView),
+  { loading: ViewSkeleton },
+);
+const SystemDoctorView = dynamic(
+  () => import('@/components/views/SystemDoctorView').then((m) => m.SystemDoctorView),
+  { loading: ViewSkeleton },
+);
 
 export type DeckViewId =
   | 'deck'
@@ -113,6 +149,29 @@ export function DeckShell() {
     },
     [goToIndex],
   );
+
+  // Idle-prefetch secondary view chunks after first paint so tab swipes feel instant
+  useEffect(() => {
+    const warmChunks = () => {
+      void import('@/components/views/AntigravityMissionView');
+      void import('@/components/views/HardwareToolsView');
+      void import('@/components/views/SystemDoctorView');
+      void import('@/components/views/LiveMonitorView');
+      void import('@/components/views/MacInspectorView');
+      void import('@/components/views/PreviewAmbientView');
+      void import('@/components/views/LaunchControlView');
+    };
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(warmChunks, { timeout: 1800 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(warmChunks, 900);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     try {

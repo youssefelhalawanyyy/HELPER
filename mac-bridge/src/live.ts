@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,17 +33,34 @@ function startBridge(tunnelUrl: string): void {
   console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
   console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code...\n`);
 
-  bridgeChild = spawn(NPX_CMD, ['tsx', 'src/index.ts'], {
-    cwd: BRIDGE_ROOT,
-    shell: IS_WIN,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      BRIDGE_PORT: String(BRIDGE_PORT),
-      PUBLIC_PWA_URL,
-      PUBLIC_BRIDGE_URL: tunnelUrl,
-    },
-  });
+  const distEntry = path.join(BRIDGE_ROOT, 'dist', 'index.js');
+  const srcEntry = path.join(BRIDGE_ROOT, 'src', 'index.ts');
+  const useCompiled =
+    fs.existsSync(distEntry) &&
+    (!fs.existsSync(srcEntry) || fs.statSync(distEntry).mtimeMs >= fs.statSync(srcEntry).mtimeMs);
+
+  bridgeChild = useCompiled
+    ? spawn(process.execPath, [distEntry], {
+        cwd: BRIDGE_ROOT,
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          BRIDGE_PORT: String(BRIDGE_PORT),
+          PUBLIC_PWA_URL,
+          PUBLIC_BRIDGE_URL: tunnelUrl,
+        },
+      })
+    : spawn(NPX_CMD, ['tsx', 'src/index.ts'], {
+        cwd: BRIDGE_ROOT,
+        shell: IS_WIN,
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          BRIDGE_PORT: String(BRIDGE_PORT),
+          PUBLIC_PWA_URL,
+          PUBLIC_BRIDGE_URL: tunnelUrl,
+        },
+      });
 
   bridgeChild.on('exit', (code) => {
     cleanup();

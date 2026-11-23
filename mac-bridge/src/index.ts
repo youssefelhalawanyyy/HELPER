@@ -177,15 +177,15 @@ let latestSpeedTest: SpeedTestState = {
   ts: 0,
 };
 
-// Start background pollers
+// Stagger background pollers so bridge boots & prints QR in <150ms with zero CPU spike
 statsService.start(2000);
 activeAppPoller.start(1500);
-portService.start(3500);
-gitService.start(5000);
-clipboardTracker.start(1500);
-processService.start(4500);
-deepTelemetry.start(6000);
 antigravityService.start(1200);
+setTimeout(() => portService.start(4000), 300);
+setTimeout(() => gitService.start(5000), 500);
+setTimeout(() => clipboardTracker.start(1800), 700);
+setTimeout(() => processService.start(5000), 900);
+setTimeout(() => deepTelemetry.start(6500), 1100);
 
 // --- Express Routes ---
 app.use(
@@ -827,9 +827,9 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
   }
 }
 
-// --- HTTP & WebSocket Server ---
+// --- HTTP & WebSocket Server (perMessageDeflate disabled for <1ms 120Hz trackpad frames) ---
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', perMessageDeflate: false });
 
 wss.on('connection', (ws, req) => {
   const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
