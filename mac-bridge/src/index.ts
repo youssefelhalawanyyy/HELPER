@@ -721,6 +721,13 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'doctor:setAiKey': {
+      const { requestId, apiKey } = msg.payload;
+      const ok = systemDoctorService.setAiKey(apiKey);
+      reply(requestId, ok, ok ? 'AI Repair Key saved locally (gitignored)' : 'Invalid API key');
+      return;
+    }
+
     case 'speedtest:run': {
       if (latestSpeedTest.running) {
         reply(msg.payload.requestId, false, 'Speed test already running');

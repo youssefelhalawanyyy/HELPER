@@ -11,6 +11,11 @@ import type {
   DoctorRepairAction,
   SystemDoctorReport,
 } from '../types/protocol.js';
+import {
+  loadDoctorAiKey,
+  runAutonomousAiRescue,
+  saveDoctorAiKey,
+} from './doctorAiAgent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -81,6 +86,7 @@ export class SystemDoctorService {
   private report: SystemDoctorReport = {
     scanning: false,
     repairing: false,
+    aiConfigured: Boolean(loadDoctorAiKey()),
     activeAction: '',
     score: 0,
     grade: 'GOOD',
@@ -118,6 +124,15 @@ export class SystemDoctorService {
     return this.report;
   }
 
+  setAiKey(apiKey: string): boolean {
+    const ok = saveDoctorAiKey(apiKey);
+    if (ok) {
+      this.report.aiConfigured = true;
+      this.emit();
+    }
+    return ok;
+  }
+
   private emit(): void {
     this.onUpdate({
       ...this.report,
@@ -131,6 +146,8 @@ export class SystemDoctorService {
   private term(line: string): void {
     const clean = line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g, '').trimEnd();
     if (!clean.trim()) return;
+    // Mirror live to BOTH the computer's own terminal AND the iPhone!
+    console.log(`[DevDeck Doctor] ${clean}`);
     this.report.terminalLines = [...this.report.terminalLines.slice(-160), clean.slice(0, 260)];
     this.emit();
   }
@@ -924,6 +941,42 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         summaryMsg = await doScanMalware();
       } else if (action === 'verify_system_files') {
         summaryMsg = await doVerifySystemFiles();
+      } else if (action === 'ai_rescue') {
+        this.term('==================================================');
+        this.log('LAUNCHING DEVDECK AI AUTONOMOUS COMPUTER REPAIR AGENT');
+        this.term('==================================================');
+        if (!this.report.scannedAt) {
+          this.report.repairing = false;
+          await this.runScan();
+          this.report.repairing = true;
+        }
+        const aiStartScore = this.report.score;
+        const aiSummary = await runAutonomousAiRescue(
+          this.report,
+          (line) => this.term(line),
+          (statusText) => {
+            this.report.activeAction = statusText;
+            this.emit();
+          },
+        );
+        this.log('Re-scanning computer after AI repairs…');
+        this.report.repairing = false;
+        this.report.activeAction = '';
+        await this.runScan();
+        this.report.postReport = {
+          generatedAt: Date.now(),
+          scoreBefore: aiStartScore,
+          scoreAfter: this.report.score,
+          whatWasFixed: aiSummary.whatWasFixed,
+          whatWasNotFixed: aiSummary.whatWasNotFixed,
+          whyItHappened: aiSummary.whyItHappened,
+          nextSteps: aiSummary.nextSteps,
+        };
+        summaryMsg = `AI Rescue Complete! Health ${aiStartScore} → ${this.report.score}/100`;
+        this.log(`✅ ${summaryMsg}`);
+        this.emit();
+        this.onAlert?.('success', summaryMsg);
+        return summaryMsg;
       } else if (action === 'full_tuneup' || action === 'fix_all') {
         this.term('==================================================');
         this.log('STARTING ALL-IN-ONE DEEP RESCUE & REPAIR PIPELINE');

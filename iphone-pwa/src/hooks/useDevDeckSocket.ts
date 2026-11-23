@@ -223,6 +223,7 @@ export function useDevDeckSocket() {
   const [doctorReport, setDoctorReport] = useState<SystemDoctorReport>({
     scanning: false,
     repairing: false,
+    aiConfigured: false,
     activeAction: '',
     score: 0,
     grade: 'GOOD',

@@ -332,7 +332,8 @@ export type DoctorRepairAction =
   | 'scan_malware'
   | 'verify_system_files'
   | 'full_tuneup'
-  | 'fix_all';
+  | 'fix_all'
+  | 'ai_rescue';
 
 export interface DoctorIssue {
   id: string;
@@ -358,6 +359,7 @@ export interface DoctorPostReport {
 export interface SystemDoctorReport {
   scanning: boolean;
   repairing: boolean;
+  aiConfigured: boolean;
   activeAction: string;
   score: number;
   grade: 'EXCELLENT' | 'GOOD' | 'SLOW' | 'CRITICAL';
@@ -461,4 +463,5 @@ export type ClientEvent =
   | { type: 'antigravity:diffFile'; payload: { requestId: string; file: string } }
   | { type: 'doctor:scan'; payload: { requestId: string } }
   | { type: 'doctor:repair'; payload: { requestId: string; action: DoctorRepairAction } }
+  | { type: 'doctor:setAiKey'; payload: { requestId: string; apiKey: string } }
   | { type: 'speedtest:run'; payload: { requestId: string } };

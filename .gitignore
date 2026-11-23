@@ -4,6 +4,7 @@ node_modules/
 mac-bridge/dist/
 mac-bridge/data/config.json
 mac-bridge/data/mouse_daemon
+mac-bridge/data/doctor_ai.json
 mac-bridge/scans/*
 !mac-bridge/scans/.gitkeep
 iphone-pwa/.next/

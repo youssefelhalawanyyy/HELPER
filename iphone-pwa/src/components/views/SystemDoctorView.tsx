@@ -10,6 +10,7 @@ import {
   Cpu,
   HardDrive,
   HeartPulse,
+  KeyRound,
   Loader2,
   MemoryStick,
   RefreshCw,
@@ -35,6 +36,8 @@ function gradeColor(grade: string): string {
 
 export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
   const [rightTab, setRightTab] = useState<'issues' | 'terminal' | 'report'>('issues');
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
   const termRef = useRef<HTMLDivElement | null>(null);
   const prevReportTsRef = useRef<number>(0);
 
@@ -98,13 +101,65 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             <HeartPulse className="h-4 w-4" style={{ color: accent }} />
             <span className="disp text-[19px]">{isWin ? 'PC Rescue' : 'Mac Rescue'}</span>
           </div>
-          <span
-            className="font-mono-tech rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
-            style={{ background: `${accent}20`, color: accent }}
-          >
-            {doc.scannedAt ? doc.grade : 'READY'}
-          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setKeyOpen((v) => !v);
+              }}
+              title="Configure AI Repair Key (saved locally on computer)"
+              className="flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+              style={{
+                background: doc.aiConfigured ? '#a78bfa22' : 'rgba(255,255,255,0.06)',
+                borderColor: doc.aiConfigured ? '#a78bfa66' : 'rgba(255,255,255,0.12)',
+                color: doc.aiConfigured ? '#c4b5fd' : '#9ca3af',
+              }}
+            >
+              <KeyRound className="h-2.5 w-2.5" />
+              {doc.aiConfigured ? 'AI ON' : 'SET KEY'}
+            </button>
+            <span
+              className="font-mono-tech rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
+              style={{ background: `${accent}20`, color: accent }}
+            >
+              {doc.scannedAt ? doc.grade : 'READY'}
+            </span>
+          </div>
         </div>
+
+        {/* Optional Local AI Key Input Bar */}
+        {keyOpen && (
+          <form
+            data-no-swipe="true"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (keyInput.trim().length < 12) return;
+              soundEngine.playClick();
+              deck.sendEvent({
+                type: 'doctor:setAiKey',
+                payload: { requestId: makeRequestId(), apiKey: keyInput.trim() },
+              });
+              setKeyInput('');
+              setKeyOpen(false);
+            }}
+            className="flex items-center gap-1 rounded-xl border border-[#a78bfa]/40 bg-black/85 p-1.5"
+          >
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="Paste Gemini AI Repair Key…"
+              className="h-6 min-w-0 flex-1 rounded-lg bg-white/[0.06] px-2 text-[9.5px] text-white outline-none placeholder:text-zinc-500"
+            />
+            <button
+              type="submit"
+              className="h-6 shrink-0 rounded-lg bg-[#a78bfa] px-2 text-[8.5px] font-extrabold text-[#0b0718]"
+            >
+              SAVE
+            </button>
+          </form>
+        )}
 
         {/* Health Score + 4 Key Metrics */}
         <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/70 p-2">
@@ -210,12 +265,12 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             whileTap={{ scale: 0.94 }}
             transition={DECK_SPRING}
             disabled={busy}
-            onClick={() => triggerRepair('fix_all')}
-            className="col-span-3 flex items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[#34d399] to-[#22d3ee] py-2 text-[9.5px] font-extrabold text-[#04130c] disabled:opacity-40"
+            onClick={() => triggerRepair(doc.aiConfigured ? 'ai_rescue' : 'fix_all')}
+            className="col-span-3 flex items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[#a78bfa] via-[#22d3ee] to-[#34d399] py-2 text-[9.5px] font-extrabold text-[#04130c] disabled:opacity-40"
             style={{ boxShadow: '0 2px 0 #14664a' }}
           >
-            <Wrench className="h-3.5 w-3.5" />
-            FIX ALL & RESCUE
+            {doc.aiConfigured ? <Sparkles className="h-3.5 w-3.5" /> : <Wrench className="h-3.5 w-3.5" />}
+            {doc.aiConfigured ? 'AI AUTO-FIX' : 'FIX ALL & RESCUE'}
           </motion.button>
         </div>
       </div>
@@ -354,15 +409,17 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
           >
             {doc.terminalLines.length > 0 ? (
               doc.terminalLines.map((line, idx) => {
-                const color = line.startsWith('$ ')
-                  ? 'text-[#fbbf24] font-bold'
-                  : line.includes('❌') || /error|corrupt|threat|fail/i.test(line)
-                    ? 'text-[#ff5d6c]'
-                    : line.includes('✅') || /clean|verified|ok|finished|freed/i.test(line)
-                      ? 'text-[#34d399]'
-                      : line.startsWith('===')
-                        ? 'text-[#22d3ee] font-bold'
-                        : 'text-[#d4f5e9]';
+                const color = line.startsWith('[AI THOUGHT')
+                  ? 'text-[#c4b5fd] font-bold'
+                  : line.startsWith('$ ')
+                    ? 'text-[#fbbf24] font-bold'
+                    : line.includes('❌') || line.includes('🛑') || /error|corrupt|threat|fail/i.test(line)
+                      ? 'text-[#ff5d6c]'
+                      : line.includes('✅') || /clean|verified|ok|finished|freed/i.test(line)
+                        ? 'text-[#34d399]'
+                        : line.startsWith('===')
+                          ? 'text-[#22d3ee] font-bold'
+                          : 'text-[#d4f5e9]';
                 return (
                   <div key={idx} className={`break-words whitespace-pre-wrap ${color}`}>
                     {line}
