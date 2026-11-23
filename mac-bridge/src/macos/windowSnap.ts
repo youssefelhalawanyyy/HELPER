@@ -6,64 +6,65 @@ const execFileAsync = promisify(execFile);
 export type WindowSnapPosition = 'left' | 'right' | 'maximize' | 'center' | 'top' | 'bottom';
 
 export async function snapFrontmostWindow(position: WindowSnapPosition): Promise<string> {
-  // Get primary display desktop bounds via Finder, then resize/position frontmost window via System Events
-  const script = `
-    tell application "Finder"
-      set screenBounds to bounds of window of desktop
-    end tell
-    set sx to item 1 of screenBounds
-    set sy to item 2 of screenBounds
-    set sw to item 3 of screenBounds
-    set sh to item 4 of screenBounds
-    set menuBar to 28
-    set usableH to sh - menuBar
+  // Uses AppKit NSScreen.visibleFrame (instant, zero Finder dependency, respects Menu Bar + Dock)
+  const jxa = `
+    ObjC.import('AppKit');
+    const screen = $.NSScreen.mainScreen;
+    const frame = screen.frame;
+    const vis = screen.visibleFrame;
+    const sx = Math.round(vis.origin.x);
+    const sy = Math.round(frame.size.height - (vis.origin.y + vis.size.height));
+    const sw = Math.round(vis.size.width);
+    const sh = Math.round(vis.size.height);
 
-    if "${position}" is "left" then
-      set tx to sx
-      set ty to menuBar
-      set tw to round (sw / 2)
-      set th to usableH
-    else if "${position}" is "right" then
-      set tx to sx + (round (sw / 2))
-      set ty to menuBar
-      set tw to round (sw / 2)
-      set th to usableH
-    else if "${position}" is "maximize" then
-      set tx to sx
-      set ty to menuBar
-      set tw to sw
-      set th to usableH
-    else if "${position}" is "center" then
-      set tw to round (sw * 0.8)
-      set th to round (usableH * 0.84)
-      set tx to sx + (round ((sw - tw) / 2))
-      set ty to menuBar + (round ((usableH - th) / 2))
-    else if "${position}" is "top" then
-      set tx to sx
-      set ty to menuBar
-      set tw to sw
-      set th to round (usableH / 2)
-    else
-      set tx to sx
-      set ty to menuBar + (round (usableH / 2))
-      set tw to sw
-      set th to round (usableH / 2)
-    end if
+    let tx = sx, ty = sy, tw = sw, th = sh;
+    const pos = "${position}";
+    if (pos === "left") {
+      tw = Math.round(sw / 2);
+    } else if (pos === "right") {
+      tw = Math.round(sw / 2);
+      tx = sx + tw;
+    } else if (pos === "center") {
+      tw = Math.round(sw * 0.8);
+      th = Math.round(sh * 0.86);
+      tx = sx + Math.round((sw - tw) / 2);
+      ty = sy + Math.round((sh - th) / 2);
+    } else if (pos === "top") {
+      th = Math.round(sh / 2);
+    } else if (pos === "bottom") {
+      th = Math.round(sh / 2);
+      ty = sy + th;
+    }
 
-    tell application "System Events"
-      set frontApp to first application process whose frontmost is true
-      tell frontApp
-        if (count of windows) > 0 then
-          set position of window 1 to {tx, ty}
-          set size of window 1 to {tw, th}
-          return (name of frontApp) & " snapped to ${position}"
-        else
-          return "No active window to snap"
-        end if
-      end tell
-    end tell
+    const se = Application('System Events');
+    const procs = se.applicationProcesses.whose({ frontmost: true });
+    if (procs.length === 0) {
+      "No active app";
+    } else {
+      const frontApp = procs[0];
+      const appName = frontApp.name();
+      const wins = frontApp.windows();
+      if (wins.length === 0) {
+        appName + " has no resizable window";
+      } else {
+        const w = wins[0];
+        w.position = [tx, ty];
+        w.size = [tw, th];
+        appName + " snapped to " + pos;
+      }
+    }
   `;
 
-  const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 2500 });
-  return stdout.trim() || `Snapped window to ${position}`;
+  try {
+    const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', '-e', jxa], {
+      timeout: 6000,
+    });
+    return stdout.trim() || `Snapped window to ${position}`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/not allowed assistive access|1002|accessibility/i.test(msg)) {
+      throw new Error('Enable Accessibility for Terminal in System Settings → Privacy & Security');
+    }
+    throw new Error(`Window snap failed: ${msg.slice(0, 100)}`);
+  }
 }
