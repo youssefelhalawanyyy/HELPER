@@ -382,6 +382,50 @@ export interface SystemDoctorReport {
   postReport: DoctorPostReport | null;
 }
 
+export type NetworkFixAction =
+  | 'flush_dns'
+  | 'boost_dns'
+  | 'renew_dhcp'
+  | 'full_net_fix'
+  | 'ai_analyze';
+
+export interface NetworkDevice {
+  ip: string;
+  mac: string;
+  hostname: string;
+  vendor: string;
+  isGateway?: boolean;
+  isSelf?: boolean;
+}
+
+export interface NetworkCommandState {
+  scanning: boolean;
+  testingSpeed: boolean;
+  fixing: boolean;
+  activeAction: string;
+  ssid: string;
+  signalDbm: number | null;
+  localIp: string;
+  gatewayIp: string;
+  publicIp: string;
+  isp: string;
+  dnsServers: string[];
+  vpnActive: boolean;
+  downMbps: number | null;
+  upMbps: number | null;
+  pingMs: number | null;
+  jitterMs: number | null;
+  packetLossPct: number | null;
+  grade: 'ULTRA' | 'FAST' | 'FAIR' | 'SLOW' | 'IDLE';
+  devices: NetworkDevice[];
+  wifiPassword: string | null;
+  wifiPasswordNote: string;
+  aiSummary: string;
+  aiTips: string[];
+  fixLog: string[];
+  updatedAt: number;
+}
+
 export type ServerEvent =
   | { type: 'hello'; payload: BridgeHello }
   | { type: 'config:sync'; payload: DevDeckPublicConfig }
@@ -403,6 +447,7 @@ export type ServerEvent =
   | { type: 'antigravity:state'; payload: AntigravityLiveState }
   | { type: 'antigravity:diff'; payload: AntigravityFileDiff }
   | { type: 'doctor:state'; payload: SystemDoctorReport }
+  | { type: 'network:state'; payload: NetworkCommandState }
   | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
@@ -459,4 +504,8 @@ export type ClientEvent =
   | { type: 'doctor:scan'; payload: { requestId: string } }
   | { type: 'doctor:repair'; payload: { requestId: string; action: DoctorRepairAction } }
   | { type: 'doctor:setAiKey'; payload: { requestId: string; apiKey: string; silent?: boolean } }
+  | { type: 'network:scan'; payload: { requestId: string } }
+  | { type: 'network:speedtest'; payload: { requestId: string } }
+  | { type: 'network:fix'; payload: { requestId: string; action: NetworkFixAction } }
+  | { type: 'network:wifiPassword'; payload: { requestId: string } }
   | { type: 'speedtest:run'; payload: { requestId: string } };

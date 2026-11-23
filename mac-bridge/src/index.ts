@@ -42,6 +42,7 @@ import { snapFrontmostWindow } from './macos/windowSnap.js';
 import { createApiRouter } from './routes/api.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
+import { NetworkCommandService } from './services/networkCommandService.js';
 import { SystemDoctorService } from './services/systemDoctorService.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
@@ -157,6 +158,11 @@ const antigravityService = new AntigravityService(
 );
 const systemDoctorService = new SystemDoctorService(
   (report) => broadcast({ type: 'doctor:state', payload: report }),
+  (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
+);
+const networkCommandService = new NetworkCommandService(
+  lanIp,
+  (state) => broadcast({ type: 'network:state', payload: state }),
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
 
@@ -730,6 +736,34 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'network:scan': {
+      const { requestId } = msg.payload;
+      reply(requestId, true, 'Scanning Wi-Fi, Gateway & LAN devices…');
+      void networkCommandService.scanNetwork();
+      return;
+    }
+
+    case 'network:speedtest': {
+      const { requestId } = msg.payload;
+      reply(requestId, true, 'Running speed & latency benchmark…');
+      void networkCommandService.runSpeedTest();
+      return;
+    }
+
+    case 'network:fix': {
+      const { requestId, action } = msg.payload;
+      reply(requestId, true, `Running ${action.replace(/_/g, ' ')}…`);
+      void networkCommandService.runNetworkFix(action);
+      return;
+    }
+
+    case 'network:wifiPassword': {
+      const { requestId } = msg.payload;
+      const note = await networkCommandService.revealWifiPassword();
+      reply(requestId, true, note);
+      return;
+    }
+
     case 'speedtest:run': {
       if (latestSpeedTest.running) {
         reply(msg.payload.requestId, false, 'Speed test already running');
@@ -875,6 +909,7 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'mac:telemetry', payload: deepTelemetry.getLatest() });
   sendTo(ws, { type: 'antigravity:state', payload: antigravityService.getLatest() });
   sendTo(ws, { type: 'doctor:state', payload: systemDoctorService.getLatest() });
+  sendTo(ws, { type: 'network:state', payload: networkCommandService.getLatest() });
   sendTo(ws, { type: 'agent:progress', payload: latestProgress });
   sendTo(ws, { type: 'speedtest:state', payload: latestSpeedTest });
   if (activeQuestion) {

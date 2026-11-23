@@ -68,6 +68,10 @@ const SystemDoctorView = dynamic(
   () => import('@/components/views/SystemDoctorView').then((m) => m.SystemDoctorView),
   { loading: ViewSkeleton },
 );
+const NetworkCommandView = dynamic(
+  () => import('@/components/views/NetworkCommandView').then((m) => m.NetworkCommandView),
+  { loading: ViewSkeleton },
+);
 
 export type DeckViewId =
   | 'deck'
@@ -77,7 +81,8 @@ export type DeckViewId =
   | 'hardware'
   | 'preview'
   | 'launch'
-  | 'doctor';
+  | 'doctor'
+  | 'network';
 
 const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
   { id: 'deck', label: 'Deck', accent: '#34d399' },
@@ -88,6 +93,7 @@ const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
   { id: 'preview', label: 'Desk Clock', accent: '#60a5fa' },
   { id: 'launch', label: 'Launch', accent: '#fbbf24' },
   { id: 'doctor', label: 'PC Doctor', accent: '#ff5d6c' },
+  { id: 'network', label: 'NetOps Pro', accent: '#22d3ee' },
 ];
 
 const PAGE_VARIANTS = {
@@ -156,6 +162,7 @@ export function DeckShell() {
       void import('@/components/views/AntigravityMissionView');
       void import('@/components/views/HardwareToolsView');
       void import('@/components/views/SystemDoctorView');
+      void import('@/components/views/NetworkCommandView');
       void import('@/components/views/LiveMonitorView');
       void import('@/components/views/MacInspectorView');
       void import('@/components/views/PreviewAmbientView');
@@ -581,6 +588,7 @@ export function DeckShell() {
                 {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
                 {activeView === 'launch' && <LaunchControlView deck={deck} />}
                 {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
+                {activeView === 'network' && <NetworkCommandView deck={deck} />}
               </motion.div>
             </AnimatePresence>
           </main>

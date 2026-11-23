@@ -22,6 +22,7 @@ import type {
   LogStatus,
   MacDeepTelemetry,
   MediaState,
+  NetworkCommandState,
   ProfileId,
   ServerEvent,
   SpeedTestState,
@@ -251,6 +252,33 @@ export function useDevDeckSocket() {
     terminalLines: [],
     postReport: null,
   });
+  const [networkState, setNetworkState] = useState<NetworkCommandState>({
+    scanning: false,
+    testingSpeed: false,
+    fixing: false,
+    activeAction: '',
+    ssid: 'Wi-Fi',
+    signalDbm: null,
+    localIp: '',
+    gatewayIp: '',
+    publicIp: '',
+    isp: '',
+    dnsServers: [],
+    vpnActive: false,
+    downMbps: null,
+    upMbps: null,
+    pingMs: null,
+    jitterMs: null,
+    packetLossPct: null,
+    grade: 'IDLE',
+    devices: [],
+    wifiPassword: null,
+    wifiPasswordNote: '',
+    aiSummary: 'Tap "SCAN NET" or "SPEED TEST" to inspect Wi-Fi speed, devices on your network, and boost DNS.',
+    aiTips: [],
+    fixLog: [],
+    updatedAt: 0,
+  });
   const [speedTest, setSpeedTest] = useState<SpeedTestState>({
     running: false,
     downMbps: null,
@@ -395,6 +423,9 @@ export function useDevDeckSocket() {
                   }),
                 );
               }
+              break;
+            case 'network:state':
+              setNetworkState(msg.payload);
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
@@ -555,6 +586,7 @@ export function useDevDeckSocket() {
     antigravityState,
     antigravityDiff,
     doctorReport,
+    networkState,
     speedTest,
     caffeineActive,
     processes,
