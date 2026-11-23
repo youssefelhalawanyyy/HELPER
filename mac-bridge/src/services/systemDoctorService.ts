@@ -16,6 +16,7 @@ import {
   runAutonomousAiRescue,
   saveDoctorAiKey,
 } from './doctorAiAgent.js';
+import { runDeepHardwareAndSoftwareAudit } from './deepHardwareAudit.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -683,6 +684,12 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           fixLabel: 'Flush DNS',
         });
       }
+
+      // 9. Deep Hardware & Software Audit (Thermal, SMART, Battery, Power Plan, Drivers, AV Conflict, Indexer, Browser Bloat, BSOD/Panics, Heavy Folders)
+      const deepAudit = await runDeepHardwareAndSoftwareAudit(procs.list);
+      for (const note of deepAudit.terminalNotes) this.term(note);
+      issues.push(...deepAudit.issues);
+      score -= deepAudit.scorePenalty;
 
       score = Math.max(5, Math.min(100, score));
       const grade: SystemDoctorReport['grade'] =
