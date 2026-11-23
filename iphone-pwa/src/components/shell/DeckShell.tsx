@@ -63,15 +63,33 @@ export function DeckShell() {
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
-  const [scale, setScale] = useState(1);
+  const [viewport, setViewport] = useState({ scale: 1, portrait: false });
 
   useEffect(() => {
-    const updateScale = () => {
-      setScale(Math.min(window.innerWidth / 844, window.innerHeight / 390));
+    // Progressive enhancement where Screen Orientation Lock API is supported
+    try {
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      void orient?.lock?.('landscape')?.catch(() => {});
+    } catch {
+      // iOS Safari falls back to CSS 90deg landscape lock below
+    }
+
+    const updateViewport = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const portrait = h > w;
+      const scale = portrait ? Math.min(h / 844, w / 390) : Math.min(w / 844, h / 390);
+      setViewport({ scale, portrait });
     };
-    updateScale();
-    window.addEventListener('resize', updateScale);
-    return () => window.removeEventListener('resize', updateScale);
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    window.addEventListener('orientationchange', updateViewport);
+    return () => {
+      window.removeEventListener('resize', updateViewport);
+      window.removeEventListener('orientationchange', updateViewport);
+    };
   }, []);
 
   const toggleSound = () => {
@@ -130,17 +148,18 @@ export function DeckShell() {
         : '#34d399';
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black">
-      <div style={{ width: 844 * scale, height: 390 * scale }}>
-        <div
-          className="relative overflow-hidden bg-black"
-          style={{
-            width: 844,
-            height: 390,
-            transform: `scale(${scale})`,
-            transformOrigin: '0 0',
-          }}
-        >
+    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-black">
+      <div
+        className="relative shrink-0 overflow-hidden bg-black"
+        style={{
+          width: 844,
+          height: 390,
+          transform: viewport.portrait
+            ? `rotate(90deg) scale(${viewport.scale})`
+            : `scale(${viewport.scale})`,
+          transformOrigin: 'center center',
+        }}
+      >
           <div className="flex h-full">
             {/* Slim 50px Left Navigation Rail */}
             <nav
@@ -480,39 +499,38 @@ export function DeckShell() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+
+          {/* Quick Snippet Injector Slide-Over Drawer (locked inside landscape stage) */}
+          <SnippetDrawer
+            open={snippetsOpen}
+            snippets={deck.config?.snippets ?? []}
+            onClose={() => setSnippetsOpen(false)}
+            onSend={deck.sendEvent}
+          />
+
+          {/* Live MCP Agent Notification Card */}
+          <AgentNotificationBanner
+            notification={deck.agentNotification}
+            onDismiss={deck.dismissAgentNotification}
+            onSend={deck.sendEvent}
+          />
+
+          {/* Global Instant Two-Way ask_iphone Overlay */}
+          <AgentQuestionOverlay question={deck.agentQuestion} onSend={deck.sendEvent} />
+
+          {/* On-Demand Pairing Overlay */}
+          <PairingOverlay
+            open={pairingModalOpen}
+            status={deck.status}
+            currentPairing={deck.pairing}
+            onClose={() => setPairingModalOpen(false)}
+            onPairWithPin={deck.pairWithPin}
+            onDisconnect={() => {
+              deck.clearPairing();
+              setPairingModalOpen(false);
+            }}
+          />
       </div>
-
-      {/* Quick Snippet Injector Slide-Over Drawer */}
-      <SnippetDrawer
-        open={snippetsOpen}
-        snippets={deck.config?.snippets ?? []}
-        onClose={() => setSnippetsOpen(false)}
-        onSend={deck.sendEvent}
-      />
-
-      {/* Live MCP Agent Notification Card */}
-      <AgentNotificationBanner
-        notification={deck.agentNotification}
-        onDismiss={deck.dismissAgentNotification}
-        onSend={deck.sendEvent}
-      />
-
-      {/* Global Instant Two-Way ask_iphone Overlay (shows over ANY screen) */}
-      <AgentQuestionOverlay question={deck.agentQuestion} onSend={deck.sendEvent} />
-
-      {/* On-Demand Pairing Overlay */}
-      <PairingOverlay
-        open={pairingModalOpen}
-        status={deck.status}
-        currentPairing={deck.pairing}
-        onClose={() => setPairingModalOpen(false)}
-        onPairWithPin={deck.pairWithPin}
-        onDisconnect={() => {
-          deck.clearPairing();
-          setPairingModalOpen(false);
-        }}
-      />
     </div>
   );
 }

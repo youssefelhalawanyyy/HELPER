@@ -157,7 +157,7 @@ export function PairingOverlay({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2.5 backdrop-blur-xl sm:p-4"
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/85 p-2.5 backdrop-blur-xl sm:p-4"
         >
           {/* Ambient glow */}
           <div
@@ -176,7 +176,7 @@ export function PairingOverlay({
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={DECK_SPRING}
             onClick={(e) => e.stopPropagation()}
-            className="tile deck-scroll relative max-h-[94dvh] w-full max-w-[740px] overflow-y-auto p-3.5 sm:p-4"
+            className="tile deck-scroll relative max-h-[372px] w-full max-w-[740px] overflow-y-auto p-3.5"
             style={{
               borderRadius: 24,
               borderColor: 'rgba(255,255,255,0.12)',
@@ -249,10 +249,10 @@ export function PairingOverlay({
               )}
             </div>
 
-            {/* Responsive 2-Column Layout: fits 844x390 landscape with zero vertical clipping */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+            {/* Always 2-Column Landscape Layout inside 844x390 locked stage */}
+            <div className="grid grid-cols-12 gap-3">
               {/* Left Column: Mode Tabs + Inputs + OTP PIN + Submit */}
-              <form onSubmit={handleSubmit} className="flex flex-col gap-2.5 sm:col-span-7">
+              <form onSubmit={handleSubmit} className="col-span-7 flex flex-col gap-2.5">
                 {/* Mode Tabs */}
                 <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.07] bg-black/70 p-1">
                   <button
@@ -409,7 +409,7 @@ export function PairingOverlay({
               </form>
 
               {/* Right Column: Live Mac Terminal Setup Guide */}
-              <div className="flex flex-col justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-3 sm:col-span-5">
+              <div className="col-span-5 flex flex-col justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-3">
                 <div>
                   <div className="mb-2 flex items-center gap-1.5">
                     <Terminal className="h-3.5 w-3.5 text-[#34d399]" />

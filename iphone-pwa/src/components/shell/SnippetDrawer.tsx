@@ -59,14 +59,14 @@ export function SnippetDrawer({ open, snippets, onClose, onSend }: SnippetDrawer
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-30 bg-black/65 backdrop-blur-xs"
+            className="absolute inset-0 z-30 bg-black/65 backdrop-blur-xs"
           />
           <motion.aside
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
-            className="fixed top-0 right-0 bottom-0 z-40 flex w-[340px] max-w-[85vw] flex-col border-l border-white/10 bg-[#0B0B0E] shadow-2xl"
+            className="absolute top-0 right-0 bottom-0 z-40 flex w-[340px] max-w-[85%] flex-col border-l border-white/10 bg-[#0B0B0E] shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-white/[0.08] px-3.5 py-2.5">
               <div className="flex items-center gap-2">
