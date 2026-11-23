@@ -10,6 +10,8 @@ import {
   ChevronRight,
   ClipboardList,
   Coffee,
+  Maximize2,
+  Minimize2,
   Volume2,
   VolumeX,
   Zap,
@@ -76,6 +78,7 @@ export function DeckShell() {
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [viewport, setViewport] = useState({
     stageW: 844,
     stageH: 390,
@@ -120,33 +123,34 @@ export function DeckShell() {
 
     const updateViewport = () => {
       const vv = window.visualViewport;
-      const w = Math.round(vv?.width ?? window.innerWidth);
-      const h = Math.round(vv?.height ?? window.innerHeight);
+      const w = vv?.width ?? window.innerWidth;
+      const h = vv?.height ?? window.innerHeight;
       const portrait = h > w;
 
-      // Target landscape dimensions after optional 90deg rotation
+      // Exact landscape dimensions after 90deg rotation when phone is held upright
       const landW = portrait ? h : w;
       const landH = portrait ? w : h;
 
-      // Dynamically match mobile phone aspect ratio so there are zero black bars & zero clipping
-      const isMobile = Math.min(w, h) <= 520;
+      // Always fill 100% of the screen edge-to-edge in BOTH orientations (zero black bars)
       const stageH = 390;
-      const stageW = isMobile
-        ? Math.max(720, Math.min(932, Math.round(stageH * (landW / Math.max(1, landH)))))
-        : 844;
-      const scale = Math.min(landW / stageW, landH / stageH);
+      const stageW = Math.max(660, Math.round(stageH * (landW / Math.max(1, landH))));
+      const scale = landH / stageH;
 
       setViewport({ stageW, stageH, scale, portrait });
     };
+
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
 
     updateViewport();
     window.addEventListener('resize', updateViewport);
     window.addEventListener('orientationchange', updateViewport);
     window.visualViewport?.addEventListener('resize', updateViewport);
+    document.addEventListener('fullscreenchange', onFsChange);
     return () => {
       window.removeEventListener('resize', updateViewport);
       window.removeEventListener('orientationchange', updateViewport);
       window.visualViewport?.removeEventListener('resize', updateViewport);
+      document.removeEventListener('fullscreenchange', onFsChange);
     };
   }, []);
 
@@ -359,6 +363,25 @@ export function DeckShell() {
               className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#22d3ee]"
             >
               <ClipboardList className="h-3 w-3" />
+            </motion.button>
+
+            <motion.button
+              type="button"
+              aria-label="Toggle fullscreen"
+              whileTap={{ scale: 0.9 }}
+              onClick={() => {
+                soundEngine.playClick();
+                if (document.fullscreenElement) {
+                  void document.exitFullscreen?.().catch(() => {});
+                } else {
+                  void document.documentElement.requestFullscreen?.().catch(() => {
+                    deck.showToast(true, 'On iPhone: tap Share → Add to Home Screen for full screen');
+                  });
+                }
+              }}
+              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0] hover:text-white"
+            >
+              {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
             </motion.button>
 
             <motion.button
