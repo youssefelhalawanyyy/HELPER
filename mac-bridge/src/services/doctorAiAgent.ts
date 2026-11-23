@@ -173,6 +173,8 @@ export async function runAutonomousAiRescue(
   initialReport: SystemDoctorReport,
   onLine: (line: string) => void,
   onStatus: (status: string) => void,
+  priorFixes: string[] = [],
+  priorNotFixed: string[] = [],
 ): Promise<{
   whatWasFixed: string[];
   whatWasNotFixed: string[];
@@ -181,20 +183,22 @@ export async function runAutonomousAiRescue(
 }> {
   const apiKey = loadDoctorAiKey();
   if (!apiKey) {
-    throw new Error('No AI Repair Key configured. Tap the Key icon to add your Gemini API key.');
+    throw new Error('No AI Repair Key configured. Tap SET KEY to add your Gemini API key.');
   }
 
   const osName = IS_WIN ? 'Windows 10/11 (PowerShell)' : 'macOS (zsh)';
   const systemInstruction = `You are DevDeck AI Systems Engineer — a senior ${osName} diagnostics and repair specialist.
-Your ONLY purpose is to diagnose why this computer is slow, crashing, or has corrupted/junk/security issues, run safe non-destructive terminal commands to investigate and fix what can be safely fixed, and then write a clear plain-English final report.
+Your ONLY purpose is to investigate every remaining problem on this computer, safely fix everything possible (corrupted caches, npm/pip/brew/browser caches, bloated temp/log folders, broken configs, heavy idle services, stuck indexers), and write a comprehensive, professional plain-English report.
 
 STRICT SAFETY RULES:
-- NEVER delete personal documents, photos, Desktop, Downloads, or project code.
+- NEVER delete personal documents, photos, Desktop, Downloads, or user source code.
 - NEVER use sudo, format, diskpart, mkfs, dd, shutdown, reboot, or curl|sh.
-- Only run fast, non-interactive commands (<= 25 seconds each):
-  - Safe diagnostics: find largest cache folders, check top CPU/RAM processes, inspect recent crash logs, check corrupted .plist files (plutil -lint) or Windows Defender/DISM/Event Logs, check startup items.
-  - Safe repairs: flush DNS (dscacheutil -flushcache / ipconfig /flushdns), remove safe temp/cache files in system tmpdir, move corrupted .plist to .plist.bak (only if proven corrupt by plutil), trim Windows working sets, run Defender QuickScan on Windows.
-- You have at most 5 command steps. Aim for 3-5 high-value commands, then return done: true with a thorough plain-English report.
+- Safe repairs you CAN and SHOULD execute when relevant:
+  - Inspect largest folders in ~/Library/Caches, ~/Library/Developer, ~/.npm, ~/.cache, %TEMP%, etc.
+  - Safely clear package/build caches (e.g. npm cache clean --force, pip cache purge, brew cleanup, old log files).
+  - Identify the exact app causing repeated crashes from DiagnosticReports or Event Logs.
+  - Identify exact processes eating CPU/RAM and explain why.
+- You have up to 8 command steps. Do not repeat repairs listed in priorFixes — focus on deeper root causes and reclaiming real speed/space, then return done: true with a complete, unified plain-English report merging your work with priorFixes.
 
 ALWAYS respond with ONLY valid JSON matching this exact schema:
 When running a command:
@@ -208,10 +212,10 @@ When finished:
 {
   "done": true,
   "reasoning": "Short wrap-up sentence",
-  "whatWasFixed": ["Clear plain-English bullet of each thing actually fixed or verified"],
-  "whatWasNotFixed": ["Clear plain-English bullet of anything that could NOT be auto-fixed and needs the user"],
-  "whyItHappened": ["Clear plain-English root cause explanation of why this computer was slow/unstable"],
-  "nextSteps": ["Actionable numbered step for the user"]
+  "whatWasFixed": ["Complete plain-English bullet list of EVERY fix completed (include priorFixes + your new fixes with exact numbers)"],
+  "whatWasNotFixed": ["Clear plain-English bullet of anything that could NOT be auto-fixed and needs user action"],
+  "whyItHappened": ["Clear plain-English root cause explanation of why this computer was slow, crashing, or unstable"],
+  "nextSteps": ["Specific numbered step for the user (with exact folder names/app names you discovered)"]
 }`;
 
   const snapshot = {
@@ -219,6 +223,8 @@ When finished:
     healthScore: initialReport.score,
     grade: initialReport.grade,
     metrics: initialReport.metrics,
+    priorFixesAlreadyCompleted: priorFixes,
+    priorItemsNeedingAttention: priorNotFixed,
     issues: initialReport.issues.map((i) => ({
       severity: i.severity,
       title: i.title,
@@ -231,17 +237,17 @@ When finished:
       role: 'user',
       parts: [
         {
-          text: `Here is the live diagnostic snapshot of this computer. Begin your autonomous investigation and safe repair now:\n${JSON.stringify(snapshot, null, 2)}`,
+          text: `Automated Stage 1 repairs have already completed. Here is the live snapshot of this computer. Now perform Stage 2 deep investigation & safe repairs for all remaining issues:\n${JSON.stringify(snapshot, null, 2)}`,
         },
       ],
     },
   ];
 
-  const collectedFixes: string[] = [];
-  const collectedNotFixed: string[] = [];
+  const collectedFixes: string[] = [...priorFixes];
+  const collectedNotFixed: string[] = [...priorNotFixed];
   let finalResult: AiStepResponse | null = null;
 
-  const MAX_STEPS = 5;
+  const MAX_STEPS = 8;
   for (let step = 1; step <= MAX_STEPS; step += 1) {
     onStatus(`AI Step ${step}/${MAX_STEPS}: Analyzing system…`);
     const decision = await callGeminiJson(apiKey, systemInstruction, history);

@@ -439,13 +439,33 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
           <div className="deck-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
             {report ? (
               <>
-                <div className="flex items-center justify-between rounded-xl border border-[#34d399]/30 bg-[#34d399]/[0.08] px-2.5 py-1.5">
-                  <span className="text-[10px] font-extrabold text-white">
-                    Rescue Report Complete
-                  </span>
-                  <span className="num font-mono-tech text-[10px] font-extrabold text-[#34d399]">
-                    Health Score: {report.scoreBefore} → {report.scoreAfter}/100
-                  </span>
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-[#34d399]/30 bg-[#34d399]/[0.08] px-2.5 py-1.5">
+                  <div>
+                    <div className="text-[10px] font-extrabold text-white">
+                      Full Rescue Report
+                    </div>
+                    <div className="num font-mono-tech text-[9px] font-extrabold text-[#34d399]">
+                      Health Score: {report.scoreBefore} → {report.scoreAfter}/100
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={triggerScan}
+                      className="rounded-lg border border-white/15 bg-white/[0.06] px-2 py-1 text-[8px] font-extrabold text-zinc-200 uppercase disabled:opacity-40"
+                    >
+                      Re-Scan
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => triggerRepair(doc.aiConfigured ? 'ai_rescue' : 'fix_all')}
+                      className="rounded-lg bg-[#34d399] px-2 py-1 text-[8px] font-extrabold text-[#04130c] uppercase disabled:opacity-40"
+                    >
+                      Redo All
+                    </button>
+                  </div>
                 </div>
 
                 {/* What Was Fixed */}
@@ -505,6 +525,39 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
                         </span>
                         <span>{step}</span>
                       </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Redo Any Specific Repair Step */}
+                <div className="rounded-xl border border-white/[0.07] bg-black/60 p-2">
+                  <div className="mb-1.5 text-[8.5px] font-extrabold tracking-wider text-zinc-400 uppercase">
+                    Re-Run Any Specific Repair
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        { action: 'scan_malware', label: 'Redo Virus Scan', color: '#f472b6' },
+                        { action: 'verify_system_files', label: 'Redo Corrupt Fix', color: '#ff5d6c' },
+                        { action: 'clean_junk', label: 'Redo Clean Junk', color: '#fbbf24' },
+                        { action: 'free_ram', label: 'Redo Trim RAM', color: '#a78bfa' },
+                        { action: 'flush_dns', label: 'Redo Flush DNS', color: '#22d3ee' },
+                      ] as const
+                    ).map((btn) => (
+                      <button
+                        key={btn.action}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => triggerRepair(btn.action)}
+                        className="rounded-lg border px-2 py-1 text-[8px] font-extrabold uppercase disabled:opacity-40"
+                        style={{
+                          background: `${btn.color}18`,
+                          borderColor: `${btn.color}44`,
+                          color: btn.color,
+                        }}
+                      >
+                        {btn.label}
+                      </button>
                     ))}
                   </div>
                 </div>

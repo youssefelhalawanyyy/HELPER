@@ -938,6 +938,57 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         return 'macOS disk volume verification completed';
       };
 
+      const doAutoFixConfigsAndPower = async () => {
+        if (IS_WIN) {
+          // Switch Power Saver -> Balanced automatically if Power Saver is throttling the PC
+          try {
+            const scheme = await runPowerShell('powercfg /getactivescheme 2>$null | Out-String', 3000);
+            if (/Power saver|a1841308-3541-4fab-bc81-f71556f20b4a/i.test(scheme)) {
+              await this.execStreaming('powercfg', ['/setactive', '381b4222-f694-41f0-9685-ff5bb260df2e'], 5000);
+              whatWasFixed.push('Switched Windows Power Plan from "Power Saver" to "Balanced" to remove CPU throttling.');
+            }
+          } catch {
+            // Ignore
+          }
+          return;
+        }
+
+        // macOS: auto-quarantine any corrupted .plist files in ~/Library/Preferences so macOS regenerates clean ones
+        try {
+          const prefsDir = path.join(os.homedir(), 'Library', 'Preferences');
+          const plists = fs
+            .readdirSync(prefsDir)
+            .filter((f) => f.endsWith('.plist') && !f.startsWith('.'))
+            .slice(0, 60)
+            .map((f) => path.join(prefsDir, f));
+          if (plists.length > 0) {
+            const res = await execFileAsync('plutil', ['-lint', ...plists], { timeout: 5000 }).catch(
+              (e) => ({ stdout: e?.stdout || '', stderr: e?.stderr || '' }),
+            );
+            const combined = `${res.stdout}\n${res.stderr}`;
+            let fixedPlists = 0;
+            for (const line of combined.split('\n')) {
+              if (line.includes(':') && !line.trim().endsWith(': OK') && line.includes('.plist')) {
+                const filePath = line.split(':')[0].trim();
+                if (filePath && fs.existsSync(filePath)) {
+                  const bakPath = `${filePath}.corrupt.bak`;
+                  fs.renameSync(filePath, bakPath);
+                  this.term(`✅ Quarantined corrupted config: ${path.basename(filePath)} → .corrupt.bak`);
+                  fixedPlists += 1;
+                }
+              }
+            }
+            if (fixedPlists > 0) {
+              whatWasFixed.push(
+                `Repaired ${fixedPlists} corrupted preference file(s) by safely backing up to .corrupt.bak so macOS regenerates clean configs.`,
+              );
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      };
+
       if (action === 'clean_junk') {
         summaryMsg = doCleanJunk();
       } else if (action === 'flush_dns') {
@@ -947,10 +998,11 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
       } else if (action === 'scan_malware') {
         summaryMsg = await doScanMalware();
       } else if (action === 'verify_system_files') {
+        await doAutoFixConfigsAndPower();
         summaryMsg = await doVerifySystemFiles();
       } else if (action === 'ai_rescue') {
         this.term('==================================================');
-        this.log('LAUNCHING DEVDECK AI AUTONOMOUS COMPUTER REPAIR AGENT');
+        this.log('STAGE 1/2: RUNNING FULL AUTOMATED SYSTEM REPAIR SUITE');
         this.term('==================================================');
         if (!this.report.scannedAt) {
           this.report.repairing = false;
@@ -958,6 +1010,21 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           this.report.repairing = true;
         }
         const aiStartScore = this.report.score;
+
+        // Stage 1: Execute EVERY core deterministic repair automatically
+        this.report.activeAction = 'Stage 1/2: Cleaning junk, DNS, RAM, configs, security & OS files…';
+        this.emit();
+        doCleanJunk();
+        await doFlushDns();
+        await doFreeRam();
+        await doAutoFixConfigsAndPower();
+        await doScanMalware();
+        await doVerifySystemFiles();
+
+        // Stage 2: Autonomous Gemini AI Systems Engineer for deep custom investigation & remaining fixes
+        this.term('==================================================');
+        this.log('STAGE 2/2: LAUNCHING AI SYSTEMS ENGINEER FOR DEEP FIXES');
+        this.term('==================================================');
         const aiSummary = await runAutonomousAiRescue(
           this.report,
           (line) => this.term(line),
@@ -965,8 +1032,10 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
             this.report.activeAction = statusText;
             this.emit();
           },
+          whatWasFixed,
+          whatWasNotFixed,
         );
-        this.log('Re-scanning computer after AI repairs…');
+        this.log('Re-scanning computer to measure final improvement…');
         this.report.repairing = false;
         this.report.activeAction = '';
         await this.runScan();
@@ -979,7 +1048,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           whyItHappened: aiSummary.whyItHappened,
           nextSteps: aiSummary.nextSteps,
         };
-        summaryMsg = `AI Rescue Complete! Health ${aiStartScore} → ${this.report.score}/100`;
+        summaryMsg = `Full AI Rescue Complete! Health ${aiStartScore} → ${this.report.score}/100`;
         this.log(`✅ ${summaryMsg}`);
         this.emit();
         this.onAlert?.('success', summaryMsg);
@@ -991,6 +1060,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         doCleanJunk();
         await doFlushDns();
         await doFreeRam();
+        await doAutoFixConfigsAndPower();
         await doScanMalware();
         if (action === 'fix_all') {
           await doVerifySystemFiles();
