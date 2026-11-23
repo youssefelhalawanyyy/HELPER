@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.log
+mac-bridge/dist/
+mac-bridge/data/config.json
+mac-bridge/scans/*
+!mac-bridge/scans/.gitkeep
+iphone-pwa/.next/
+iphone-pwa/out/
+.env
+.env.local

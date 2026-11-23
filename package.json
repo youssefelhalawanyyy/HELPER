@@ -1,0 +1,20 @@
+{
+  "name": "devdeck-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DevDeck — Mac + iPhone 14 OLED Coding Companion PWA",
+  "workspaces": [
+    "mac-bridge",
+    "iphone-pwa"
+  ],
+  "scripts": {
+    "dev": "concurrently -n BRIDGE,PWA -c cyan,emerald \"npm run dev -w mac-bridge\" \"npm run dev -w iphone-pwa\"",
+    "dev:bridge": "npm run dev -w mac-bridge",
+    "dev:pwa": "npm run dev -w iphone-pwa",
+    "build": "npm run build -w mac-bridge && npm run build -w iphone-pwa",
+    "typecheck": "npm run typecheck -w mac-bridge && npm run typecheck -w iphone-pwa"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
