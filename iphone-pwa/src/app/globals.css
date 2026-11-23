@@ -3,8 +3,6 @@
 :root {
   color-scheme: only dark;
   box-sizing: border-box;
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
   --scrollbar-thumb: #3a3e4b;
   --scrollbar-track: #101114;
 }

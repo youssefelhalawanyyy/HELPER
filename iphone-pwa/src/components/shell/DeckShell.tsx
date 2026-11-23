@@ -76,7 +76,12 @@ export function DeckShell() {
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
-  const [viewport, setViewport] = useState({ scale: 1, portrait: false });
+  const [viewport, setViewport] = useState({
+    stageW: 844,
+    stageH: 390,
+    scale: 1,
+    portrait: false,
+  });
 
   // Swipe gesture tracking (works in both landscape & 90deg-rotated portrait)
   const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
@@ -114,18 +119,34 @@ export function DeckShell() {
     }
 
     const updateViewport = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      const vv = window.visualViewport;
+      const w = Math.round(vv?.width ?? window.innerWidth);
+      const h = Math.round(vv?.height ?? window.innerHeight);
       const portrait = h > w;
-      const scale = portrait ? Math.min(h / 844, w / 390) : Math.min(w / 844, h / 390);
-      setViewport({ scale, portrait });
+
+      // Target landscape dimensions after optional 90deg rotation
+      const landW = portrait ? h : w;
+      const landH = portrait ? w : h;
+
+      // Dynamically match mobile phone aspect ratio so there are zero black bars & zero clipping
+      const isMobile = Math.min(w, h) <= 520;
+      const stageH = 390;
+      const stageW = isMobile
+        ? Math.max(720, Math.min(932, Math.round(stageH * (landW / Math.max(1, landH)))))
+        : 844;
+      const scale = Math.min(landW / stageW, landH / stageH);
+
+      setViewport({ stageW, stageH, scale, portrait });
     };
+
     updateViewport();
     window.addEventListener('resize', updateViewport);
     window.addEventListener('orientationchange', updateViewport);
+    window.visualViewport?.addEventListener('resize', updateViewport);
     return () => {
       window.removeEventListener('resize', updateViewport);
       window.removeEventListener('orientationchange', updateViewport);
+      window.visualViewport?.removeEventListener('resize', updateViewport);
     };
   }, []);
 
@@ -226,16 +247,23 @@ export function DeckShell() {
         onTouchEnd={handleTouchEnd}
         className="relative shrink-0 overflow-hidden bg-black"
         style={{
-          width: 844,
-          height: 390,
+          width: viewport.stageW,
+          height: viewport.stageH,
           transform: viewport.portrait
             ? `rotate(90deg) scale(${viewport.scale})`
             : `scale(${viewport.scale})`,
           transformOrigin: 'center center',
         }}
       >
-        {/* Safe-area padded full-width layout (clear of iPhone 14 Dynamic Island / Notch on left & right) */}
-        <div className="flex h-full flex-col gap-2 py-2 pr-4 pl-8">
+        {/* Safe-area padded full-width layout (always clears iPhone notch / Dynamic Island & Home Indicator) */}
+        <div
+          className="flex h-full flex-col gap-2 py-2"
+          style={{
+            paddingLeft: viewport.portrait ? 34 : 'max(36px, env(safe-area-inset-left, 36px))',
+            paddingRight: viewport.portrait ? 22 : 'max(18px, env(safe-area-inset-right, 18px))',
+            paddingBottom: viewport.portrait ? 10 : 'max(10px, env(safe-area-inset-bottom, 10px))',
+          }}
+        >
           {/* Ultra-Slim Top Status Bar */}
           <header className="flex h-6 shrink-0 items-center gap-1.5 text-[10px] font-bold">
             <span className="sub mr-0.5 !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">
