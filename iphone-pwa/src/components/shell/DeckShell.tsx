@@ -321,30 +321,32 @@ export function DeckShell() {
           transformOrigin: 'center center',
         }}
       >
-        {/* True edge-to-edge full-screen padding (uses actual iOS safe-area-insets only) */}
+        {/* Precision edge-to-edge full-screen padding (clears notch cleanly without wasted margins) */}
         <div
           className="flex h-full flex-col gap-1.5"
           style={{
-            paddingTop: 6,
+            paddingTop: 5,
             paddingLeft: viewport.portrait
-              ? 'max(10px, env(safe-area-inset-top, 10px))'
-              : 'max(10px, env(safe-area-inset-left, 10px))',
+              ? 'max(8px, calc(env(safe-area-inset-top, 0px) * 0.5))'
+              : 'max(8px, calc(env(safe-area-inset-left, 0px) * 0.5))',
             paddingRight: viewport.portrait
-              ? 'max(10px, env(safe-area-inset-bottom, 10px))'
-              : 'max(10px, env(safe-area-inset-right, 10px))',
-            paddingBottom: 'max(6px, env(safe-area-inset-bottom, 6px))',
+              ? 'max(8px, calc(env(safe-area-inset-bottom, 0px) * 0.4))'
+              : 'max(8px, calc(env(safe-area-inset-right, 0px) * 0.5))',
+            paddingBottom: 'max(5px, calc(env(safe-area-inset-bottom, 0px) * 0.35))',
           }}
         >
-          {/* Ultra-Slim Top Status Bar */}
-          <header className="flex h-6 shrink-0 items-center gap-1.5 text-[10px] font-bold">
-            <div className="mr-0.5 flex items-center gap-1.5">
+          {/* Ultra-Slim Single-Line Top Status Bar */}
+          <header className="flex h-6 shrink-0 items-center gap-1.5 overflow-hidden text-[9.5px] font-bold">
+            <div className="mr-0.5 flex shrink-0 items-center gap-1.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/icons/icon-192.png"
                 alt="DevDeck logo"
-                className="h-5 w-5 rounded-[5px] border border-[#22d3ee]/40 object-cover shadow-[0_0_8px_rgba(34,211,238,0.35)]"
+                className="h-5 w-5 shrink-0 rounded-[5px] border border-[#22d3ee]/40 object-cover shadow-[0_0_8px_rgba(34,211,238,0.35)]"
               />
-              <span className="sub !text-[11px] !tracking-[0.14em] !text-[#f2f3f7]">DevDeck</span>
+              <span className="sub whitespace-nowrap !text-[10.5px] !tracking-[0.14em] !text-[#f2f3f7]">
+                DevDeck
+              </span>
             </div>
 
             <button
@@ -353,7 +355,7 @@ export function DeckShell() {
                 soundEngine.playClick();
                 setPairingModalOpen(true);
               }}
-              className="flex h-5 items-center gap-1.5 rounded-full px-2.5"
+              className="flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap"
               style={{
                 background: isConnected
                   ? 'rgba(52,211,153,.12)'
@@ -478,14 +480,14 @@ export function DeckShell() {
                   payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
                 });
               }}
-              className="flex h-5 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold"
+              className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold whitespace-nowrap"
               style={{
                 background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
                 color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
                 boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
               }}
             >
-              <Coffee className="h-[10px] w-[10px]" />
+              <Coffee className="h-[10px] w-[10px] shrink-0" />
               CAFFEINE
             </motion.button>
 
@@ -500,11 +502,11 @@ export function DeckShell() {
                 if (isConnected) {
                   deck.sendEvent({
                     type: 'app:focus',
-                    payload: { requestId: makeRequestId(), appName: 'Antigravity' },
+                    payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
                   });
                 }
               }}
-              className="flex h-5 items-center gap-1 rounded-full px-2.5 text-white"
+              className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2.5 text-[9px] font-extrabold whitespace-nowrap text-white"
               style={{
                 background:
                   activeView === 'antigravity' || deck.antigravityState.active
@@ -516,7 +518,7 @@ export function DeckShell() {
                     : 'none',
               }}
             >
-              <Zap className="h-[10px] w-[10px] fill-current" />
+              <Zap className="h-[10px] w-[10px] shrink-0 fill-current" />
               ANTIGRAVITY IDE
             </motion.button>
           </header>

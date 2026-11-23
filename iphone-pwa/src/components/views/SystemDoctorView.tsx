@@ -87,9 +87,9 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
   const report = doc.postReport;
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.05fr 1.75fr' }}>
-      {/* LEFT: Health Gauge + Metrics + Plain-English Verdict + SCAN ALL / FIX ALL */}
-      <div className="tile flex min-h-0 flex-col justify-between gap-1.5 p-2.5">
+    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.06fr 1.74fr' }}>
+      {/* LEFT: Health Gauge + Metrics + Plain-English Verdict + SCAN ALL / AI AUTO-FIX */}
+      <div className="tile flex min-h-0 flex-col justify-between gap-2 p-3">
         <div
           className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full"
           style={{ background: `linear-gradient(90deg, ${accent}, #22d3ee)` }}
@@ -255,9 +255,9 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             transition={DECK_SPRING}
             disabled={busy}
             onClick={triggerScan}
-            className="col-span-2 flex items-center justify-center gap-1 rounded-xl border border-white/15 bg-white/[0.06] py-2 text-[9px] font-extrabold text-white disabled:opacity-40"
+            className="col-span-2 flex h-8 items-center justify-center gap-1 rounded-xl border border-white/15 bg-white/[0.06] text-[9px] font-extrabold whitespace-nowrap text-white disabled:opacity-40"
           >
-            <RefreshCw className={`h-3 w-3 ${doc.scanning ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3 w-3 shrink-0 ${doc.scanning ? 'animate-spin' : ''}`} />
             SCAN ALL
           </motion.button>
           <motion.button
@@ -266,17 +266,17 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             transition={DECK_SPRING}
             disabled={busy}
             onClick={() => triggerRepair(doc.aiConfigured ? 'ai_rescue' : 'fix_all')}
-            className="col-span-3 flex items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[#a78bfa] via-[#22d3ee] to-[#34d399] py-2 text-[9.5px] font-extrabold text-[#04130c] disabled:opacity-40"
+            className="col-span-3 flex h-8 items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[#a78bfa] via-[#22d3ee] to-[#34d399] text-[9.5px] font-extrabold whitespace-nowrap text-[#04130c] disabled:opacity-40"
             style={{ boxShadow: '0 2px 0 #14664a' }}
           >
-            {doc.aiConfigured ? <Sparkles className="h-3.5 w-3.5" /> : <Wrench className="h-3.5 w-3.5" />}
+            {doc.aiConfigured ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <Wrench className="h-3.5 w-3.5 shrink-0" />}
             {doc.aiConfigured ? 'AI AUTO-FIX' : 'FIX ALL & RESCUE'}
           </motion.button>
         </div>
       </div>
 
       {/* RIGHT: 3-Tab Diagnostic, Live Terminal & Post-Repair English Report */}
-      <div className="tile flex min-h-0 flex-col gap-1.5 p-2.5">
+      <div className="tile flex min-h-0 flex-col gap-2 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#ff5d6c] via-[#fbbf24] to-[#34d399]" />
 
         {/* 3-Tab Switcher */}
@@ -578,16 +578,16 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
 
-        {/* Quick Individual Repair Tools Strip */}
+        {/* Quick Individual Repair Tools Strip (pixel-aligned h-8 with left card buttons) */}
         <div className="grid grid-cols-4 gap-1.5">
           <motion.button
             type="button"
             whileTap={{ scale: 0.94 }}
             disabled={busy}
             onClick={() => triggerRepair('scan_malware')}
-            className="flex items-center justify-center gap-1 rounded-xl border border-[#f472b6]/35 bg-[#f472b6]/12 py-1.5 text-[8.5px] font-extrabold text-[#f472b6] disabled:opacity-40"
+            className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#f472b6]/35 bg-[#f472b6]/12 text-[8.5px] font-extrabold whitespace-nowrap text-[#f472b6] disabled:opacity-40"
           >
-            <Bug className="h-3 w-3" />
+            <Bug className="h-3 w-3 shrink-0" />
             VIRUS SCAN
           </motion.button>
           <motion.button
@@ -595,9 +595,9 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             whileTap={{ scale: 0.94 }}
             disabled={busy}
             onClick={() => triggerRepair('verify_system_files')}
-            className="flex items-center justify-center gap-1 rounded-xl border border-[#ff5d6c]/35 bg-[#ff5d6c]/12 py-1.5 text-[8.5px] font-extrabold text-[#ff5d6c] disabled:opacity-40"
+            className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#ff5d6c]/35 bg-[#ff5d6c]/12 text-[8.5px] font-extrabold whitespace-nowrap text-[#ff5d6c] disabled:opacity-40"
           >
-            <ShieldCheck className="h-3 w-3" />
+            <ShieldCheck className="h-3 w-3 shrink-0" />
             {isWin ? 'SFC/DISM' : 'CORRUPT FIX'}
           </motion.button>
           <motion.button
@@ -605,9 +605,9 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             whileTap={{ scale: 0.94 }}
             disabled={busy}
             onClick={() => triggerRepair('clean_junk')}
-            className="flex items-center justify-center gap-1 rounded-xl border border-[#fbbf24]/35 bg-[#fbbf24]/12 py-1.5 text-[8.5px] font-extrabold text-[#fbbf24] disabled:opacity-40"
+            className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#fbbf24]/35 bg-[#fbbf24]/12 text-[8.5px] font-extrabold whitespace-nowrap text-[#fbbf24] disabled:opacity-40"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3 w-3 shrink-0" />
             CLEAN JUNK
           </motion.button>
           <motion.button
@@ -615,9 +615,9 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             whileTap={{ scale: 0.94 }}
             disabled={busy}
             onClick={() => triggerRepair('free_ram')}
-            className="flex items-center justify-center gap-1 rounded-xl border border-[#a78bfa]/35 bg-[#a78bfa]/12 py-1.5 text-[8.5px] font-extrabold text-[#a78bfa] disabled:opacity-40"
+            className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#a78bfa]/35 bg-[#a78bfa]/12 text-[8.5px] font-extrabold whitespace-nowrap text-[#a78bfa] disabled:opacity-40"
           >
-            <MemoryStick className="h-3 w-3" />
+            <MemoryStick className="h-3 w-3 shrink-0" />
             FREE RAM
           </motion.button>
         </div>
