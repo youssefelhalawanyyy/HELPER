@@ -120,11 +120,20 @@ export function PairingOverlay({
     setBusy(true);
     soundEngine.playClick();
 
+    const rawHost = host.trim();
+    const isLocalOrIp = /^(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})(:\d+)?$/i.test(rawHost);
     const normalizedHost =
-      mode === 'tunnel' && !/^https?:\/\//i.test(host.trim())
-        ? `https://${host.trim()}`
-        : host.trim();
-    const resolvedPort = mode === 'tunnel' ? 443 : Number(port) || 4747;
+      /^https?:\/\//i.test(rawHost)
+        ? rawHost
+        : isLocalOrIp
+          ? rawHost
+          : mode === 'tunnel'
+            ? `https://${rawHost}`
+            : rawHost;
+    const resolvedPort =
+      /^https:\/\//i.test(normalizedHost) || (mode === 'tunnel' && !isLocalOrIp)
+        ? 443
+        : Number(port) || 4747;
 
     const res = await onPairWithPin(normalizedHost, resolvedPort, pin);
     setBusy(false);

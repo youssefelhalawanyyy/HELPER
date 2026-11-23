@@ -32,18 +32,28 @@ function buildBridgeUrls(cfg: { host: string; port: number; secure?: boolean }) 
   const raw = cfg.host.trim().replace(/\/+$/, '');
   const isFullHttps = /^https:\/\//i.test(raw);
   const isFullHttp = /^http:\/\//i.test(raw);
-  const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
 
   if (isFullHttps || isFullHttp) {
-    const httpBase = raw;
-    const wsBase = raw.replace(/^http/i, 'ws');
-    return { httpBase, wsBase };
+    try {
+      const u = new URL(raw);
+      const httpBase = u.origin;
+      const wsBase = u.origin.replace(/^http/i, 'ws');
+      return { httpBase, wsBase };
+    } catch {
+      const httpBase = raw;
+      const wsBase = raw.replace(/^http/i, 'ws');
+      return { httpBase, wsBase };
+    }
   }
 
-  const useSecure = Boolean(cfg.secure) || cfg.port === 443 || (pageIsHttps && !/^(localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(raw));
+  const isLocalOrIp = /^(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3})$/i.test(raw);
+  const useSecure = Boolean(cfg.secure) || (!isLocalOrIp && cfg.port === 443) || (!isLocalOrIp && raw.includes('.'));
   const httpProto = useSecure ? 'https' : 'http';
   const wsProto = useSecure ? 'wss' : 'ws';
-  const portSuffix = (useSecure && cfg.port === 443) || (!useSecure && cfg.port === 80) || !cfg.port ? '' : `:${cfg.port}`;
+  const portSuffix =
+    (useSecure && (!cfg.port || cfg.port === 443)) || (!useSecure && cfg.port === 80)
+      ? ''
+      : `:${cfg.port || 4747}`;
   return {
     httpBase: `${httpProto}://${raw}${portSuffix}`,
     wsBase: `${wsProto}://${raw}${portSuffix}`,
@@ -360,7 +370,18 @@ export function useDevDeckSocket() {
         soundEngine.playSuccessChime();
         return { ok: true };
       } catch {
-        return { ok: false, error: `Cannot reach Mac bridge at ${httpBase}` };
+        const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+        const isLanIp = /^http:\/\/(?!127\.0\.0\.1|localhost)/i.test(httpBase);
+        if (pageIsHttps && isLanIp) {
+          return {
+            ok: false,
+            error: `HTTPS blocks HTTP LAN IPs (${httpBase}). Use 127.0.0.1 on this Mac, or an https://....trycloudflare.com tunnel on iPhone.`,
+          };
+        }
+        return {
+          ok: false,
+          error: `Cannot reach Mac bridge at ${httpBase}. Make sure npm run dev:bridge (and cloudflared if using a tunnel) is running.`,
+        };
       }
     },
     [savePairing],
