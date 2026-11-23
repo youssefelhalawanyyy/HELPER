@@ -43,6 +43,21 @@ const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
   'system.spotlight': 'tell application "System Events" to key code 49 using {command down}',
   'system.copy': 'tell application "System Events" to keystroke "c" using {command down}',
   'system.paste': 'tell application "System Events" to keystroke "v" using {command down}',
+  'system.undo': 'tell application "System Events" to keystroke "z" using {command down}',
+
+  // Game-Controller / Navigation Pad
+  'nav.back': 'tell application "System Events" to keystroke "[" using {command down}',
+  'nav.forward': 'tell application "System Events" to keystroke "]" using {command down}',
+  'nav.switchApp': 'tell application "System Events" to key code 48 using {command down}',
+  'nav.missionControl': 'tell application "System Events" to key code 126 using {control down}',
+  'nav.up': 'tell application "System Events" to key code 126',
+  'nav.down': 'tell application "System Events" to key code 125',
+  'nav.left': 'tell application "System Events" to key code 123',
+  'nav.right': 'tell application "System Events" to key code 124',
+  'nav.enter': 'tell application "System Events" to key code 36',
+  'nav.escape': 'tell application "System Events" to key code 53',
+  'nav.space': 'tell application "System Events" to key code 49',
+  'nav.backspace': 'tell application "System Events" to key code 51',
 };
 
 const WINDOWS_SHORTCUTS: Record<string, string> = {
@@ -79,6 +94,21 @@ const WINDOWS_SHORTCUTS: Record<string, string> = {
   // General Windows
   'system.copy': '^c',
   'system.paste': '^v',
+  'system.undo': '^z',
+
+  // Game-Controller / Navigation Pad (Windows)
+  'nav.back': '%{LEFT}',
+  'nav.forward': '%{RIGHT}',
+  'nav.switchApp': '%{TAB}',
+  'nav.missionControl': '^{ESC}',
+  'nav.up': '{UP}',
+  'nav.down': '{DOWN}',
+  'nav.left': '{LEFT}',
+  'nav.right': '{RIGHT}',
+  'nav.enter': '{ENTER}',
+  'nav.escape': '{ESC}',
+  'nav.space': ' ',
+  'nav.backspace': '{BACKSPACE}',
 };
 
 export function isKnownShortcut(shortcutId: string): boolean {

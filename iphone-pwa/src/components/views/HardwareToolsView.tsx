@@ -3,16 +3,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Camera,
   ChevronLeft,
   ChevronRight,
+  CornerDownLeft,
+  Delete,
   Flame,
+  Gamepad2,
   LayoutGrid,
   Loader2,
   Lock,
   MousePointer2,
   Play,
   Presentation,
+  RotateCcw,
   ScrollText,
   Sliders,
   Smartphone,
@@ -106,7 +114,8 @@ const SNAP_OPTIONS: Array<{ id: WindowSnapPosition; label: string }> = [
 ];
 
 export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
-  const [subTab, setSubTab] = useState<HardwareTab>('controls');
+  const [subTab, setSubTab] = useState<HardwareTab>('remote');
+  const [remoteRightTab, setRemoteRightTab] = useState<'controller' | 'slides'>('controller');
   const [dialMode, setDialMode] = useState<DialMode>('volume');
   const [dialVal, setDialVal] = useState(deck.mediaState.volume);
   const [uploadingScan, setUploadingScan] = useState(false);
@@ -119,7 +128,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const lastSendRef = useRef(0);
   const faceDownTriggeredRef = useRef(false);
 
-  // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger scroll + drag lock)
+  // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger inertia scroll + drag lock)
   const [padPreset, setPadPreset] = useState<TrackpadPreset>('macbook');
   const [dragLock, setDragLock] = useState(false);
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -129,9 +138,15 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const padLastTsRef = useRef(0);
   const padSubpixelRef = useRef({ rx: 0, ry: 0 });
   const padPendingRef = useRef({ dx: 0, dy: 0, sx: 0, sy: 0 });
+  const padScrollVelRef = useRef({ vx: 0, vy: 0 });
   const padMovedDistRef = useRef(0);
   const padRafRef = useRef<number | null>(null);
   const padActiveRef = useRef(false);
+
+  const fireShortcut = (shortcutId: string) => {
+    soundEngine.playDetent();
+    deck.sendEvent({ type: 'shortcut:trigger', payload: { shortcutId } });
+  };
 
   useEffect(() => {
     return () => {
@@ -349,37 +364,43 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const dist = Math.hypot(rawDx, rawDy);
               padMovedDistRef.current += dist;
 
-              // Two-finger smooth macOS scroll
+              // Two-finger smooth scroll with momentum velocity capture
               if (pointersRef.current.size >= 2) {
-                padPendingRef.current.sx += rawDx * 1.35;
-                padPendingRef.current.sy += rawDy * 1.55;
+                const sdx = rawDx * 1.45;
+                const sdy = rawDy * 1.7;
+                padPendingRef.current.sx += sdx;
+                padPendingRef.current.sy += sdy;
+                padScrollVelRef.current = {
+                  vx: padScrollVelRef.current.vx * 0.45 + sdx * 0.55,
+                  vy: padScrollVelRef.current.vy * 0.45 + sdy * 0.55,
+                };
                 return;
               }
 
-              // Micro-tremor deadzone when resting fingertip
-              if (dist < 0.25) return;
+              // Ultra-fine micro-tremor deadzone when resting fingertip
+              if (dist < 0.15) return;
 
               const now = performance.now();
               const dt = Math.max(0.004, Math.min(0.05, (now - padLastTsRef.current) / 1000));
               padLastTsRef.current = now;
 
-              // One-Euro filter tuning per preset
+              // Pro One-Euro filter tuning per preset (faster, silkier laptop-grade response)
               const cfg =
                 padPreset === 'smooth'
-                  ? { minCutoff: 1.4, beta: 0.045, baseGain: 1.0, accel: 0.42, maxGain: 3.4 }
+                  ? { minCutoff: 1.6, beta: 0.055, baseGain: 1.15, accel: 0.48, maxGain: 3.9 }
                   : padPreset === 'turbo'
-                    ? { minCutoff: 3.2, beta: 0.14, baseGain: 1.45, accel: 0.65, maxGain: 5.2 }
-                    : { minCutoff: 2.1, beta: 0.085, baseGain: 1.15, accel: 0.52, maxGain: 4.4 };
+                    ? { minCutoff: 3.8, beta: 0.18, baseGain: 1.75, accel: 0.78, maxGain: 6.8 }
+                    : { minCutoff: 2.5, beta: 0.11, baseGain: 1.35, accel: 0.62, maxGain: 5.4 };
 
               const fx = padFilterX.current.filter(rawDx, dt, cfg.minCutoff, cfg.beta);
               const fy = padFilterY.current.filter(rawDy, dt, cfg.minCutoff, cfg.beta);
 
               // Apple-style ballistic velocity acceleration curve
               const velocityPxPerSec = Math.hypot(fx, fy) / dt;
-              const speedNorm = Math.min(24, velocityPxPerSec / 110);
+              const speedNorm = Math.min(26, velocityPxPerSec / 100);
               const gain = Math.min(
                 cfg.maxGain,
-                cfg.baseGain + Math.pow(speedNorm, 1.15) * cfg.accel,
+                cfg.baseGain + Math.pow(speedNorm, 1.18) * cfg.accel,
               );
 
               padPendingRef.current.dx += fx * gain;
@@ -399,7 +420,26 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type: 'trackpad:click',
                     payload: { button: twoFingerRef.current ? 'right' : 'left' },
                   });
+                } else if (twoFingerRef.current) {
+                  // Smooth MacBook-style 2-finger inertia scroll glide on release
+                  let { vx, vy } = padScrollVelRef.current;
+                  const glide = () => {
+                    if (padActiveRef.current || (Math.abs(vx) < 0.7 && Math.abs(vy) < 0.7)) {
+                      return;
+                    }
+                    deck.sendEvent({
+                      type: 'trackpad:scroll',
+                      payload: { dx: Math.round(vx), dy: Math.round(vy) },
+                    });
+                    vx *= 0.84;
+                    vy *= 0.84;
+                    padRafRef.current = requestAnimationFrame(glide);
+                  };
+                  if (Math.abs(vx) >= 1.5 || Math.abs(vy) >= 1.5) {
+                    padRafRef.current = requestAnimationFrame(glide);
+                  }
                 }
+                padScrollVelRef.current = { vx: 0, vy: 0 };
                 twoFingerRef.current = false;
               }
             }}
@@ -463,83 +503,266 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
           </div>
         </div>
 
-        {/* Right: Presentation Slide Remote (Keynote / PowerPoint / Google Slides) */}
-        <div className="tile flex flex-col justify-between gap-2 p-3.5">
-          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#34d399]" />
-          <div className="flex items-center justify-between">
-            <span className="disp text-[22px]">Slide Clicker</span>
-            <Presentation className="h-4 w-4 text-[#34d399]" />
+        {/* Right: Game-Controller Action Pad & Slide Clicker */}
+        <div className="tile flex min-h-0 flex-col justify-between gap-2 p-3">
+          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-gradient-to-r from-[#a78bfa] to-[#34d399]" />
+
+          {/* Header Switcher: Controller vs Slide Clicker */}
+          <div className="flex items-center justify-between gap-1.5">
+            <div className="flex rounded-full bg-black/75 p-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setRemoteRightTab('controller');
+                }}
+                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                style={{
+                  background: remoteRightTab === 'controller' ? '#1f222c' : 'transparent',
+                  color: remoteRightTab === 'controller' ? '#a78bfa' : '#7c8190',
+                }}
+              >
+                <Gamepad2 className="h-3 w-3" />
+                Controller
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setRemoteRightTab('slides');
+                }}
+                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                style={{
+                  background: remoteRightTab === 'slides' ? '#1f222c' : 'transparent',
+                  color: remoteRightTab === 'slides' ? '#34d399' : '#7c8190',
+                }}
+              >
+                <Presentation className="h-3 w-3" />
+                Slides
+              </button>
+            </div>
+            <span className="font-mono-tech text-[8px] text-zinc-500 uppercase">L1 / D-PAD</span>
           </div>
 
-          <div className="grid flex-1 grid-cols-2 gap-2">
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.94 }}
-              transition={DECK_SPRING}
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({
-                  type: 'presentation:key',
-                  payload: { requestId: makeRequestId(), action: 'prev' },
-                });
-              }}
-              className="hw-key flex flex-col items-center justify-center rounded-2xl text-zinc-200"
-            >
-              <ChevronLeft className="h-8 w-8 text-[#fbbf24]" />
-              <span className="sub mt-1">PREV SLIDE</span>
-            </motion.button>
+          {remoteRightTab === 'controller' ? (
+            <div className="flex min-h-0 flex-1 flex-col justify-between gap-1.5">
+              {/* Top Shoulder Bumpers (Back / Forward / Switch App / Mission Control) */}
+              <div className="grid grid-cols-4 gap-1">
+                {(
+                  [
+                    { id: 'nav.back', label: '← BACK', color: '#22d3ee' },
+                    { id: 'nav.forward', label: 'FWD →', color: '#22d3ee' },
+                    { id: 'nav.switchApp', label: 'SWITCH', color: '#a78bfa' },
+                    { id: 'nav.missionControl', label: 'EXPOSE', color: '#fbbf24' },
+                  ] as const
+                ).map((b) => (
+                  <motion.button
+                    key={b.id}
+                    type="button"
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => fireShortcut(b.id)}
+                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-[8.5px] font-extrabold whitespace-nowrap"
+                    style={{ color: b.color }}
+                  >
+                    {b.label}
+                  </motion.button>
+                ))}
+              </div>
 
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.94 }}
-              transition={DECK_SPRING}
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({
-                  type: 'presentation:key',
-                  payload: { requestId: makeRequestId(), action: 'next' },
-                });
-              }}
-              className="flex flex-col items-center justify-center rounded-2xl bg-[#34d399] text-[#04130c]"
-              style={{ boxShadow: '0 4px 0 #14664a' }}
-            >
-              <ChevronRight className="h-8 w-8" />
-              <span className="mt-1 text-[10px] font-extrabold uppercase tracking-wider">
-                NEXT SLIDE
-              </span>
-            </motion.button>
-          </div>
+              {/* Center Ergonomic Cross D-Pad + Face Action Buttons */}
+              <div className="grid min-h-0 flex-1 grid-cols-12 gap-2">
+                {/* 3x3 Cross D-Pad */}
+                <div className="col-span-7 grid grid-cols-3 grid-rows-3 gap-1">
+                  <div />
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => fireShortcut('nav.up')}
+                    aria-label="Up"
+                    className="hw-key grid place-items-center rounded-xl text-white"
+                  >
+                    <ArrowUp className="h-4 w-4 text-[#22d3ee]" />
+                  </motion.button>
+                  <div />
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({
-                  type: 'presentation:key',
-                  payload: { requestId: makeRequestId(), action: 'start' },
-                });
-              }}
-              className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#34d399]"
-            >
-              <Play className="h-3 w-3 fill-current" />
-              Present
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({
-                  type: 'presentation:key',
-                  payload: { requestId: makeRequestId(), action: 'escape' },
-                });
-              }}
-              className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#ff5d6c]"
-            >
-              <X className="h-3 w-3" />
-              Exit (Esc)
-            </button>
-          </div>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => fireShortcut('nav.left')}
+                    aria-label="Left"
+                    className="hw-key grid place-items-center rounded-xl text-white"
+                  >
+                    <ArrowLeft className="h-4 w-4 text-[#22d3ee]" />
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => fireShortcut('nav.enter')}
+                    aria-label="Enter / OK"
+                    className="grid place-items-center rounded-xl bg-[#34d399] text-[#04130c]"
+                    style={{ boxShadow: '0 2px 0 #14664a' }}
+                  >
+                    <CornerDownLeft className="h-4 w-4" />
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => fireShortcut('nav.right')}
+                    aria-label="Right"
+                    className="hw-key grid place-items-center rounded-xl text-white"
+                  >
+                    <ArrowRight className="h-4 w-4 text-[#22d3ee]" />
+                  </motion.button>
+
+                  <div />
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => fireShortcut('nav.down')}
+                    aria-label="Down"
+                    className="hw-key grid place-items-center rounded-xl text-white"
+                  >
+                    <ArrowDown className="h-4 w-4 text-[#22d3ee]" />
+                  </motion.button>
+                  <div />
+                </div>
+
+                {/* Right 2x2 Face Buttons (A / B / X / Y style) */}
+                <div className="col-span-5 grid grid-cols-2 grid-rows-2 gap-1.5">
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => fireShortcut('nav.escape')}
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 text-[8.5px] font-extrabold text-[#ff5d6c]"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    ESC
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => fireShortcut('nav.space')}
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#34d399]/40 bg-[#34d399]/15 text-[8.5px] font-extrabold text-[#34d399]"
+                  >
+                    <Play className="h-3.5 w-3.5 fill-current" />
+                    SPACE
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => fireShortcut('nav.backspace')}
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#fbbf24]/40 bg-[#fbbf24]/15 text-[8.5px] font-extrabold text-[#fbbf24]"
+                  >
+                    <Delete className="h-3.5 w-3.5" />
+                    DEL
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => fireShortcut('system.undo')}
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#a78bfa]/40 bg-[#a78bfa]/15 text-[8.5px] font-extrabold text-[#c4b5fd]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    UNDO
+                  </motion.button>
+                </div>
+              </div>
+
+              {/* Bottom Quick Action Bar (Copy / Paste / New Tab / Close Tab) */}
+              <div className="grid grid-cols-4 gap-1">
+                {(
+                  [
+                    { id: 'system.copy', label: 'COPY' },
+                    { id: 'system.paste', label: 'PASTE' },
+                    { id: 'chrome.newTab', label: '+ TAB' },
+                    { id: 'chrome.closeTab', label: '✕ TAB' },
+                  ] as const
+                ).map((b) => (
+                  <motion.button
+                    key={b.id}
+                    type="button"
+                    whileTap={{ scale: 0.93 }}
+                    onClick={() => fireShortcut(b.id)}
+                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-[8.5px] font-extrabold whitespace-nowrap text-zinc-200"
+                  >
+                    {b.label}
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid flex-1 grid-cols-2 gap-2">
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.94 }}
+                  transition={DECK_SPRING}
+                  onClick={() => {
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'presentation:key',
+                      payload: { requestId: makeRequestId(), action: 'prev' },
+                    });
+                  }}
+                  className="hw-key flex flex-col items-center justify-center rounded-2xl text-zinc-200"
+                >
+                  <ChevronLeft className="h-8 w-8 text-[#fbbf24]" />
+                  <span className="sub mt-1">PREV SLIDE</span>
+                </motion.button>
+
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.94 }}
+                  transition={DECK_SPRING}
+                  onClick={() => {
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'presentation:key',
+                      payload: { requestId: makeRequestId(), action: 'next' },
+                    });
+                  }}
+                  className="flex flex-col items-center justify-center rounded-2xl bg-[#34d399] text-[#04130c]"
+                  style={{ boxShadow: '0 4px 0 #14664a' }}
+                >
+                  <ChevronRight className="h-8 w-8" />
+                  <span className="mt-1 text-[10px] font-extrabold uppercase tracking-wider">
+                    NEXT SLIDE
+                  </span>
+                </motion.button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'presentation:key',
+                      payload: { requestId: makeRequestId(), action: 'start' },
+                    });
+                  }}
+                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#34d399]"
+                >
+                  <Play className="h-3 w-3 fill-current" />
+                  Present
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'presentation:key',
+                      payload: { requestId: makeRequestId(), action: 'escape' },
+                    });
+                  }}
+                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#ff5d6c]"
+                >
+                  <X className="h-3 w-3" />
+                  Exit (Esc)
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

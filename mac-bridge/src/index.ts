@@ -585,6 +585,14 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'shortcut:trigger': {
+      const { shortcutId } = msg.payload;
+      if (isKnownShortcut(shortcutId)) {
+        void runShortcut(shortcutId).catch(() => {});
+      }
+      return;
+    }
+
     case 'system:toggleDarkMode': {
       try {
         const dark = await toggleMacDarkMode();

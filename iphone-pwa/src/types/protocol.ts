@@ -486,6 +486,7 @@ export type ClientEvent =
   | { type: 'trackpad:drag'; payload: { down: boolean } }
   | { type: 'trackpad:scroll'; payload: { dx: number; dy: number } }
   | { type: 'presentation:key'; payload: { requestId: string; action: 'next' | 'prev' | 'start' | 'escape' } }
+  | { type: 'shortcut:trigger'; payload: { shortcutId: string } }
   | { type: 'system:toggleDarkMode'; payload: { requestId: string } }
   | { type: 'system:toggleMic'; payload: { requestId: string } }
   | { type: 'script:run'; payload: { requestId: string; scriptName: string } }
