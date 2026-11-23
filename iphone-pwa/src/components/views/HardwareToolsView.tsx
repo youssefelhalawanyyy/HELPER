@@ -139,6 +139,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const padSubpixelRef = useRef({ rx: 0, ry: 0 });
   const padPendingRef = useRef({ dx: 0, dy: 0, sx: 0, sy: 0 });
   const padScrollVelRef = useRef({ vx: 0, vy: 0 });
+  const padEmaVelRef = useRef({ vx: 0, vy: 0 });
   const padMovedDistRef = useRef(0);
   const padRafRef = useRef<number | null>(null);
   const padActiveRef = useRef(false);
@@ -314,6 +315,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 padFilterX.current.reset();
                 padFilterY.current.reset();
                 padSubpixelRef.current = { rx: 0, ry: 0 };
+                padEmaVelRef.current = { vx: 0, vy: 0 };
                 padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
                 padLastTsRef.current = performance.now();
               }
@@ -378,33 +380,43 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               }
 
               // Ultra-fine micro-tremor deadzone when resting fingertip
-              if (dist < 0.15) return;
+              if (dist < 0.12) return;
 
               const now = performance.now();
               const dt = Math.max(0.004, Math.min(0.05, (now - padLastTsRef.current) / 1000));
               padLastTsRef.current = now;
 
-              // Pro One-Euro filter tuning per preset (faster, silkier laptop-grade response)
+              // Stage 1: Outlier digitizer spike clamp (prevents sudden cursor jumps)
+              const maxJump = 68;
+              const clampedDx = Math.max(-maxJump, Math.min(maxJump, rawDx));
+              const clampedDy = Math.max(-maxJump, Math.min(maxJump, rawDy));
+
+              // Stage 2: One-Euro Adaptive Filter (faster, silkier laptop-grade response)
               const cfg =
                 padPreset === 'smooth'
-                  ? { minCutoff: 1.6, beta: 0.055, baseGain: 1.15, accel: 0.48, maxGain: 3.9 }
+                  ? { minCutoff: 1.5, beta: 0.065, baseGain: 1.45, accel: 0.58, maxGain: 5.2, ema: 0.58 }
                   : padPreset === 'turbo'
-                    ? { minCutoff: 3.8, beta: 0.18, baseGain: 1.75, accel: 0.78, maxGain: 6.8 }
-                    : { minCutoff: 2.5, beta: 0.11, baseGain: 1.35, accel: 0.62, maxGain: 5.4 };
+                    ? { minCutoff: 4.2, beta: 0.22, baseGain: 2.35, accel: 0.95, maxGain: 9.5, ema: 0.82 }
+                    : { minCutoff: 2.8, beta: 0.14, baseGain: 1.85, accel: 0.78, maxGain: 7.4, ema: 0.72 };
 
-              const fx = padFilterX.current.filter(rawDx, dt, cfg.minCutoff, cfg.beta);
-              const fy = padFilterY.current.filter(rawDy, dt, cfg.minCutoff, cfg.beta);
+              const fx = padFilterX.current.filter(clampedDx, dt, cfg.minCutoff, cfg.beta);
+              const fy = padFilterY.current.filter(clampedDy, dt, cfg.minCutoff, cfg.beta);
 
-              // Apple-style ballistic velocity acceleration curve
-              const velocityPxPerSec = Math.hypot(fx, fy) / dt;
-              const speedNorm = Math.min(26, velocityPxPerSec / 100);
+              // Stage 3: Velocity-Adaptive EMA Polish (removes 60Hz stair-stepping)
+              const px = cfg.ema * fx + (1 - cfg.ema) * padEmaVelRef.current.vx;
+              const py = cfg.ema * fy + (1 - cfg.ema) * padEmaVelRef.current.vy;
+              padEmaVelRef.current = { vx: px, vy: py };
+
+              // Stage 4: MacBook Pro ballistic velocity acceleration curve
+              const velocityPxPerSec = Math.hypot(px, py) / dt;
+              const speedNorm = Math.min(30, velocityPxPerSec / 90);
               const gain = Math.min(
                 cfg.maxGain,
-                cfg.baseGain + Math.pow(speedNorm, 1.18) * cfg.accel,
+                cfg.baseGain + Math.pow(speedNorm, 1.2) * cfg.accel,
               );
 
-              padPendingRef.current.dx += fx * gain;
-              padPendingRef.current.dy += fy * gain;
+              padPendingRef.current.dx += px * gain;
+              padPendingRef.current.dy += py * gain;
             }}
             onPointerUp={(e) => {
               pointersRef.current.delete(e.pointerId);

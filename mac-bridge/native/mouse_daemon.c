@@ -48,7 +48,6 @@ int main(void) {
             double dx = 0, dy = 0;
             if (sscanf(line + 1, "%lf %lf", &dx, &dy) == 2) {
                 double t = now_ms();
-                // Sync with physical MacBook trackpad if idle > 120ms
                 if (t - lastMoveTs > 120.0) {
                     CGEventRef cur = CGEventCreate(NULL);
                     CGPoint pos = CGEventGetLocation(cur);
@@ -58,9 +57,9 @@ int main(void) {
                 }
                 lastMoveTs = t;
 
-                // Micro-interpolation removes network jitter while staying ultra-fast (<4ms total)
+                // Smooth sub-frame interpolation for silky 120Hz glide on fast swipes
                 double dist = hypot(dx, dy);
-                int steps = (dist > 18.0) ? 3 : (dist > 6.0 ? 2 : 1);
+                int steps = (dist > 36.0) ? 4 : (dist > 14.0 ? 3 : (dist > 5.0 ? 2 : 1));
                 double stepX = dx / steps;
                 double stepY = dy / steps;
                 CGEventType evType = (cmd == 'G' || dragging) ? kCGEventLeftMouseDragged : kCGEventMouseMoved;
@@ -75,7 +74,7 @@ int main(void) {
                         CGEventPost(kCGHIDEventTap, ev);
                         CFRelease(ev);
                     }
-                    if (i < steps - 1) usleep(1500);
+                    if (i < steps - 1) usleep(1000);
                 }
             }
         } else if (cmd == 'C') {
@@ -120,6 +119,31 @@ int main(void) {
                 if (scroll) {
                     CGEventPost(kCGHIDEventTap, scroll);
                     CFRelease(scroll);
+                }
+            }
+        } else if (cmd == 'K') {
+            // Instant <0.1ms native CoreGraphics key press: K <keyCode> <modMask>
+            // modMask: 1=Cmd, 2=Shift, 4=Alt/Option, 8=Ctrl
+            int keyCode = -1, modMask = 0;
+            if (sscanf(line + 1, "%d %d", &keyCode, &modMask) >= 1 && keyCode >= 0) {
+                CGEventFlags flags = 0;
+                if (modMask & 1) flags |= kCGEventFlagMaskCommand;
+                if (modMask & 2) flags |= kCGEventFlagMaskShift;
+                if (modMask & 4) flags |= kCGEventFlagMaskAlternate;
+                if (modMask & 8) flags |= kCGEventFlagMaskControl;
+
+                CGEventRef kd = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, true);
+                CGEventRef ku = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, false);
+                if (kd) {
+                    if (flags) CGEventSetFlags(kd, flags);
+                    CGEventPost(kCGHIDEventTap, kd);
+                    CFRelease(kd);
+                }
+                usleep(4000);
+                if (ku) {
+                    if (flags) CGEventSetFlags(ku, flags);
+                    CGEventPost(kCGHIDEventTap, ku);
+                    CFRelease(ku);
                 }
             }
         }

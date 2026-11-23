@@ -2,8 +2,30 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { IS_WIN, sendWinKeystroke, sendWinVirtualKey } from '../platform/win32.js';
 import { captureSelectionToClipboard, lockMacScreen, toggleMacMute } from './hardware.js';
+import { sendNativeMacKey } from './remoteControl.js';
 
 const execFileAsync = promisify(execFile);
+
+// Instant (<0.1ms) macOS CoreGraphics virtual keycodes + modifier mask (1=Cmd, 2=Shift, 4=Opt, 8=Ctrl)
+const MAC_NATIVE_KEYS: Record<string, [number, number]> = {
+  'nav.back': [33, 1], // Cmd+[
+  'nav.forward': [30, 1], // Cmd+]
+  'nav.switchApp': [48, 1], // Cmd+Tab
+  'nav.missionControl': [126, 8], // Ctrl+Up
+  'nav.up': [126, 0],
+  'nav.down': [125, 0],
+  'nav.left': [123, 0],
+  'nav.right': [124, 0],
+  'nav.enter': [36, 0],
+  'nav.escape': [53, 0],
+  'nav.space': [49, 0],
+  'nav.backspace': [51, 0],
+  'system.copy': [8, 1], // Cmd+C
+  'system.paste': [9, 1], // Cmd+V
+  'system.undo': [6, 1], // Cmd+Z
+  'chrome.newTab': [17, 1], // Cmd+T
+  'chrome.closeTab': [13, 1], // Cmd+W
+};
 
 const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
   // Antigravity IDE
@@ -146,6 +168,13 @@ export async function runShortcut(shortcutId: string): Promise<string> {
     }
     await sendWinKeystroke(expr);
     return `Triggered ${shortcutId}`;
+  }
+
+  // Fast path on macOS: <0.1ms native CoreGraphics daemon (zero osascript spawn delay!)
+  const nativeSpec = MAC_NATIVE_KEYS[shortcutId];
+  if (nativeSpec) {
+    const sent = await sendNativeMacKey(nativeSpec[0], nativeSpec[1]);
+    if (sent) return `Triggered ${shortcutId}`;
   }
 
   const script = APPLESCRIPT_SHORTCUTS[shortcutId];

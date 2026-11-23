@@ -98,7 +98,11 @@ async function ensureMouseDaemon(): Promise<ChildProcess | null> {
 
   daemonReadyPromise = (async () => {
     try {
-      if (!fs.existsSync(NATIVE_BIN)) {
+      const needsCompile =
+        !fs.existsSync(NATIVE_BIN) ||
+        (fs.existsSync(NATIVE_SRC) &&
+          fs.statSync(NATIVE_SRC).mtimeMs > fs.statSync(NATIVE_BIN).mtimeMs);
+      if (needsCompile) {
         if (daemonCompileAttempted || !fs.existsSync(NATIVE_SRC)) return null;
         daemonCompileAttempted = true;
         fs.mkdirSync(path.dirname(NATIVE_BIN), { recursive: true });
@@ -275,6 +279,20 @@ export async function scrollMacSmooth(dx: number, dy: number): Promise<void> {
   if (daemon?.stdin?.writable) {
     daemon.stdin.write(`S ${cx} ${cy}\n`);
   }
+}
+
+/**
+ * Instant (<0.1ms) native CoreGraphics keyboard event via persistent mouse_daemon.
+ * modMask: 1=Cmd, 2=Shift, 4=Option, 8=Ctrl
+ */
+export async function sendNativeMacKey(keyCode: number, modMask = 0): Promise<boolean> {
+  if (IS_WIN) return false;
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(`K ${keyCode} ${modMask}\n`);
+    return true;
+  }
+  return false;
 }
 
 export async function sendPresentationKey(
