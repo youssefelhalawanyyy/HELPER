@@ -323,7 +323,7 @@ export function DeckShell() {
                   ? deck.hello?.hostname || 'CONNECTED'
                   : isReconnecting
                     ? 'RECONNECTING…'
-                    : 'PAIR MAC'}
+                    : 'PAIR COMPUTER'}
               </span>
             </button>
 

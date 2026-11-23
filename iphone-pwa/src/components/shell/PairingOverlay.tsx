@@ -28,6 +28,7 @@ interface PairingOverlayProps {
 }
 
 type PairMode = 'tunnel' | 'lan';
+type HostOs = 'mac' | 'windows';
 
 export function PairingOverlay({
   open,
@@ -38,6 +39,7 @@ export function PairingOverlay({
   onDisconnect,
 }: PairingOverlayProps) {
   const [mode, setMode] = useState<PairMode>('tunnel');
+  const [hostOs, setHostOs] = useState<HostOs>('mac');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('4747');
   const [digits, setDigits] = useState<string[]>(['', '', '', '', '', '']);
@@ -217,7 +219,9 @@ export function PairingOverlay({
                   <Laptop className="h-4 w-4 text-[#22d3ee]" />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="disp text-[22px] text-[#f2f3f7] sm:text-[24px]">Pair With Mac</h1>
+                  <h1 className="disp text-[22px] text-[#f2f3f7] sm:text-[24px]">
+                    Pair With Computer
+                  </h1>
                   <span
                     className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider"
                     style={{
@@ -285,7 +289,7 @@ export function PairingOverlay({
                     }`}
                   >
                     <Wifi className="h-3 w-3 shrink-0" />
-                    <span className="truncate">Local Mac / IP</span>
+                    <span className="truncate">Local PC / IP</span>
                   </button>
                 </div>
 
@@ -300,7 +304,7 @@ export function PairingOverlay({
                   >
                     <div className="flex items-center justify-between">
                       <span className="sub !text-[9px]">
-                        {mode === 'tunnel' ? 'Cloudflare Tunnel URL' : 'Mac IP Address'}
+                        {mode === 'tunnel' ? 'Cloudflare Tunnel URL' : 'Computer IP Address'}
                       </span>
                       {mode === 'lan' && (
                         <button
@@ -403,42 +407,82 @@ export function PairingOverlay({
                     ) : (
                       <ShieldCheck className="h-3.5 w-3.5" />
                     )}
-                    CONNECT TO MAC
+                    CONNECT TO COMPUTER
                   </motion.button>
                 </div>
               </form>
 
-              {/* Right Column: Live Mac Terminal Setup Guide */}
+              {/* Right Column: Mac & Windows Terminal Setup Guide */}
               <div className="col-span-5 flex flex-col justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-3">
                 <div>
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <Terminal className="h-3.5 w-3.5 text-[#34d399]" />
-                    <span className="sub !text-[9.5px] !text-zinc-300">Mac Terminal Steps</span>
+                  <div className="mb-2 flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Terminal className="h-3.5 w-3.5 text-[#34d399]" />
+                      <span className="sub !text-[9px] !text-zinc-300">Terminal Steps</span>
+                    </div>
+                    <div className="flex rounded-full bg-white/[0.06] p-0.5">
+                      {(
+                        [
+                          { id: 'mac', label: 'Mac' },
+                          { id: 'windows', label: 'Windows' },
+                        ] as const
+                      ).map((osTab) => (
+                        <button
+                          key={osTab.id}
+                          type="button"
+                          onClick={() => {
+                            soundEngine.playClick();
+                            setHostOs(osTab.id);
+                          }}
+                          className="rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase transition-colors"
+                          style={{
+                            background: hostOs === osTab.id ? '#22d3ee' : 'transparent',
+                            color: hostOs === osTab.id ? '#041016' : '#8b90a0',
+                          }}
+                        >
+                          {osTab.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    {[
-                      {
-                        tag: '1. Start Bridge',
-                        cmd: 'cd /Users/youssefhalawanyy/HELPER && npm run dev:bridge',
-                        note: 'Prints your 6-digit PIN & QR code',
-                      },
-                      ...(mode === 'tunnel'
-                        ? [
-                            {
-                              tag: '2. HTTPS Tunnel',
-                              cmd: 'npx -y cloudflared tunnel --url http://127.0.0.1:4747',
-                              note: 'Paste the https://….trycloudflare.com URL',
-                            },
-                          ]
-                        : [
-                            {
-                              tag: '2. Enter Local IP',
-                              cmd: '127.0.0.1',
-                              note: 'Use 127.0.0.1 on this Mac, or LAN IP on Wi-Fi',
-                            },
-                          ]),
-                    ].map((item, idx) => (
+                    {(hostOs === 'mac'
+                      ? [
+                          {
+                            tag: '1. Start Live + QR (Mac)',
+                            cmd: 'cd /Users/youssefhalawanyy/HELPER && npm run live',
+                            note: 'Starts bridge + HTTPS tunnel + prints 1-scan QR & PIN',
+                          },
+                          ...(mode === 'tunnel'
+                            ? [
+                                {
+                                  tag: '2. Pair iPhone',
+                                  cmd: 'Scan QR or paste https://….trycloudflare.com + PIN',
+                                  note: 'Works from anywhere over HTTPS',
+                                },
+                              ]
+                            : [
+                                {
+                                  tag: '2. Local IP (Same Mac)',
+                                  cmd: '127.0.0.1',
+                                  note: 'Use 127.0.0.1 on this Mac, or LAN IP on Wi-Fi',
+                                },
+                              ]),
+                        ]
+                      : [
+                          {
+                            tag: '1. First Time (PowerShell)',
+                            cmd: 'git clone https://github.com/youssefelhalawanyyy/HELPER.git; cd HELPER; npm install',
+                            note: 'Requires Node.js LTS on Windows 10/11',
+                          },
+                          {
+                            tag: '2. Start Live + QR (Windows)',
+                            cmd: 'npm run live',
+                            note: 'Or right-click start-windows.bat → Run as Administrator',
+                          },
+                        ]
+                    ).map((item, idx) => (
                       <div
                         key={item.tag}
                         className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2"
@@ -476,9 +520,11 @@ export function PairingOverlay({
                 </div>
 
                 <div className="text-[9.5px] leading-snug text-[#7c8190]">
-                  {mode === 'tunnel'
-                    ? 'Required for iPhone Safari on Vercel HTTPS.'
-                    : 'Fastest for Chrome on this Mac (no tunnel needed).'}
+                  {hostOs === 'windows'
+                    ? 'Tip: Run as Admin on Windows for full Defender + SFC/DISM repair.'
+                    : mode === 'tunnel'
+                      ? 'Scan the terminal QR with iPhone Camera for 1-tap pairing.'
+                      : 'Fastest for Chrome on this computer (no tunnel needed).'}
                 </div>
               </div>
             </div>
