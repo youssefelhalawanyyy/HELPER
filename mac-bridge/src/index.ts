@@ -905,7 +905,7 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'app:active', payload: { ...activeApp, ts: Date.now() } });
   sendTo(ws, { type: 'ports:update', payload: { ports: portService.getLatest() } });
   sendTo(ws, { type: 'logs:status', payload: logStreamer.getStatus() });
-  for (const line of logStreamer.getRecentLines().slice(-40)) {
+  for (const line of logStreamer.getRecentLines().slice(-20)) {
     sendTo(ws, { type: 'logs:line', payload: line });
   }
   sendTo(ws, { type: 'git:status', payload: gitService.getLatest() });
@@ -927,7 +927,7 @@ wss.on('connection', (ws, req) => {
     type: 'preview:url',
     payload: { url: configStore.getAll().previewUrl, label: 'Local Dev' },
   });
-  for (const ev of webhookStore.getRecent().slice(0, 15).reverse()) {
+  for (const ev of webhookStore.getRecent().slice(0, 8).reverse()) {
     sendTo(ws, { type: 'webhook:event', payload: ev });
   }
   void getMediaState().then((media) => sendTo(ws, { type: 'media:state', payload: media }));

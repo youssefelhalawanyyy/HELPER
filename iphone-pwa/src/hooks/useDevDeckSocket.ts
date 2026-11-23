@@ -464,7 +464,7 @@ export function useDevDeckSocket() {
           return;
         }
         setStatus('reconnecting');
-        const delay = Math.min(5000, 750 * Math.pow(1.4, retryCountRef.current));
+        const delay = Math.min(3500, 300 * Math.pow(1.4, retryCountRef.current));
         retryCountRef.current += 1;
         reconnectTimerRef.current = window.setTimeout(() => connect(cfg), delay);
       };

@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from 'next';
+import { Archivo } from 'next/font/google';
 import './globals.css';
+
+const archivo = Archivo({
+  subsets: ['latin'],
+  display: 'swap',
+  weight: ['400', '500', '600', '700', '800', '900'],
+  variable: '--font-archivo',
+});
 
 export const metadata: Metadata = {
   title: 'DevDeck — Mac & PC Coding Companion',
@@ -34,17 +42,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="bg-black text-[#f2f3f7] antialiased selection:bg-cyan-500/30">
+    <html lang="en" className={`dark ${archivo.variable}`}>
+      <body className={`${archivo.className} bg-black text-[#f2f3f7] antialiased selection:bg-cyan-500/30`}>
         {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}`,
+          }}
+        />
       </body>
     </html>
   );
