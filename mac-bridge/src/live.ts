@@ -14,6 +14,11 @@ const OS_LABEL = IS_WIN ? 'Windows' : process.platform === 'darwin' ? 'Mac' : 'L
 let tunnelChild: ChildProcess | null = null;
 let bridgeChild: ChildProcess | null = null;
 let bridgeStarted = false;
+let currentTunnelUrl = '';
+let restartingBridge = false;
+let shuttingDown = false;
+const DIST_ENTRY = path.join(BRIDGE_ROOT, 'dist', 'index.js');
+const SRC_ENTRY = path.join(BRIDGE_ROOT, 'src', 'index.ts');
 
 console.log(`\n🚀 DevDeck Live Launcher (${OS_LABEL}) — starting free Cloudflare HTTPS tunnel...\n`);
 
@@ -27,20 +32,13 @@ tunnelChild = spawn(
   },
 );
 
-function startBridge(tunnelUrl: string): void {
-  if (bridgeStarted) return;
-  bridgeStarted = true;
-  console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
-  console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code...\n`);
-
-  const distEntry = path.join(BRIDGE_ROOT, 'dist', 'index.js');
-  const srcEntry = path.join(BRIDGE_ROOT, 'src', 'index.ts');
+function spawnBridgeProcess(tunnelUrl: string): void {
   const useCompiled =
-    fs.existsSync(distEntry) &&
-    (!fs.existsSync(srcEntry) || fs.statSync(distEntry).mtimeMs >= fs.statSync(srcEntry).mtimeMs);
+    fs.existsSync(DIST_ENTRY) &&
+    (!fs.existsSync(SRC_ENTRY) || fs.statSync(DIST_ENTRY).mtimeMs >= fs.statSync(SRC_ENTRY).mtimeMs);
 
-  bridgeChild = useCompiled
-    ? spawn(process.execPath, [distEntry], {
+  const child = useCompiled
+    ? spawn(process.execPath, [DIST_ENTRY], {
         cwd: BRIDGE_ROOT,
         stdio: 'inherit',
         env: {
@@ -62,9 +60,39 @@ function startBridge(tunnelUrl: string): void {
         },
       });
 
-  bridgeChild.on('exit', (code) => {
+  bridgeChild = child;
+
+  child.on('exit', (code) => {
+    if (bridgeChild === child) bridgeChild = null;
+    if (shuttingDown) return;
+    if (restartingBridge) {
+      restartingBridge = false;
+      spawnBridgeProcess(currentTunnelUrl);
+      return;
+    }
     cleanup();
     process.exit(code ?? 0);
+  });
+}
+
+function startBridge(tunnelUrl: string): void {
+  if (bridgeStarted) return;
+  bridgeStarted = true;
+  currentTunnelUrl = tunnelUrl;
+  console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
+  console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code (auto-reload enabled)...\n`);
+  spawnBridgeProcess(tunnelUrl);
+
+  // Hot-reload ONLY the bridge process when dist/index.js is rebuilt, keeping the Cloudflare tunnel URL alive!
+  let lastMtime = fs.existsSync(DIST_ENTRY) ? fs.statSync(DIST_ENTRY).mtimeMs : 0;
+  fs.watchFile(DIST_ENTRY, { interval: 1500 }, (curr) => {
+    if (shuttingDown || !curr.mtimeMs || curr.mtimeMs === lastMtime) return;
+    lastMtime = curr.mtimeMs;
+    if (bridgeChild && !bridgeChild.killed) {
+      console.log('\n♻️  Detected updated mac-bridge build — hot-reloading bridge (keeping tunnel URL alive)...\n');
+      restartingBridge = true;
+      bridgeChild.kill('SIGTERM');
+    }
   });
 }
 
@@ -92,6 +120,8 @@ tunnelChild.on('exit', (code) => {
 });
 
 function cleanup(): void {
+  shuttingDown = true;
+  fs.unwatchFile(DIST_ENTRY);
   if (bridgeChild && !bridgeChild.killed) bridgeChild.kill('SIGTERM');
   if (tunnelChild && !tunnelChild.killed) tunnelChild.kill('SIGTERM');
 }

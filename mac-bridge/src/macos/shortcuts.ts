@@ -10,8 +10,6 @@ const execFileAsync = promisify(execFile);
 const MAC_NATIVE_KEYS: Record<string, [number, number]> = {
   'nav.back': [33, 1], // Cmd+[
   'nav.forward': [30, 1], // Cmd+]
-  'nav.switchApp': [48, 1], // Cmd+Tab
-  'nav.missionControl': [126, 8], // Ctrl+Up
   'nav.up': [126, 0],
   'nav.down': [125, 0],
   'nav.left': [123, 0],
@@ -168,6 +166,11 @@ export async function runShortcut(shortcutId: string): Promise<string> {
     }
     await sendWinKeystroke(expr);
     return `Triggered ${shortcutId}`;
+  }
+
+  if (shortcutId === 'nav.missionControl' && !IS_WIN) {
+    await execFileAsync('open', ['-a', 'Mission Control'], { timeout: 2500 });
+    return 'Opened Mission Control';
   }
 
   // Fast path on macOS: <0.1ms native CoreGraphics daemon (zero osascript spawn delay!)

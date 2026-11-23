@@ -38,10 +38,37 @@ function gradeColor(grade: string): string {
 export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
   const [rightTab, setRightTab] = useState<'ai' | 'devices' | 'log'>('ai');
   const [showPass, setShowPass] = useState(false);
+  const [pendingLocal, setPendingLocal] = useState(false);
+  const pendingTimerRef = useRef<number | null>(null);
   const autoScannedRef = useRef(false);
   const net = deck.networkState;
   const accent = gradeColor(net.grade);
   const busy = net.scanning || net.testingSpeed || net.fixing;
+
+  useEffect(() => {
+    if (busy || net.updatedAt > 0) {
+      setPendingLocal(false);
+      if (pendingTimerRef.current) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+      }
+    }
+  }, [busy, net.updatedAt]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
+    };
+  }, []);
+
+  const markPending = () => {
+    setPendingLocal(true);
+    if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
+    pendingTimerRef.current = window.setTimeout(() => {
+      setPendingLocal(false);
+      deck.showToast(false, 'Computer bridge outdated — press Ctrl+C and restart npm run live');
+    }, 3000);
+  };
 
   useEffect(() => {
     if (autoScannedRef.current) return;
@@ -53,20 +80,26 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
 
   const runScan = () => {
     soundEngine.playClick();
-    deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } });
+    if (deck.sendEvent({ type: 'network:scan', payload: { requestId: makeRequestId() } })) {
+      markPending();
+    }
   };
 
   const runSpeed = () => {
     soundEngine.playClick();
     setRightTab('ai');
-    deck.sendEvent({ type: 'network:speedtest', payload: { requestId: makeRequestId() } });
+    if (deck.sendEvent({ type: 'network:speedtest', payload: { requestId: makeRequestId() } })) {
+      markPending();
+    }
   };
 
   const runFix = (action: NetworkFixAction) => {
     soundEngine.playClick();
     if (action === 'ai_analyze' || action === 'full_net_fix') setRightTab('ai');
     else setRightTab('log');
-    deck.sendEvent({ type: 'network:fix', payload: { requestId: makeRequestId(), action } });
+    if (deck.sendEvent({ type: 'network:fix', payload: { requestId: makeRequestId(), action } })) {
+      markPending();
+    }
   };
 
   const handleRevealPassword = () => {
@@ -310,8 +343,8 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
             onClick={runScan}
             className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[8px] font-extrabold text-zinc-200 uppercase disabled:opacity-40"
           >
-            <RefreshCw className={`h-2.5 w-2.5 ${net.scanning ? 'animate-spin' : ''}`} />
-            Scan LAN
+            <RefreshCw className={`h-2.5 w-2.5 ${net.scanning || pendingLocal ? 'animate-spin' : ''}`} />
+            {pendingLocal ? 'Sending…' : 'Scan LAN'}
           </button>
         </div>
 

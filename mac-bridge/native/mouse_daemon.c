@@ -135,13 +135,13 @@ int main(void) {
                 CGEventRef kd = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, true);
                 CGEventRef ku = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, false);
                 if (kd) {
-                    if (flags) CGEventSetFlags(kd, flags);
+                    CGEventSetFlags(kd, flags);
                     CGEventPost(kCGHIDEventTap, kd);
                     CFRelease(kd);
                 }
                 usleep(4000);
                 if (ku) {
-                    if (flags) CGEventSetFlags(ku, flags);
+                    CGEventSetFlags(ku, flags);
                     CGEventPost(kCGHIDEventTap, ku);
                     CFRelease(ku);
                 }
