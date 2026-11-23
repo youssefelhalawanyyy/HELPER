@@ -1104,30 +1104,46 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         this.term('==================================================');
         this.log('STAGE 2/2: LAUNCHING AI SYSTEMS ENGINEER FOR DEEP FIXES');
         this.term('==================================================');
-        const aiSummary = await runAutonomousAiRescue(
-          this.report,
-          (line) => this.term(line),
-          (statusText) => {
-            this.report.activeAction = statusText;
-            this.emit();
-          },
-          whatWasFixed,
-          whatWasNotFixed,
-        );
+        let aiSummary: {
+          whatWasFixed: string[];
+          whatWasNotFixed: string[];
+          whyItHappened: string[];
+          nextSteps: string[];
+        } | null = null;
+        try {
+          aiSummary = await runAutonomousAiRescue(
+            this.report,
+            (line) => this.term(line),
+            (statusText) => {
+              this.report.activeAction = statusText;
+              this.emit();
+            },
+            whatWasFixed,
+            whatWasNotFixed,
+          );
+        } catch (aiErr) {
+          const reason = aiErr instanceof Error ? aiErr.message : 'AI API temporarily unavailable';
+          this.term(`⚠ AI cloud quota/demand limit (${reason.slice(0, 80)}) — generating full local English report.`);
+          whatWasNotFixed.push(
+            `Gemini AI cloud step was temporarily rate-limited (${reason.slice(0, 70)}). All Stage 1 computer repairs still completed normally.`,
+          );
+        }
         this.log('Re-scanning computer to measure final improvement…');
         this.report.repairing = false;
         this.report.activeAction = '';
         await this.runScan();
-        this.report.postReport = {
-          generatedAt: Date.now(),
-          scoreBefore: aiStartScore,
-          scoreAfter: this.report.score,
-          whatWasFixed: aiSummary.whatWasFixed,
-          whatWasNotFixed: aiSummary.whatWasNotFixed,
-          whyItHappened: aiSummary.whyItHappened,
-          nextSteps: aiSummary.nextSteps,
-        };
-        summaryMsg = `Full AI Rescue Complete! Health ${aiStartScore} → ${this.report.score}/100`;
+        this.report.postReport = aiSummary
+          ? {
+              generatedAt: Date.now(),
+              scoreBefore: aiStartScore,
+              scoreAfter: this.report.score,
+              whatWasFixed: aiSummary.whatWasFixed,
+              whatWasNotFixed: aiSummary.whatWasNotFixed,
+              whyItHappened: aiSummary.whyItHappened,
+              nextSteps: aiSummary.nextSteps,
+            }
+          : this.buildPostReport(aiStartScore, whatWasFixed, whatWasNotFixed);
+        summaryMsg = `Full Rescue Complete! Health ${aiStartScore} → ${this.report.score}/100`;
         this.log(`✅ ${summaryMsg}`);
         this.emit();
         this.onAlert?.('success', summaryMsg);

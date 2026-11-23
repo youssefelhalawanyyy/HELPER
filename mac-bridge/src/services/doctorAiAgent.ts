@@ -8,7 +8,13 @@ import type { DoctorPostReport, SystemDoctorReport } from '../types/protocol.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KEY_FILE = path.resolve(__dirname, '../../data/doctor_ai.json');
 
-const MODELS = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+const MODELS = [
+  'gemini-2.5-flash-lite',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3-flash-preview',
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+];
 
 const BLOCKED_CMD_PATTERNS: RegExp[] = [
   /\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+(\/|~|\$HOME|\/Users|\/System|\/Applications|C:\\)/i,
