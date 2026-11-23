@@ -31,14 +31,6 @@ import { soundEngine } from '@/lib/soundEngine';
 
 export type DeckViewId = 'deck' | 'monitor' | 'launch' | 'hardware' | 'preview';
 
-const DEFAULT_TICKER: Array<[string, string]> = [
-  ['#34d399', 'DevDeck OLED hardware mode ready'],
-  ['#22d3ee', 'Local Wi-Fi WebSocket bridge on :4747'],
-  ['#fbbf24', 'Antigravity MCP notify_iphone armed'],
-  ['#60a5fa', 'Voice-to-Mac auto-paste online'],
-  ['#a78bfa', 'Auto-switching macOS app profiles'],
-];
-
 const NAV_ITEMS: Array<{ id: DeckViewId; label: string; icon: typeof Home }> = [
   { id: 'deck', label: 'Deck', icon: Home },
   { id: 'monitor', label: 'Monitor', icon: Activity },
@@ -54,7 +46,7 @@ export function DeckShell() {
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [antigravityMode, setAntigravityMode] = useState(true);
+  const [antigravityMode, setAntigravityMode] = useState(false);
   const [scale, setScale] = useState(1);
 
   useEffect(() => {
@@ -73,9 +65,20 @@ export function DeckShell() {
     if (next) soundEngine.playClick();
   };
 
+  const isConnected = deck.status === 'connected';
+  const isReconnecting = deck.status === 'reconnecting' || deck.status === 'connecting';
+
+  // 100% real telemetry/event ticker (zero fake placeholder logs)
   const tickerItems = useMemo(() => {
-    if (deck.logs.length > 0) {
-      return deck.logs.slice(-8).map((l): [string, string] => [
+    if (!isConnected) {
+      return [
+        ['#ff5d6c', 'Not connected to Mac bridge — click PAIR MAC to link'],
+        ['#22d3ee', 'Start bridge: npm run dev:bridge (port 4747)'],
+      ] as Array<[string, string]>;
+    }
+    const items: Array<[string, string]> = [];
+    for (const l of deck.logs.slice(-6)) {
+      items.push([
         l.level === 'error'
           ? '#ff5d6c'
           : l.level === 'success'
@@ -83,14 +86,26 @@ export function DeckShell() {
             : l.level === 'warn'
               ? '#fbbf24'
               : '#22d3ee',
-        l.text.slice(0, 72),
+        l.text.slice(0, 80),
       ]);
     }
-    return DEFAULT_TICKER;
-  }, [deck.logs]);
+    if (items.length === 0) {
+      items.push(['#34d399', `Connected to ${deck.hello?.hostname || 'Mac'}`]);
+      items.push(['#22d3ee', `Active app: ${deck.activeApp.appName}`]);
+      items.push(['#fbbf24', `Git: ${deck.gitStatus.repoName} (${deck.gitStatus.branch})`]);
+      items.push(['#a78bfa', `Listening dev ports: ${deck.ports.length}`]);
+    }
+    return items;
+  }, [
+    isConnected,
+    deck.logs,
+    deck.hello?.hostname,
+    deck.activeApp.appName,
+    deck.gitStatus.repoName,
+    deck.gitStatus.branch,
+    deck.ports.length,
+  ]);
 
-  const isConnected = deck.status === 'connected';
-  const isReconnecting = deck.status === 'reconnecting' || deck.status === 'connecting';
   const flashColor =
     deck.alertFlash?.kind === 'error'
       ? '#ff5d6c'
@@ -170,7 +185,11 @@ export function DeckShell() {
                 onClick={toggleSound}
                 className="grid h-8 w-8 place-items-center text-[#6b7080] hover:text-white"
               >
-                {soundOn ? <Volume2 className="h-[15px] w-[15px]" /> : <VolumeX className="h-[15px] w-[15px]" />}
+                {soundOn ? (
+                  <Volume2 className="h-[15px] w-[15px]" />
+                ) : (
+                  <VolumeX className="h-[15px] w-[15px]" />
+                )}
               </motion.button>
 
               <motion.button
@@ -228,7 +247,7 @@ export function DeckShell() {
                   </span>
                   <span>
                     {isConnected
-                      ? 'CONNECTED'
+                      ? deck.hello?.hostname || 'CONNECTED'
                       : isReconnecting
                         ? 'RECONNECTING…'
                         : 'PAIR MAC'}
@@ -236,10 +255,13 @@ export function DeckShell() {
                 </button>
 
                 <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2.5 text-[#f2f3f7]">
-                  CPU <b className="ml-1">{Math.round(deck.stats.cpuPct)}%</b>
+                  CPU <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
                 </span>
                 <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2.5 text-[#f2f3f7]">
-                  RAM <b className="ml-1">{deck.stats.ramUsedGb.toFixed(1)}GB</b>
+                  RAM{' '}
+                  <b className="ml-1">
+                    {isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}GB` : '--'}
+                  </b>
                 </span>
 
                 {deck.focusState.active && (
@@ -291,6 +313,7 @@ export function DeckShell() {
                         deck={deck}
                         antigravityPinned={antigravityMode}
                         onNavigateToMonitor={() => setActiveView('monitor')}
+                        onOpenPairing={() => setPairingModalOpen(true)}
                       />
                     )}
                     {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
@@ -348,7 +371,7 @@ export function DeckShell() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
-                className="pointer-events-none absolute right-3 bottom-8 z-40 max-w-[320px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
+                className="pointer-events-none absolute right-3 bottom-8 z-40 max-w-[340px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
                 style={{
                   background: deck.toast.ok ? '#0b1e16' : '#240c10',
                   borderColor: deck.toast.ok ? '#34d39955' : '#ff5d6c66',
