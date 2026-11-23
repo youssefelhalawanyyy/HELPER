@@ -324,18 +324,30 @@ export type DoctorRepairAction =
   | 'clean_junk'
   | 'flush_dns'
   | 'free_ram'
+  | 'scan_malware'
   | 'verify_system_files'
-  | 'full_tuneup';
+  | 'full_tuneup'
+  | 'fix_all';
 
 export interface DoctorIssue {
   id: string;
   severity: 'critical' | 'warning' | 'healthy';
-  category: 'cpu' | 'memory' | 'disk' | 'corruption' | 'startup' | 'crashes' | 'network';
+  category: 'cpu' | 'memory' | 'disk' | 'corruption' | 'security' | 'startup' | 'crashes' | 'network';
   title: string;
   plainEnglish: string;
   impact: string;
   fixAction?: DoctorRepairAction;
   fixLabel?: string;
+}
+
+export interface DoctorPostReport {
+  generatedAt: number;
+  scoreBefore: number;
+  scoreAfter: number;
+  whatWasFixed: string[];
+  whatWasNotFixed: string[];
+  whyItHappened: string[];
+  nextSteps: string[];
 }
 
 export interface SystemDoctorReport {
@@ -359,9 +371,13 @@ export interface SystemDoctorReport {
     startupCount: number;
     uptimeHours: number;
     integrityStatus: string;
+    securityStatus: string;
+    corruptedFilesCount: number;
   };
   issues: DoctorIssue[];
   repairLog: string[];
+  terminalLines: string[];
+  postReport: DoctorPostReport | null;
 }
 
 export type ServerEvent =

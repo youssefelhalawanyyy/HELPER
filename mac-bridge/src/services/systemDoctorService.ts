@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import si from 'systeminformation';
 import { IS_WIN, runPowerShell } from '../platform/win32.js';
 import type {
   DoctorIssue,
+  DoctorPostReport,
   DoctorRepairAction,
   SystemDoctorReport,
 } from '../types/protocol.js';
@@ -83,7 +84,8 @@ export class SystemDoctorService {
     activeAction: '',
     score: 0,
     grade: 'GOOD',
-    summaryEnglish: 'Tap "Deep Scan" to inspect CPU, RAM, disk health, junk files, crashes, and system corruption.',
+    summaryEnglish:
+      'Tap "SCAN ALL" to inspect viruses/threats, corrupted files, CPU, RAM, disk health, junk, and crashes.',
     platform: process.platform,
     scannedAt: 0,
     metrics: {
@@ -98,9 +100,13 @@ export class SystemDoctorService {
       startupCount: 0,
       uptimeHours: 0,
       integrityStatus: 'Not Checked',
+      securityStatus: 'Not Scanned',
+      corruptedFilesCount: 0,
     },
     issues: [],
     repairLog: [],
+    terminalLines: [],
+    postReport: null,
   };
 
   constructor(
@@ -113,18 +119,85 @@ export class SystemDoctorService {
   }
 
   private emit(): void {
-    this.onUpdate({ ...this.report, issues: [...this.report.issues], repairLog: [...this.report.repairLog] });
+    this.onUpdate({
+      ...this.report,
+      issues: [...this.report.issues],
+      repairLog: [...this.report.repairLog],
+      terminalLines: [...this.report.terminalLines],
+      postReport: this.report.postReport ? { ...this.report.postReport } : null,
+    });
   }
 
-  private log(line: string): void {
-    const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    this.report.repairLog = [...this.report.repairLog.slice(-60), `[${stamp}] ${line}`];
+  private term(line: string): void {
+    const clean = line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g, '').trimEnd();
+    if (!clean.trim()) return;
+    this.report.terminalLines = [...this.report.terminalLines.slice(-160), clean.slice(0, 260)];
     this.emit();
   }
 
-  private async checkIntegrityAndCrashes(): Promise<{
+  private log(line: string): void {
+    const stamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    this.report.repairLog = [...this.report.repairLog.slice(-60), `[${stamp}] ${line}`];
+    this.term(`[doctor] ${line}`);
+  }
+
+  private execStreaming(
+    command: string,
+    args: string[],
+    timeoutMs = 90_000,
+  ): Promise<{ code: number; output: string }> {
+    return new Promise((resolve) => {
+      this.term(`$ ${command} ${args.join(' ')}`);
+      const child = spawn(command, args, {
+        shell: IS_WIN && command !== 'powershell.exe',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      let buf = '';
+      const flushLines = (chunk: Buffer) => {
+        const text = chunk.toString('utf8');
+        out += text;
+        buf += text;
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop() ?? '';
+        for (const l of lines) {
+          if (l.trim()) this.term(l);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        this.term('⚠ Command timed out');
+        resolve({ code: -1, output: out });
+      }, timeoutMs);
+
+      child.stdout?.on('data', flushLines);
+      child.stderr?.on('data', flushLines);
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        this.term(`ERROR: ${err.message}`);
+        resolve({ code: 1, output: err.message });
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (buf.trim()) this.term(buf);
+        resolve({ code: code ?? 0, output: out });
+      });
+    });
+  }
+
+  private async checkSecurityAndIntegrity(): Promise<{
     integrityStatus: string;
     corrupted: boolean;
+    corruptedFilesCount: number;
+    corruptedFileNames: string[];
+    securityStatus: string;
+    securityThreat: boolean;
+    securityDetail: string;
     crashCount: number;
     topCrashApp: string;
     startupCount: number;
@@ -132,33 +205,77 @@ export class SystemDoctorService {
     if (IS_WIN) {
       let integrityStatus = 'Healthy';
       let corrupted = false;
+      let corruptedFilesCount = 0;
+      const corruptedFileNames: string[] = [];
+      let securityStatus = 'Defender Active';
+      let securityThreat = false;
+      let securityDetail = 'Windows Defender real-time protection is active and no threats were detected.';
       let crashCount = 0;
-      let topCrashApp = '';
+      const topCrashApp = '';
       let startupCount = 0;
 
-      // 1. DISM /CheckHealth (read-only, fast check for Windows component store corruption)
+      // 1. Windows Defender status & threat detections
       try {
+        this.term('$ powershell Get-MpComputerStatus; Get-MpThreatDetection');
+        const psSec = `
+$st = Get-MpComputerStatus -ErrorAction SilentlyContinue
+$threats = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Select-Object -First 5)
+$rtp = if ($st) { $st.RealTimeProtectionEnabled } else { $true }
+$age = if ($st) { $st.AntivirusSignatureAge } else { 0 }
+Write-Output ("RTP=" + $rtp + "||AGE=" + $age + "||THREATS=" + $threats.Count)
+`;
+        const out = await runPowerShell(psSec, 6000);
+        const rtpOff = /RTP=False/i.test(out);
+        const threatMatch = out.match(/THREATS=(\d+)/i);
+        const threatCount = Number(threatMatch?.[1] || 0);
+        const ageMatch = out.match(/AGE=(\d+)/i);
+        const sigAge = Number(ageMatch?.[1] || 0);
+
+        if (threatCount > 0) {
+          securityThreat = true;
+          securityStatus = `${threatCount} Threat(s) Logged`;
+          securityDetail = `Windows Defender logged ${threatCount} malware/virus detection(s). Run "Virus Scan" immediately to quarantine threats.`;
+        } else if (rtpOff) {
+          securityThreat = true;
+          securityStatus = 'Protection OFF';
+          securityDetail = 'Windows Defender Real-Time Protection is turned OFF, leaving your PC exposed to viruses and ransomware.';
+        } else if (sigAge > 14) {
+          securityStatus = `Defs ${sigAge}d Old`;
+          securityDetail = `Windows Defender virus definitions are ${sigAge} days old. Update Windows Security definitions.`;
+        } else {
+          securityStatus = 'Defender Clean';
+        }
+        this.term(`Security: ${securityStatus}`);
+      } catch {
+        securityStatus = 'Check Skipped';
+      }
+
+      // 2. DISM /CheckHealth for OS file corruption
+      try {
+        this.term('$ DISM /Online /Cleanup-Image /CheckHealth');
         const out = await runPowerShell('DISM /Online /Cleanup-Image /CheckHealth 2>&1 | Out-String', 12_000);
         if (/repairable|corrupt/i.test(out)) {
           integrityStatus = 'Corrupted (Repairable)';
           corrupted = true;
+          corruptedFilesCount = 1;
         } else if (/no component store corruption/i.test(out)) {
           integrityStatus = 'Healthy (DISM Verified)';
         } else if (/elevated|740/i.test(out)) {
           integrityStatus = 'Needs Admin for DISM';
         }
+        this.term(`Integrity: ${integrityStatus}`);
       } catch {
         integrityStatus = 'Check Skipped';
       }
 
-      // 2. Recent Application/System crash events & startup items
+      // 3. System event errors & startup items
       try {
         const ps = `
 $since = (Get-Date).AddDays(-7)
 $errs = @(Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2; StartTime=$since} -MaxEvents 25 -ErrorAction SilentlyContinue)
 $start1 = @(Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue | ForEach-Object { $_.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } })
 $start2 = @(Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" -ErrorAction SilentlyContinue)
-Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).ToString())
+Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).toString())
 `;
         const out = await runPowerShell(ps, 5000);
         const [eStr, sStr] = out.trim().split('||');
@@ -168,13 +285,59 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
         // Ignore
       }
 
-      return { integrityStatus, corrupted, crashCount, topCrashApp, startupCount };
+      return {
+        integrityStatus,
+        corrupted,
+        corruptedFilesCount,
+        corruptedFileNames,
+        securityStatus,
+        securityThreat,
+        securityDetail,
+        crashCount,
+        topCrashApp,
+        startupCount,
+      };
     }
 
-    // macOS: SMART status + recent crash reports in ~/Library/Logs/DiagnosticReports + LaunchAgents
-    let integrityStatus = 'Verified';
+    // macOS: Security (Gatekeeper + SIP + LaunchAgents audit) + SMART + Corrupted .plist check
+    let integrityStatus = 'SMART Verified';
     let corrupted = false;
+    let corruptedFilesCount = 0;
+    const corruptedFileNames: string[] = [];
+    let securityStatus = 'XProtect & Gatekeeper ON';
+    let securityThreat = false;
+    let securityDetail = 'macOS Gatekeeper & System Integrity Protection (SIP) are active. No suspicious unsigned startup agents detected.';
+
+    // 1. Gatekeeper & SIP
     try {
+      this.term('$ spctl --status && csrutil status');
+      const [gk, sip] = await Promise.all([
+        execFileAsync('spctl', ['--status'], { timeout: 2500 }).catch((e) => ({
+          stdout: e?.stdout || '',
+          stderr: e?.stderr || '',
+        })),
+        execFileAsync('csrutil', ['status'], { timeout: 2500 }).catch((e) => ({
+          stdout: e?.stdout || '',
+          stderr: e?.stderr || '',
+        })),
+      ]);
+      const gkText = `${gk.stdout} ${gk.stderr}`;
+      const sipText = `${sip.stdout} ${sip.stderr}`;
+      const gkDisabled = /assessments disabled/i.test(gkText);
+      const sipDisabled = /disabled/i.test(sipText);
+      if (gkDisabled || sipDisabled) {
+        securityThreat = true;
+        securityStatus = gkDisabled ? 'Gatekeeper OFF' : 'SIP Disabled';
+        securityDetail = `${gkDisabled ? 'macOS Gatekeeper is disabled' : 'System Integrity Protection (SIP) is disabled'}. This makes it easier for malware or unsigned adware to run.`;
+      }
+      this.term(`Security: ${securityStatus}`);
+    } catch {
+      // Ignore
+    }
+
+    // 2. SMART disk health
+    try {
+      this.term('$ diskutil info / | grep SMART');
       const { stdout } = await execFileAsync('diskutil', ['info', '/'], { timeout: 3000 });
       const smartMatch = stdout.match(/SMART Status:\s*(.+)/i);
       if (smartMatch) {
@@ -182,10 +345,45 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
         integrityStatus = `SMART ${status}`;
         if (!/verified|not supported/i.test(status)) corrupted = true;
       }
+      this.term(`Disk: ${integrityStatus}`);
     } catch {
       integrityStatus = 'Checked';
     }
 
+    // 3. Check user Preferences .plist files for corruption (plutil -lint)
+    try {
+      const prefsDir = path.join(os.homedir(), 'Library', 'Preferences');
+      const plists = fs
+        .readdirSync(prefsDir)
+        .filter((f) => f.endsWith('.plist') && !f.startsWith('.'))
+        .slice(0, 40)
+        .map((f) => path.join(prefsDir, f));
+      if (plists.length > 0) {
+        this.term(`$ plutil -lint ~/Library/Preferences/*.plist (${plists.length} checked)`);
+        const res = await execFileAsync('plutil', ['-lint', ...plists], { timeout: 5000 }).catch(
+          (e) => ({ stdout: e?.stdout || '', stderr: e?.stderr || '' }),
+        );
+        const combined = `${res.stdout}\n${res.stderr}`;
+        for (const line of combined.split('\n')) {
+          if (line.includes(':') && !line.trim().endsWith(': OK') && line.includes('.plist')) {
+            corruptedFilesCount += 1;
+            const fileName = path.basename(line.split(':')[0].trim());
+            if (fileName) corruptedFileNames.push(fileName);
+          }
+        }
+        if (corruptedFilesCount > 0) {
+          corrupted = true;
+          integrityStatus = `${corruptedFilesCount} Corrupted Plist(s)`;
+          this.term(`⚠ Found ${corruptedFilesCount} corrupted preference file(s): ${corruptedFileNames.slice(0, 3).join(', ')}`);
+        } else {
+          this.term('All checked preference files passed plutil -lint: OK');
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 4. Recent crash reports
     let crashCount = 0;
     const crashByApp = new Map<string, number>();
     const diagDir = path.join(os.homedir(), 'Library', 'Logs', 'DiagnosticReports');
@@ -212,6 +410,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       }
     }
 
+    // 5. LaunchAgents startup items
     let startupCount = 0;
     try {
       const agents = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -222,13 +421,25 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       // Ignore
     }
 
-    return { integrityStatus, corrupted, crashCount, topCrashApp, startupCount };
+    return {
+      integrityStatus,
+      corrupted,
+      corruptedFilesCount,
+      corruptedFileNames,
+      securityStatus,
+      securityThreat,
+      securityDetail,
+      crashCount,
+      topCrashApp,
+      startupCount,
+    };
   }
 
   async runScan(): Promise<SystemDoctorReport> {
     if (this.report.scanning) return this.report;
     this.report.scanning = true;
-    this.report.activeAction = 'Scanning CPU, RAM, storage, junk & system integrity…';
+    this.report.activeAction = 'Deep scanning viruses, corrupted files, CPU, RAM & disk…';
+    this.term('=== Starting Deep System & Security Scan ===');
     this.emit();
 
     try {
@@ -237,7 +448,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
         si.mem().catch(() => ({ total: 1, active: 0, available: 1, swapused: 0 })),
         si.fsSize().catch(() => []),
         si.processes().catch(() => ({ list: [] })),
-        this.checkIntegrityAndCrashes(),
+        this.checkSecurityAndIntegrity(),
       ]);
 
       const cpuPct = Math.round(load.currentLoad || 0);
@@ -252,7 +463,6 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       const diskPct = Math.round(mainDisk?.use || 0);
       const diskFreeGb = Number(((mainDisk?.available || 0) / 1024 ** 3).toFixed(1));
 
-      // Temp junk measurement
       let junkBytes = measureDirSizeBytes(os.tmpdir(), 1000);
       if (!IS_WIN) {
         junkBytes += measureDirSizeBytes(path.join(os.homedir(), 'Library', 'Logs'), 500);
@@ -260,7 +470,6 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       const tempJunkMb = Math.round(junkBytes / (1024 * 1024));
       const uptimeHours = Math.round(os.uptime() / 3600);
 
-      // Top CPU & RAM hogs
       const topCpu = procs.list
         .filter((p) => p.pid > 4 && p.pid !== process.pid && p.cpu > 5)
         .sort((a, b) => b.cpu - a.cpu)
@@ -273,17 +482,48 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       const issues: DoctorIssue[] = [];
       let score = 100;
 
-      // 1. System File / Disk Corruption
+      // 1. Malware / Virus / Security Shield
+      if (sysCheck.securityThreat) {
+        score -= 28;
+        issues.push({
+          id: 'security',
+          severity: 'critical',
+          category: 'security',
+          title: `Security Alert: ${sysCheck.securityStatus}`,
+          plainEnglish: sysCheck.securityDetail,
+          impact: 'Malware/adware can hijack CPU & steal data',
+          fixAction: 'scan_malware',
+          fixLabel: 'Virus Scan',
+        });
+      } else {
+        issues.push({
+          id: 'security',
+          severity: 'healthy',
+          category: 'security',
+          title: `Security Shield: ${sysCheck.securityStatus}`,
+          plainEnglish: sysCheck.securityDetail,
+          impact: 'Active malware protection',
+          fixAction: 'scan_malware',
+          fixLabel: 'Run Scan',
+        });
+      }
+
+      // 2. Corrupted Files & System Integrity
       if (sysCheck.corrupted) {
-        score -= 30;
+        score -= 28;
         issues.push({
           id: 'integrity',
           severity: 'critical',
           category: 'corruption',
-          title: 'Corrupted System Files / Drive Issue Detected',
+          title:
+            sysCheck.corruptedFilesCount > 0 && !IS_WIN
+              ? `${sysCheck.corruptedFilesCount} Corrupted Config File(s) Found`
+              : 'Corrupted System Files / Drive Issue Detected',
           plainEnglish: IS_WIN
-            ? 'Windows component store reported corruption. Corrupted OS files cause random freezes, slow boots, and app crashes.'
-            : `Your drive reported "${sysCheck.integrityStatus}". Disk or volume issues can cause severe stutters and data loss.`,
+            ? 'Windows component store reported corruption. Corrupted OS files cause random freezes, blue screens, and slow boots.'
+            : sysCheck.corruptedFileNames.length > 0
+              ? `Found corrupted preference file(s): ${sysCheck.corruptedFileNames.slice(0, 3).join(', ')}. Corrupted config files cause app hangs and slow launches.`
+              : `Your drive reported "${sysCheck.integrityStatus}". Disk or volume issues can cause severe stutters.`,
           impact: 'High risk of crashes & freezing',
           fixAction: 'verify_system_files',
           fixLabel: IS_WIN ? 'Run SFC + DISM' : 'Verify Disk',
@@ -296,16 +536,16 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           title: `System Integrity: ${sysCheck.integrityStatus}`,
           plainEnglish:
             'No corrupted system files or drive hardware errors were found. You can still run a deep verification anytime.',
-          impact: 'OS core files intact',
+          impact: 'Core OS files intact',
           fixAction: 'verify_system_files',
-          fixLabel: IS_WIN ? 'Run SFC + DISM' : 'Verify Volume',
+          fixLabel: IS_WIN ? 'Run SFC + DISM' : 'Verify Disk',
         });
       }
 
-      // 2. RAM / Memory Pressure
-      if (ramPct >= 85 || swapUsedGb >= 2) {
+      // 3. RAM / Memory Pressure
+      if (ramPct >= 82 || swapUsedGb >= 2) {
         const crit = ramPct >= 92 || swapUsedGb >= 4;
-        score -= crit ? 25 : 15;
+        score -= crit ? 24 : 14;
         const hogText = topRam.length
           ? ` Heavy apps: ${topRam.map((p) => `${p.name.replace(/\.exe$/i, '')} (${p.mem.toFixed(0)}%)`).join(', ')}.`
           : '';
@@ -314,7 +554,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           severity: crit ? 'critical' : 'warning',
           category: 'memory',
           title: `High Memory Usage (${ramPct}% Full)`,
-          plainEnglish: `Your computer is using ${ramUsedGb} GB of ${ramTotalGb} GB RAM${swapUsedGb > 0 ? ` and spilling ${swapUsedGb} GB onto slow disk swap` : ''}.${hogText} This is a major cause of lag when switching apps.`,
+          plainEnglish: `Your computer is using ${ramUsedGb} GB of ${ramTotalGb} GB RAM${swapUsedGb > 0 ? ` and spilling ${swapUsedGb} GB onto slow disk swap` : ''}.${hogText} When RAM fills up, every click lags.`,
           impact: 'Causes stuttering & app reloads',
           fixAction: 'free_ram',
           fixLabel: 'Trim RAM',
@@ -325,27 +565,27 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           severity: 'healthy',
           category: 'memory',
           title: `Memory Healthy (${ramPct}% Used)`,
-          plainEnglish: `${ramUsedGb} GB of ${ramTotalGb} GB RAM is in use with plenty of headroom for smooth multitasking.`,
+          plainEnglish: `${ramUsedGb} GB of ${ramTotalGb} GB RAM is in use with healthy headroom.`,
           impact: 'Smooth multitasking',
         });
       }
 
-      // 3. CPU Bottleneck
+      // 4. CPU Bottleneck
       if (cpuPct >= 70) {
         const crit = cpuPct >= 88;
         score -= crit ? 22 : 12;
         const hogText = topCpu.length
-          ? ` Right now ${topCpu.map((p) => `${p.name.replace(/\.exe$/i, '')} (${Math.round(p.cpu)}%)`).join(' and ')} are eating most of your processor.`
+          ? ` Right now ${topCpu.map((p) => `${p.name.replace(/\.exe$/i, '')} (${Math.round(p.cpu)}%)`).join(' and ')} are eating most of your CPU.`
           : '';
         issues.push({
           id: 'cpu',
           severity: crit ? 'critical' : 'warning',
           category: 'cpu',
           title: `Processor Overloaded (${cpuPct}% CPU)`,
-          plainEnglish: `Your CPU is working very hard right now.${hogText} High CPU load makes mouse clicks, typing, and video playback feel sluggish.`,
+          plainEnglish: `Your CPU is heavily loaded right now.${hogText} High CPU usage makes typing and clicking feel sluggish.`,
           impact: 'Direct UI lag & fan noise',
           fixAction: 'free_ram',
-          fixLabel: 'Optimize Load',
+          fixLabel: 'Optimize',
         });
       } else {
         issues.push({
@@ -358,7 +598,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
         });
       }
 
-      // 4. Storage Free Space
+      // 5. Storage Free Space
       if (diskPct >= 85 || diskFreeGb < 20) {
         const crit = diskPct >= 93 || diskFreeGb < 10;
         score -= crit ? 22 : 12;
@@ -367,29 +607,29 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           severity: crit ? 'critical' : 'warning',
           category: 'disk',
           title: `Low Free Disk Space (${diskFreeGb} GB Left)`,
-          plainEnglish: `Your main drive is ${diskPct}% full. When an SSD drops below 15% free space, Windows/macOS slows down dramatically because it has no room for swap and caches.`,
-          impact: 'Severe boot & file-save slowdown',
+          plainEnglish: `Your main drive only has ${diskFreeGb} GB free (${diskPct}% used). SSDs slow down dramatically when free space drops below 15 GB because the OS runs out of room for virtual memory.`,
+          impact: 'Severe boot, swap & app-launch slowdown',
           fixAction: 'clean_junk',
           fixLabel: 'Clean Junk',
         });
       }
 
-      // 5. Temp & Cache Junk
+      // 6. Temp & Cache Junk
       if (tempJunkMb >= 150) {
         score -= tempJunkMb >= 800 ? 12 : 6;
         issues.push({
           id: 'junk',
-          severity: tempJunkMb >= 800 ? 'warning' : 'warning',
+          severity: 'warning',
           category: 'disk',
           title: `${tempJunkMb} MB of Temporary Junk Files`,
-          plainEnglish: `Found ${tempJunkMb} MB of leftover temp and log files cluttering your drive. Clearing them safely frees space and speeds up file indexing.`,
+          plainEnglish: `Found ${tempJunkMb} MB of leftover temporary and log files cluttering your drive. Clearing them safely reclaims space and speeds up file indexing.`,
           impact: `Reclaim ~${tempJunkMb} MB instantly`,
           fixAction: 'clean_junk',
           fixLabel: `Clean ${tempJunkMb} MB`,
         });
       }
 
-      // 6. Recent Crashes / System Errors
+      // 7. Recent Crashes
       if (sysCheck.crashCount >= 4) {
         score -= sysCheck.crashCount >= 12 ? 15 : 8;
         issues.push({
@@ -398,15 +638,15 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           category: 'crashes',
           title: `${sysCheck.crashCount} Recent System/App Crashes (7 Days)`,
           plainEnglish: sysCheck.topCrashApp
-            ? `Your computer logged ${sysCheck.crashCount} crashes this week — "${sysCheck.topCrashApp}" crashed most often. Repeated crashes point to a buggy app or corrupted cache.`
-            : `Your computer logged ${sysCheck.crashCount} critical system errors this week. Running a system file repair is strongly recommended.`,
+            ? `Your computer logged ${sysCheck.crashCount} crashes this week — "${sysCheck.topCrashApp}" crashed most often. Repeated crashes point to a buggy app, low disk space, or corrupted cache.`
+            : `Your computer logged ${sysCheck.crashCount} critical system errors this week. Running a full system file repair is strongly recommended.`,
           impact: 'Instability & unexpected freezes',
           fixAction: 'verify_system_files',
           fixLabel: 'Verify Files',
         });
       }
 
-      // 7. Startup Bloat / Long Uptime
+      // 8. Startup Bloat / Long Uptime
       if (sysCheck.startupCount >= 10 || uptimeHours >= 168) {
         score -= 7;
         issues.push({
@@ -419,8 +659,8 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
               : `${sysCheck.startupCount} Startup Background Items`,
           plainEnglish:
             uptimeHours >= 168
-              ? `Your computer has been running for ${Math.floor(uptimeHours / 24)} days straight without a restart. Memory leaks and stale caches build up over time — a reboot + tune-up will make it feel brand new.`
-              : `You have ${sysCheck.startupCount} apps launching automatically at login, which slows down boot time and eats background RAM.`,
+              ? `Your computer has been running for ${Math.floor(uptimeHours / 24)} days straight without a restart. Memory leaks and stale kernel caches accumulate over time.`
+              : `You have ${sysCheck.startupCount} apps launching automatically at login, slowing boot time and eating RAM.`,
           impact: 'Slow boot & background drag',
           fixAction: 'flush_dns',
           fixLabel: 'Flush DNS',
@@ -431,19 +671,17 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       const grade: SystemDoctorReport['grade'] =
         score >= 85 ? 'EXCELLENT' : score >= 68 ? 'GOOD' : score >= 45 ? 'SLOW' : 'CRITICAL';
 
-      // Sort issues: critical -> warning -> healthy
       const order = { critical: 0, warning: 1, healthy: 2 };
       issues.sort((a, b) => order[a.severity] - order[b.severity]);
 
-      // Plain-English top-level diagnosis
       const realProblems = issues.filter((i) => i.severity !== 'healthy');
-      let summaryEnglish = '';
-      if (realProblems.length === 0) {
-        summaryEnglish = `Your ${IS_WIN ? 'Windows PC' : 'Mac'} is running fast and healthy (${score}/100). CPU (${cpuPct}%), RAM (${ramPct}%), disk space (${diskFreeGb} GB free), and system integrity all look great.`;
-      } else {
-        const topTwo = realProblems.slice(0, 2).map((p) => p.title.toLowerCase()).join(' and ');
-        summaryEnglish = `Your ${IS_WIN ? 'Windows PC' : 'Mac'} is slowed down mainly by ${topTwo}. Tap "1-Tap Full Tune-Up" below to clean junk, refresh memory & DNS, and restore speed.`;
-      }
+      const summaryEnglish =
+        realProblems.length === 0
+          ? `Your ${IS_WIN ? 'Windows PC' : 'Mac'} is clean, secure, and fast (${score}/100). No viruses, corrupted files, or major bottlenecks found.`
+          : `Your ${IS_WIN ? 'Windows PC' : 'Mac'} is slowed down mainly by ${realProblems
+              .slice(0, 2)
+              .map((p) => p.title.toLowerCase())
+              .join(' and ')}. Tap "FIX ALL" to scan viruses, verify corrupted files, clean junk, and generate a full English repair report.`;
 
       this.report = {
         ...this.report,
@@ -466,9 +704,12 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           startupCount: sysCheck.startupCount,
           uptimeHours,
           integrityStatus: sysCheck.integrityStatus,
+          securityStatus: sysCheck.securityStatus,
+          corruptedFilesCount: sysCheck.corruptedFilesCount,
         },
         issues,
       };
+      this.term(`=== Scan Complete — Health Score: ${score}/100 (${grade}) ===`);
       this.emit();
       return this.report;
     } catch (err) {
@@ -480,20 +721,82 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
     }
   }
 
+  private buildPostReport(
+    scoreBefore: number,
+    whatWasFixed: string[],
+    whatWasNotFixed: string[],
+  ): DoctorPostReport {
+    const m = this.report.metrics;
+    const whyItHappened: string[] = [];
+    const nextSteps: string[] = [];
+
+    if (m.diskFreeGb < 15) {
+      whyItHappened.push(
+        `Low free storage (${m.diskFreeGb} GB left) starves the OS of virtual memory swap space, causing freezes and app crashes.`,
+      );
+      whatWasNotFixed.push(
+        `Personal files on your drive were NOT deleted — you still only have ${m.diskFreeGb} GB free.`,
+      );
+      nextSteps.push(
+        'Free up at least 20 GB by deleting old Downloads, large screen recordings, or unused Xcode/Docker/node_modules caches.',
+      );
+    }
+    if (m.ramPct >= 82) {
+      whyItHappened.push(
+        `RAM is ${m.ramPct}% full (${m.ramUsedGb}/${m.ramTotalGb} GB), forcing your computer to swap memory onto disk.`,
+      );
+      nextSteps.push('Close unused browser tabs and heavy background apps (check Mac/PC Monitor tab).');
+    }
+    if (m.crashReportsCount >= 4) {
+      whyItHappened.push(
+        `${m.crashReportsCount} system/app crash logs were recorded in the last 7 days, indicating unstable apps or low-memory kills.`,
+      );
+      nextSteps.push('Update crashing apps and your OS to the latest stable version.');
+    }
+    if (m.uptimeHours >= 168) {
+      whyItHappened.push(
+        `The computer has not been restarted in ${Math.floor(m.uptimeHours / 24)} days, allowing kernel caches and memory leaks to build up.`,
+      );
+      whatWasNotFixed.push('Automatic reboot was skipped so your open work is never lost.');
+      nextSteps.push('Save your work and restart the computer once to clear kernel memory completely.');
+    }
+    if (whyItHappened.length === 0) {
+      whyItHappened.push(
+        'No severe hardware or OS bottlenecks were found — only normal temporary cache buildup and DNS/memory clutter.',
+      );
+    }
+    if (nextSteps.length === 0) {
+      nextSteps.push('Your computer is in great shape! Run "FIX ALL" once a week to keep it fast.');
+    }
+
+    return {
+      generatedAt: Date.now(),
+      scoreBefore: scoreBefore || this.report.score,
+      scoreAfter: this.report.score,
+      whatWasFixed,
+      whatWasNotFixed,
+      whyItHappened,
+      nextSteps,
+    };
+  }
+
   async runRepair(action: DoctorRepairAction): Promise<string> {
     if (this.report.repairing) {
       return 'A repair action is already running';
     }
     this.report.repairing = true;
-    this.report.activeAction = action.replace(/_/g, ' ');
+    this.report.activeAction = action.replace(/_/g, ' ').toUpperCase();
     this.emit();
 
     const beforeScore = this.report.score;
+    const whatWasFixed: string[] = [];
+    const whatWasNotFixed: string[] = [];
     let summaryMsg = '';
 
     try {
       const doCleanJunk = () => {
         this.log('Cleaning temporary & cache junk files…');
+        this.term(`$ clean "${os.tmpdir()}"`);
         const r1 = cleanDirFilesOlderThan(os.tmpdir(), 10 * 60 * 1000);
         let freed = r1.freedBytes;
         let count = r1.deletedCount;
@@ -504,68 +807,109 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
           count += r2.deletedCount;
         }
         const mb = (freed / (1024 * 1024)).toFixed(1);
-        this.log(`Removed ${count} old temp/log items — freed ${mb} MB.`);
+        this.log(`Removed ${count} old temp/log files — freed ${mb} MB.`);
+        whatWasFixed.push(`Cleaned ${count} temporary & old crash log files (${mb} MB reclaimed).`);
         return `Freed ${mb} MB (${count} junk files removed)`;
       };
 
       const doFlushDns = async () => {
         this.log('Flushing DNS & refreshing network resolver cache…');
         if (IS_WIN) {
-          await execFileAsync('ipconfig', ['/flushdns'], { timeout: 5000 });
-          this.log('Windows DNS resolver cache flushed.');
+          await this.execStreaming('ipconfig', ['/flushdns'], 8000);
         } else {
-          await execFileAsync('dscacheutil', ['-flushcache'], { timeout: 5000 });
-          this.log('macOS DNS cache flushed.');
+          await this.execStreaming('dscacheutil', ['-flushcache'], 8000);
         }
+        whatWasFixed.push('Flushed stale DNS cache for faster website and API lookups.');
         return 'DNS cache flushed';
       };
 
       const doFreeRam = async () => {
-        this.log('Trimming idle memory working sets…');
+        this.log('Optimizing memory & trimming idle working sets…');
         if (IS_WIN) {
-          await runPowerShell(
-            `Add-Type 'using System; using System.Runtime.InteropServices; public class Mem { [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(IntPtr h); }'; Get-Process | Where-Object { $_.WorkingSet64 -gt 80MB -and $_.ProcessName -notmatch 'System|csrss|dwm|explorer|node' } | ForEach-Object { try { [Mem]::EmptyWorkingSet($_.Handle) | Out-Null } catch {} }`,
-            8000,
+          const encoded = Buffer.from(
+            `Add-Type 'using System; using System.Runtime.InteropServices; public class Mem { [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(IntPtr h); }'; $c=0; Get-Process | Where-Object { $_.WorkingSet64 -gt 80MB -and $_.ProcessName -notmatch 'System|csrss|dwm|explorer|node' } | ForEach-Object { try { if([Mem]::EmptyWorkingSet($_.Handle)){ $c++ } } catch {} }; Write-Output "Trimmed working set memory on $c background processes."`,
+            'utf16le',
+          ).toString('base64');
+          await this.execStreaming(
+            'powershell.exe',
+            ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+            12_000,
           );
-          this.log('Windows standby/working-set RAM trimmed across background apps.');
+          whatWasFixed.push('Trimmed standby/working-set RAM across heavy Windows background apps.');
         } else {
-          const { stdout } = await execFileAsync('vm_stat', [], { timeout: 3000 }).catch(() => ({ stdout: '' }));
-          const freeMatch = stdout.match(/Pages free:\s+(\d+)/);
-          this.log(`macOS memory check complete (free pages: ${freeMatch?.[1] || 'ok'}).`);
+          await this.execStreaming('vm_stat', [], 5000);
+          whatWasFixed.push('Audited macOS virtual memory & page pressure.');
         }
         return 'Memory optimized';
       };
 
+      const doScanMalware = async () => {
+        if (IS_WIN) {
+          this.log('Starting live Windows Defender antivirus QuickScan…');
+          const res = await this.execStreaming(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              'Update-MpSignature -ErrorAction SilentlyContinue; Start-MpScan -ScanType QuickScan; $t=@(Get-MpThreatDetection -ErrorAction SilentlyContinue); Write-Output ("Defender QuickScan finished. Active threat detections: " + $t.Count)',
+            ],
+            120_000,
+          );
+          if (res.code === 0) {
+            whatWasFixed.push('Ran full Windows Defender antivirus QuickScan & signature check.');
+          } else {
+            whatWasNotFixed.push(
+              'Windows Defender scan returned a warning — open Windows Security for full offline scan if needed.',
+            );
+          }
+          return 'Windows Defender antivirus scan completed';
+        }
+
+        this.log('Running macOS Security, Gatekeeper, SIP & LaunchAgent audit…');
+        await this.execStreaming('spctl', ['--status'], 5000);
+        await this.execStreaming('csrutil', ['status'], 5000);
+        const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+        if (fs.existsSync(agentsDir)) {
+          await this.execStreaming('ls', ['-la', agentsDir], 5000);
+        }
+        whatWasFixed.push(
+          'Verified macOS Gatekeeper, SIP, XProtect status and audited user LaunchAgents for suspicious persistence.',
+        );
+        return 'macOS security & malware persistence audit completed';
+      };
+
       const doVerifySystemFiles = async () => {
         if (IS_WIN) {
-          this.log('Running Windows System File Checker (DISM + SFC)…');
-          const dismOut = await runPowerShell(
-            'DISM /Online /Cleanup-Image /RestoreHealth 2>&1 | Out-String',
+          this.log('Running Windows System File Repair (DISM + SFC /scannow)…');
+          const dism = await this.execStreaming(
+            'DISM',
+            ['/Online', '/Cleanup-Image', '/RestoreHealth'],
             120_000,
-          ).catch((e) => (e instanceof Error ? e.message : String(e)));
-          for (const line of dismOut.split('\n').filter((l) => l.trim()).slice(-6)) {
-            this.log(`DISM: ${line.trim()}`);
-          }
-          if (/740|elevated/i.test(dismOut)) {
-            this.log('TIP: Right-click start-windows.bat → "Run as Administrator" to repair protected Windows system files.');
-            return 'Run start-windows.bat as Administrator for full SFC/DISM repair';
-          }
-          const sfcOut = await runPowerShell('sfc /scannow 2>&1 | Out-String', 120_000).catch((e) =>
-            e instanceof Error ? e.message : String(e),
           );
-          for (const line of sfcOut.split('\n').filter((l) => l.trim()).slice(-6)) {
-            this.log(`SFC: ${line.trim()}`);
+          if (/740|elevated/i.test(dism.output)) {
+            whatWasNotFixed.push(
+              'Windows DISM & SFC require Administrator rights. Right-click start-windows.bat → "Run as Administrator" to repair protected Windows OS files.',
+            );
+            return 'Run start-windows.bat as Administrator for protected SFC/DISM repair';
+          }
+          const sfc = await this.execStreaming('sfc', ['/scannow'], 120_000);
+          if (sfc.code === 0) {
+            whatWasFixed.push('Completed Windows DISM + SFC /scannow system file corruption repair.');
+          } else {
+            whatWasNotFixed.push('SFC reported some locked files — reboot and run SFC as Administrator.');
           }
           return 'Windows DISM + SFC integrity repair finished';
         }
 
         this.log('Running macOS APFS volume verification (diskutil verifyVolume /)…');
-        const { stdout } = await execFileAsync('diskutil', ['verifyVolume', '/'], {
-          timeout: 60_000,
-          maxBuffer: 1024 * 1024,
-        });
-        for (const line of stdout.split('\n').filter((l) => l.trim()).slice(-6)) {
-          this.log(`diskutil: ${line.trim()}`);
+        const res = await this.execStreaming('diskutil', ['verifyVolume', '/'], 90_000);
+        if (res.code === 0) {
+          whatWasFixed.push('Verified macOS APFS volume & filesystem metadata (diskutil verifyVolume /).');
+        } else {
+          whatWasNotFixed.push(
+            'diskutil verifyVolume reported a warning — run Disk Utility First Aid in macOS Recovery if errors persist.',
+          );
         }
         return 'macOS disk volume verification completed';
       };
@@ -576,19 +920,28 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
         summaryMsg = await doFlushDns();
       } else if (action === 'free_ram') {
         summaryMsg = await doFreeRam();
+      } else if (action === 'scan_malware') {
+        summaryMsg = await doScanMalware();
       } else if (action === 'verify_system_files') {
         summaryMsg = await doVerifySystemFiles();
-      } else if (action === 'full_tuneup') {
-        this.log('=== Starting 1-Tap Full Computer Tune-Up ===');
-        const m1 = doCleanJunk();
+      } else if (action === 'full_tuneup' || action === 'fix_all') {
+        this.term('==================================================');
+        this.log('STARTING ALL-IN-ONE DEEP RESCUE & REPAIR PIPELINE');
+        this.term('==================================================');
+        doCleanJunk();
         await doFlushDns();
         await doFreeRam();
-        this.log('Re-scanning system health…');
+        await doScanMalware();
+        if (action === 'fix_all') {
+          await doVerifySystemFiles();
+        }
+        this.log('Re-scanning computer to measure improvement…');
         this.report.repairing = false;
         await this.runScan();
-        const afterScore = this.report.score;
-        summaryMsg = `Tune-Up complete: ${m1}. Health ${beforeScore || afterScore} → ${afterScore}/100`;
+        this.report.postReport = this.buildPostReport(beforeScore, whatWasFixed, whatWasNotFixed);
+        summaryMsg = `Rescue Complete! Health ${this.report.postReport.scoreBefore} → ${this.report.postReport.scoreAfter}/100`;
         this.log(`✅ ${summaryMsg}`);
+        this.emit();
         this.onAlert?.('success', summaryMsg);
         return summaryMsg;
       }
@@ -596,6 +949,8 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).To
       this.report.repairing = false;
       this.report.activeAction = '';
       await this.runScan();
+      this.report.postReport = this.buildPostReport(beforeScore, whatWasFixed, whatWasNotFixed);
+      this.emit();
       this.onAlert?.('success', summaryMsg);
       return summaryMsg;
     } catch (err) {

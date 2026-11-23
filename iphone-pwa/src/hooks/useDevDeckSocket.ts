@@ -241,9 +241,13 @@ export function useDevDeckSocket() {
       startupCount: 0,
       uptimeHours: 0,
       integrityStatus: 'Not Checked',
+      securityStatus: 'Not Scanned',
+      corruptedFilesCount: 0,
     },
     issues: [],
     repairLog: [],
+    terminalLines: [],
+    postReport: null,
   });
   const [speedTest, setSpeedTest] = useState<SpeedTestState>({
     running: false,
