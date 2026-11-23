@@ -81,15 +81,13 @@ export function PairingOverlay({
       return;
     }
 
-    // Handle pasting a full 6-digit PIN
     if (cleaned.length > 1) {
       const next = [...digits];
       for (let i = 0; i < 6 && i < cleaned.length; i += 1) {
         next[i] = cleaned[i];
       }
       setDigits(next);
-      const focusIdx = Math.min(5, cleaned.length);
-      pinRefs.current[focusIdx]?.focus();
+      pinRefs.current[Math.min(5, cleaned.length)]?.focus();
       return;
     }
 
@@ -150,11 +148,11 @@ export function PairingOverlay({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-3 backdrop-blur-xl"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2.5 backdrop-blur-xl sm:p-4"
         >
-          {/* Ambient radial halo */}
+          {/* Ambient glow */}
           <div
-            className="pointer-events-none absolute h-[340px] w-[540px] rounded-full opacity-25 blur-[90px]"
+            className="pointer-events-none absolute h-[280px] w-[520px] rounded-full opacity-25 blur-[90px]"
             style={{
               background:
                 mode === 'tunnel'
@@ -164,14 +162,14 @@ export function PairingOverlay({
           />
 
           <motion.div
-            initial={{ opacity: 0, scale: 0.94, y: 12 }}
+            initial={{ opacity: 0, scale: 0.94, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={DECK_SPRING}
             onClick={(e) => e.stopPropagation()}
-            className="tile relative w-full max-w-[560px] overflow-hidden p-5"
+            className="tile deck-scroll relative max-h-[94dvh] w-full max-w-[740px] overflow-y-auto p-3.5 sm:p-4"
             style={{
-              borderRadius: 26,
+              borderRadius: 24,
               borderColor: 'rgba(255,255,255,0.12)',
               boxShadow:
                 'inset 0 1px 0 rgba(255,255,255,0.09), 0 30px 80px -15px rgba(0,0,0,0.95)',
@@ -197,41 +195,35 @@ export function PairingOverlay({
               }}
             />
 
-            {/* Header */}
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
+            {/* Compact Header Row */}
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
                 <div
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/10"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10"
                   style={{
                     background:
                       'linear-gradient(135deg, rgba(34,211,238,0.18), rgba(52,211,153,0.1))',
-                    boxShadow: '0 0 24px -6px rgba(34,211,238,0.5)',
                   }}
                 >
-                  <Laptop className="h-5 w-5 text-[#22d3ee]" />
+                  <Laptop className="h-4 w-4 text-[#22d3ee]" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h1 className="disp text-[26px] text-[#f2f3f7]">Pair With Mac</h1>
-                    <span
-                      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider"
-                      style={{
-                        background: isConnected
-                          ? 'rgba(52,211,153,.15)'
-                          : 'rgba(255,255,255,.07)',
-                        color: isConnected ? '#34d399' : '#9ca3af',
-                      }}
-                    >
-                      <i
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ background: isConnected ? '#34d399' : '#6b7080' }}
-                      />
-                      {status}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-[#8b90a0]">
-                    Link your iPhone 14 to the local Mac bridge over zero-latency WebSockets.
-                  </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="disp text-[22px] text-[#f2f3f7] sm:text-[24px]">Pair With Mac</h1>
+                  <span
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider"
+                    style={{
+                      background: isConnected
+                        ? 'rgba(52,211,153,.15)'
+                        : 'rgba(255,255,255,.07)',
+                      color: isConnected ? '#34d399' : '#9ca3af',
+                    }}
+                  >
+                    <i
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: isConnected ? '#34d399' : '#6b7080' }}
+                    />
+                    {status}
+                  </span>
                 </div>
               </div>
 
@@ -241,211 +233,246 @@ export function PairingOverlay({
                   whileTap={{ scale: 0.88 }}
                   onClick={onClose}
                   aria-label="Close pairing dialog"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.05] text-[#8b90a0] hover:bg-white/10 hover:text-white"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.05] text-[#8b90a0] hover:bg-white/10 hover:text-white"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-3.5 w-3.5" />
                 </motion.button>
               )}
             </div>
 
-            {/* Connection Mode Switcher */}
-            <div className="mb-4 grid grid-cols-2 gap-1.5 rounded-2xl border border-white/[0.07] bg-black/70 p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setMode('tunnel');
-                  if (/^(127\.0\.0\.1|localhost|192\.168\.)/.test(host)) setHost('');
-                }}
-                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[11px] font-bold transition-all ${
-                  mode === 'tunnel'
-                    ? 'bg-[#1b1d24] text-[#22d3ee] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                    : 'text-[#7c8190] hover:text-zinc-200'
-                }`}
-              >
-                <Globe className="h-3.5 w-3.5" />
-                HTTPS Tunnel (Vercel / iPhone)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setMode('lan');
-                  if (!host || /^https:\/\//i.test(host)) setHost('127.0.0.1');
-                }}
-                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[11px] font-bold transition-all ${
-                  mode === 'lan'
-                    ? 'bg-[#1b1d24] text-[#34d399] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                    : 'text-[#7c8190] hover:text-zinc-200'
-                }`}
-              >
-                <Wifi className="h-3.5 w-3.5" />
-                Local Mac / LAN IP
-              </button>
-            </div>
-
-            {/* Pairing Form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-              {/* Row 1: Bridge Address */}
-              <div className="grid grid-cols-12 gap-2.5">
-                <label className={mode === 'tunnel' ? 'col-span-12 flex flex-col gap-1' : 'col-span-8 flex flex-col gap-1'}>
-                  <div className="flex items-center justify-between">
-                    <span className="sub">
-                      {mode === 'tunnel' ? 'Cloudflare Tunnel HTTPS URL' : 'Mac IP Address'}
-                    </span>
-                    {mode === 'lan' && (
-                      <button
-                        type="button"
-                        onClick={() => setHost('127.0.0.1')}
-                        className="text-[10px] font-bold text-[#34d399] hover:underline"
-                      >
-                        Use 127.0.0.1 (this Mac)
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    required
-                    value={host}
-                    onChange={(e) => setHost(e.target.value)}
-                    placeholder={
-                      mode === 'tunnel'
-                        ? 'https://your-tunnel-name.trycloudflare.com'
-                        : '192.168.100.44 or 127.0.0.1'
-                    }
-                    className="font-mono-tech rounded-xl border border-white/10 bg-black/90 px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 outline-none transition-colors focus:border-[#22d3ee]"
-                  />
-                </label>
-
-                {mode === 'lan' && (
-                  <label className="col-span-4 flex flex-col gap-1">
-                    <span className="sub">Bridge Port</span>
-                    <input
-                      type="number"
-                      required
-                      value={port}
-                      onChange={(e) => setPort(e.target.value)}
-                      className="font-mono-tech rounded-xl border border-white/10 bg-black/90 px-3 py-2.5 text-xs text-white outline-none focus:border-[#34d399]"
-                    />
-                  </label>
-                )}
-              </div>
-
-              {/* Row 2: 6-Digit Hardware OTP PIN */}
-              <div className="flex flex-col gap-1.5">
-                <span className="sub">6-Digit Terminal Pair PIN</span>
-                <div className="grid grid-cols-6 gap-2">
-                  {digits.map((d, i) => (
-                    <input
-                      key={i}
-                      ref={(el) => {
-                        pinRefs.current[i] = el;
-                      }}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={d}
-                      onChange={(e) => handleDigitChange(i, e.target.value)}
-                      onKeyDown={(e) => handleDigitKeyDown(i, e)}
-                      aria-label={`PIN digit ${i + 1}`}
-                      placeholder="•"
-                      className="font-mono-tech num h-11 w-full rounded-xl border border-white/10 bg-black/90 text-center text-lg font-extrabold text-[#22d3ee] placeholder:text-zinc-700 outline-none transition-all focus:border-[#22d3ee] focus:shadow-[0_0_16px_-4px_rgba(34,211,238,0.6)]"
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {error && (
-                <div className="rounded-xl border border-[#ff5d6c]/35 bg-[#ff5d6c]/10 px-3 py-2 text-[11px] font-medium text-[#ff9ca5]">
-                  {error}
-                </div>
-              )}
-
-              {/* Quick Mac Terminal Cheat Sheet */}
-              <div className="rounded-2xl border border-white/[0.06] bg-black/60 p-2.5">
-                <div className="mb-1.5 flex items-center gap-1.5">
-                  <Terminal className="h-3 w-3 text-[#34d399]" />
-                  <span className="sub !text-[9px]">Run on your Mac</span>
-                </div>
-                <div className="space-y-1.5">
-                  {[
-                    {
-                      tag: 'Terminal 1',
-                      cmd: 'cd /Users/youssefhalawanyy/HELPER && npm run dev:bridge',
-                    },
-                    ...(mode === 'tunnel'
-                      ? [
-                          {
-                            tag: 'Terminal 2',
-                            cmd: 'npx -y cloudflared tunnel --url http://127.0.0.1:4747',
-                          },
-                        ]
-                      : []),
-                  ].map((item, idx) => (
-                    <div
-                      key={item.tag}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-2.5 py-1.5"
-                    >
-                      <div className="min-w-0">
-                        <span className="mr-2 text-[9px] font-extrabold uppercase text-[#22d3ee]">
-                          {item.tag}
-                        </span>
-                        <code className="font-mono-tech text-[10px] text-zinc-300">{item.cmd}</code>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyCommand(idx, item.cmd)}
-                        aria-label={`Copy ${item.tag} command`}
-                        className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-white/[0.06] text-zinc-400 hover:text-white"
-                      >
-                        {copiedCmd === idx ? (
-                          <Check className="h-3 w-3 text-[#34d399]" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Action Row */}
-              <div className="flex items-center justify-between gap-2 pt-0.5">
-                {currentPairing ? (
+            {/* Responsive 2-Column Layout: fits 844x390 landscape with zero vertical clipping */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+              {/* Left Column: Mode Tabs + Inputs + OTP PIN + Submit */}
+              <form onSubmit={handleSubmit} className="flex flex-col gap-2.5 sm:col-span-7">
+                {/* Mode Tabs */}
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.07] bg-black/70 p-1">
                   <button
                     type="button"
-                    onClick={onDisconnect}
-                    className="flex items-center gap-1.5 rounded-full border border-[#ff5d6c]/35 bg-[#ff5d6c]/10 px-3.5 py-2 text-[11px] font-bold text-[#ff5d6c] hover:bg-[#ff5d6c]/20"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setMode('tunnel');
+                      if (/^(127\.0\.0\.1|localhost|192\.168\.)/.test(host)) setHost('');
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10.5px] font-bold transition-all ${
+                      mode === 'tunnel'
+                        ? 'bg-[#1b1d24] text-[#22d3ee] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                        : 'text-[#7c8190] hover:text-zinc-200'
+                    }`}
                   >
-                    <Unplug className="h-3.5 w-3.5" />
-                    Unpair Mac
+                    <Globe className="h-3 w-3 shrink-0" />
+                    <span className="truncate">HTTPS Tunnel</span>
                   </button>
-                ) : (
-                  <span className="sub">Zero cloud · local Wi-Fi</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setMode('lan');
+                      if (!host || /^https:\/\//i.test(host)) setHost('127.0.0.1');
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10.5px] font-bold transition-all ${
+                      mode === 'lan'
+                        ? 'bg-[#1b1d24] text-[#34d399] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                        : 'text-[#7c8190] hover:text-zinc-200'
+                    }`}
+                  >
+                    <Wifi className="h-3 w-3 shrink-0" />
+                    <span className="truncate">Local Mac / IP</span>
+                  </button>
+                </div>
+
+                {/* Host / Port Row */}
+                <div className="grid grid-cols-12 gap-2">
+                  <label
+                    className={
+                      mode === 'tunnel'
+                        ? 'col-span-12 flex flex-col gap-1'
+                        : 'col-span-8 flex flex-col gap-1'
+                    }
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="sub !text-[9px]">
+                        {mode === 'tunnel' ? 'Cloudflare Tunnel URL' : 'Mac IP Address'}
+                      </span>
+                      {mode === 'lan' && (
+                        <button
+                          type="button"
+                          onClick={() => setHost('127.0.0.1')}
+                          className="text-[9.5px] font-bold text-[#34d399] hover:underline"
+                        >
+                          Use 127.0.0.1
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      placeholder={
+                        mode === 'tunnel'
+                          ? 'https://xxxx.trycloudflare.com'
+                          : '127.0.0.1 or 192.168.x.x'
+                      }
+                      className="font-mono-tech rounded-xl border border-white/10 bg-black/90 px-3 py-2 text-[11.5px] text-white placeholder:text-zinc-600 outline-none focus:border-[#22d3ee]"
+                    />
+                  </label>
+
+                  {mode === 'lan' && (
+                    <label className="col-span-4 flex flex-col gap-1">
+                      <span className="sub !text-[9px]">Port</span>
+                      <input
+                        type="number"
+                        required
+                        value={port}
+                        onChange={(e) => setPort(e.target.value)}
+                        className="font-mono-tech rounded-xl border border-white/10 bg-black/90 px-2.5 py-2 text-[11.5px] text-white outline-none focus:border-[#34d399]"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 6-Digit Hardware OTP PIN */}
+                <div className="flex flex-col gap-1">
+                  <span className="sub !text-[9px]">6-Digit Terminal Pair PIN</span>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {digits.map((d, i) => (
+                      <input
+                        key={i}
+                        ref={(el) => {
+                          pinRefs.current[i] = el;
+                        }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={d}
+                        onChange={(e) => handleDigitChange(i, e.target.value)}
+                        onKeyDown={(e) => handleDigitKeyDown(i, e)}
+                        aria-label={`PIN digit ${i + 1}`}
+                        placeholder="•"
+                        className="font-mono-tech num h-10 w-full rounded-xl border border-white/10 bg-black/90 text-center text-base font-extrabold text-[#22d3ee] placeholder:text-zinc-700 outline-none transition-all focus:border-[#22d3ee] focus:shadow-[0_0_14px_-4px_rgba(34,211,238,0.65)]"
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="rounded-xl border border-[#ff5d6c]/35 bg-[#ff5d6c]/10 px-2.5 py-1.5 text-[10.5px] font-medium text-[#ff9ca5]">
+                    {error}
+                  </div>
                 )}
 
-                <motion.button
-                  type="submit"
-                  whileTap={readyToConnect ? { scale: 0.96 } : undefined}
-                  disabled={!readyToConnect}
-                  className="flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-extrabold tracking-wide transition-all disabled:opacity-35"
-                  style={{
-                    background: readyToConnect ? '#34d399' : '#1f232c',
-                    color: readyToConnect ? '#04130c' : '#8b90a0',
-                    boxShadow: readyToConnect
-                      ? '0 3px 0 #14664a, 0 0 24px -4px rgba(52,211,153,0.65)'
-                      : 'none',
-                  }}
-                >
-                  {busy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                {/* Action Row */}
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  {currentPairing ? (
+                    <button
+                      type="button"
+                      onClick={onDisconnect}
+                      className="flex items-center gap-1 rounded-full border border-[#ff5d6c]/35 bg-[#ff5d6c]/10 px-3 py-1.5 text-[10.5px] font-bold text-[#ff5d6c]"
+                    >
+                      <Unplug className="h-3 w-3" />
+                      Unpair
+                    </button>
                   ) : (
-                    <ShieldCheck className="h-4 w-4" />
+                    <span className="sub !text-[8.5px]">Local Wi-Fi · Zero Cloud</span>
                   )}
-                  CONNECT TO MAC
-                </motion.button>
+
+                  <motion.button
+                    type="submit"
+                    whileTap={readyToConnect ? { scale: 0.96 } : undefined}
+                    disabled={!readyToConnect}
+                    className="flex items-center gap-1.5 rounded-full px-4 py-2 text-[11px] font-extrabold tracking-wide transition-all disabled:opacity-35"
+                    style={{
+                      background: readyToConnect ? '#34d399' : '#1f232c',
+                      color: readyToConnect ? '#04130c' : '#8b90a0',
+                      boxShadow: readyToConnect
+                        ? '0 3px 0 #14664a, 0 0 22px -4px rgba(52,211,153,0.65)'
+                        : 'none',
+                    }}
+                  >
+                    {busy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    )}
+                    CONNECT TO MAC
+                  </motion.button>
+                </div>
+              </form>
+
+              {/* Right Column: Live Mac Terminal Setup Guide */}
+              <div className="flex flex-col justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-3 sm:col-span-5">
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <Terminal className="h-3.5 w-3.5 text-[#34d399]" />
+                    <span className="sub !text-[9.5px] !text-zinc-300">Mac Terminal Steps</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {[
+                      {
+                        tag: '1. Start Bridge',
+                        cmd: 'cd /Users/youssefhalawanyy/HELPER && npm run dev:bridge',
+                        note: 'Prints your 6-digit PIN & QR code',
+                      },
+                      ...(mode === 'tunnel'
+                        ? [
+                            {
+                              tag: '2. HTTPS Tunnel',
+                              cmd: 'npx -y cloudflared tunnel --url http://127.0.0.1:4747',
+                              note: 'Paste the https://….trycloudflare.com URL',
+                            },
+                          ]
+                        : [
+                            {
+                              tag: '2. Enter Local IP',
+                              cmd: '127.0.0.1',
+                              note: 'Use 127.0.0.1 on this Mac, or LAN IP on Wi-Fi',
+                            },
+                          ]),
+                    ].map((item, idx) => (
+                      <div
+                        key={item.tag}
+                        className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2"
+                      >
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[9.5px] font-extrabold uppercase text-[#22d3ee]">
+                            {item.tag}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCommand(idx, item.cmd)}
+                            aria-label={`Copy ${item.tag}`}
+                            className="flex items-center gap-1 rounded-md bg-white/[0.07] px-1.5 py-0.5 text-[9px] font-bold text-zinc-300 hover:text-white"
+                          >
+                            {copiedCmd === idx ? (
+                              <>
+                                <Check className="h-2.5 w-2.5 text-[#34d399]" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-2.5 w-2.5" />
+                                Copy
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <code className="font-mono-tech block break-all text-[9.5px] leading-snug text-zinc-200">
+                          {item.cmd}
+                        </code>
+                        <div className="mt-1 text-[9px] text-[#7c8190]">{item.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-[9.5px] leading-snug text-[#7c8190]">
+                  {mode === 'tunnel'
+                    ? 'Required for iPhone Safari on Vercel HTTPS.'
+                    : 'Fastest for Chrome on this Mac (no tunnel needed).'}
+                </div>
               </div>
-            </form>
+            </div>
           </motion.div>
         </motion.div>
       )}
