@@ -204,16 +204,16 @@ export async function runDeepHardwareAndSoftwareAudit(
     terminalNotes.push(`⚠ Background Indexer/Updater using ${indexerCpu}% CPU`);
   }
 
-  // 8. Browser Bloat (Chrome / Edge / Safari / Arc / Firefox)
+  // 8. Browser Bloat (only flag when browser is genuinely eating heavy RAM >= 22%)
   const browserProcs = procs.filter((p) =>
     /chrome|msedge|safari|firefox|arc|brave|opera/i.test(p.name),
   );
   const browserMemPct = Math.round(browserProcs.reduce((sum, p) => sum + (p.mem || 0), 0));
-  if (browserMemPct >= 25 || browserProcs.length >= 28) {
-    scorePenalty += browserMemPct >= 40 ? 12 : 6;
+  if (browserMemPct >= 22) {
+    scorePenalty += browserMemPct >= 38 ? 12 : 6;
     issues.push({
       id: 'browser-bloat',
-      severity: browserMemPct >= 40 ? 'critical' : 'warning',
+      severity: browserMemPct >= 38 ? 'critical' : 'warning',
       category: 'memory',
       title: `Browser Bloat (${browserProcs.length} Processes · ${browserMemPct}% RAM)`,
       plainEnglish: `Your web browser has ${browserProcs.length} active tab/extension processes eating ~${browserMemPct}% of your total RAM. Too many open tabs or heavy extensions cause severe memory leaks and stuttering.`,

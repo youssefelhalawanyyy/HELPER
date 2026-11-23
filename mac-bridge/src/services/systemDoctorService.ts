@@ -383,7 +383,12 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         );
         const combined = `${res.stdout}\n${res.stderr}`;
         for (const line of combined.split('\n')) {
-          if (line.includes(':') && !line.trim().endsWith(': OK') && line.includes('.plist')) {
+          if (
+            line.includes(':') &&
+            !line.trim().endsWith(': OK') &&
+            line.includes('.plist') &&
+            !/operation not permitted|permission denied|no such file/i.test(line)
+          ) {
             corruptedFilesCount += 1;
             const fileName = path.basename(line.split(':')[0].trim());
             if (fileName) corruptedFileNames.push(fileName);
@@ -866,11 +871,18 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           // 4. Clean 100% safe regenerable browser & developer caches
           const safeMacCaches = [
             path.join(home, 'Library', 'Caches', 'Google', 'Chrome', 'Default', 'Cache'),
+            path.join(home, 'Library', 'Caches', 'Google', 'Chrome', 'Default', 'Code Cache'),
             path.join(home, 'Library', 'Caches', 'com.apple.Safari', 'WebKitCache'),
             path.join(home, 'Library', 'Caches', 'pip'),
             path.join(home, 'Library', 'Caches', 'Homebrew'),
+            path.join(home, 'Library', 'Caches', 'typescript'),
+            path.join(home, 'Library', 'Caches', 'node-gyp'),
+            path.join(home, 'Library', 'Caches', 'Yarn'),
             path.join(home, '.npm', '_cacache'),
+            path.join(home, 'Library', 'Developer', 'Xcode', 'DerivedData'),
+            path.join(home, 'Library', 'Application Support', 'Code', 'Cache'),
             path.join(home, 'Library', 'Application Support', 'Code', 'CachedData'),
+            path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Code Cache'),
           ];
           for (const cacheDir of safeMacCaches) {
             if (!fs.existsSync(cacheDir)) continue;
@@ -882,12 +894,17 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
         } else {
           // Windows safe regenerable caches
           const localApp = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+          const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
           const safeWinCaches = [
             path.join(localApp, 'Temp'),
             path.join(localApp, 'Google', 'Chrome', 'User Data', 'Default', 'Cache'),
+            path.join(localApp, 'Google', 'Chrome', 'User Data', 'Default', 'Code Cache'),
             path.join(localApp, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache'),
+            path.join(localApp, 'Microsoft', 'Edge', 'User Data', 'Default', 'Code Cache'),
             path.join(localApp, 'npm-cache'),
             path.join(localApp, 'pip', 'cache'),
+            path.join(appData, 'Code', 'Cache'),
+            path.join(appData, 'Code', 'CachedData'),
           ];
           for (const cacheDir of safeWinCaches) {
             if (!fs.existsSync(cacheDir)) continue;
@@ -1039,7 +1056,12 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
             const combined = `${res.stdout}\n${res.stderr}`;
             let fixedPlists = 0;
             for (const line of combined.split('\n')) {
-              if (line.includes(':') && !line.trim().endsWith(': OK') && line.includes('.plist')) {
+              if (
+                line.includes(':') &&
+                !line.trim().endsWith(': OK') &&
+                line.includes('.plist') &&
+                !/operation not permitted|permission denied|no such file/i.test(line)
+              ) {
                 const filePath = line.split(':')[0].trim();
                 const base = path.basename(filePath);
                 if (filePath && fs.existsSync(filePath)) {
