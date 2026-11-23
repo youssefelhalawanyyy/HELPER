@@ -139,10 +139,11 @@ export function DeckShell() {
 
   const goToIndex = useCallback(
     (nextIdx: number) => {
-      const clamped = Math.max(0, Math.min(PAGES.length - 1, nextIdx));
-      if (clamped === pageIdx) return;
-      setDirection(clamped > pageIdx ? 1 : -1);
-      setPageIdx(clamped);
+      const len = PAGES.length;
+      const wrapped = ((nextIdx % len) + len) % len;
+      if (wrapped === pageIdx) return;
+      setDirection(nextIdx > pageIdx ? 1 : -1);
+      setPageIdx(wrapped);
       soundEngine.playDetent();
     },
     [pageIdx],
@@ -600,9 +601,8 @@ export function DeckShell() {
               <button
                 type="button"
                 aria-label="Previous page"
-                disabled={pageIdx === 0}
                 onClick={() => goToIndex(pageIdx - 1)}
-                className="text-zinc-400 hover:text-white disabled:opacity-25"
+                className="text-zinc-400 hover:text-white"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
@@ -636,9 +636,8 @@ export function DeckShell() {
               <button
                 type="button"
                 aria-label="Next page"
-                disabled={pageIdx === PAGES.length - 1}
                 onClick={() => goToIndex(pageIdx + 1)}
-                className="text-zinc-400 hover:text-white disabled:opacity-25"
+                className="text-zinc-400 hover:text-white"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
