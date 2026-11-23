@@ -6,7 +6,9 @@ import { promisify } from 'node:util';
 import type {
   AntigravityChatTurn,
   AntigravityFeedEvent,
+  AntigravityFileDiff,
   AntigravityLiveState,
+  AntigravitySessionSummary,
   AntigravityStepItem,
   AntigravityTerminalRun,
   AntigravityToolItem,
@@ -34,6 +36,11 @@ interface TranscriptEntry {
   thinking?: string;
   content?: string;
   tool_calls?: TranscriptToolCall[];
+}
+
+export interface AntigravityAlert {
+  kind: 'success' | 'error' | 'warning';
+  message: string;
 }
 
 function stripAnsi(input: string): string {
@@ -76,6 +83,23 @@ function readTailLines(filePath: string, maxBytes = 320_000): string[] {
   }
 }
 
+function readHeadText(filePath: string, maxBytes = 40_000): string {
+  try {
+    const st = fs.statSync(filePath);
+    const len = Math.min(st.size, maxBytes);
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, 0);
+      return buf.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
 function cleanArgStr(v: unknown): string {
   if (typeof v !== 'string') return '';
   return v.replace(/^"|"$/g, '').trim();
@@ -110,11 +134,22 @@ function summarizeToolCall(tc: TranscriptToolCall): { summary: string; detail: s
 export class AntigravityService {
   private timer: NodeJS.Timeout | null = null;
   private lastDigest = '';
+  private pinnedSessionId: string | null = null;
+  private sessionTitleCache = new Map<string, { mtime: number; title: string }>();
+
+  // Alert state-transition tracking
+  private initialized = false;
+  private prevLiveStatus: 'WORKING' | 'WAITING' | 'IDLE' = 'IDLE';
+  private prevFailedTermId = '';
+  private prevApprovalTurnId = '';
+
   private latest: AntigravityLiveState = {
     active: false,
     statusLabel: 'IDLE',
     lastActivityTs: 0,
     conversationId: '',
+    pinnedSessionId: null,
+    sessions: [],
     model: '',
     stepCount: 0,
     contextTokens: 0,
@@ -134,10 +169,61 @@ export class AntigravityService {
   constructor(
     private getProjectDir: () => string,
     private onUpdate: (state: AntigravityLiveState) => void,
+    private onAlert?: (alert: AntigravityAlert) => void,
   ) {}
 
   getLatest(): AntigravityLiveState {
     return this.latest;
+  }
+
+  setSelectedSession(conversationId: string | null): void {
+    this.pinnedSessionId = conversationId ? conversationId.trim() || null : null;
+    this.lastDigest = '';
+    void this.refresh();
+  }
+
+  private extractSessionTitle(fullDir: string, logPath: string, mtime: number, fallbackId: string): string {
+    const cached = this.sessionTitleCache.get(fallbackId);
+    if (cached && cached.mtime === mtime) return cached.title;
+
+    let title = '';
+    // 1. Prefer implementation_plan.md H1 heading if present
+    const planPath = path.join(fullDir, 'implementation_plan.md');
+    if (fs.existsSync(planPath)) {
+      const head = readHeadText(planPath, 600);
+      const h1 = head.match(/^#\s+(.+)$/m);
+      if (h1?.[1]) title = h1[1].trim();
+    }
+
+    // 2. Otherwise grab first USER_REQUEST from head or tail of transcript.jsonl
+    if (!title && fs.existsSync(logPath)) {
+      const head = readHeadText(logPath, 45_000);
+      const m = head.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
+      if (m?.[1]) {
+        title = m[1].replace(/\s+/g, ' ').trim();
+      } else {
+        const tailLines = readTailLines(logPath, 60_000);
+        for (let i = tailLines.length - 1; i >= 0; i -= 1) {
+          try {
+            const entry = JSON.parse(tailLines[i]) as TranscriptEntry;
+            if (entry.type === 'USER_INPUT' && entry.content) {
+              const rm = entry.content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/i);
+              const raw = (rm ? rm[1] : entry.content).replace(/\s+/g, ' ').trim();
+              if (raw) {
+                title = raw;
+                break;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    const clean = (title || `Session ${fallbackId.slice(0, 8)}`).slice(0, 48);
+    this.sessionTitleCache.set(fallbackId, { mtime, title: clean });
+    return clean;
   }
 
   private readLatestBrain(): Omit<AntigravityLiveState, 'diffFiles' | 'totalAdded' | 'totalRemoved'> {
@@ -146,6 +232,8 @@ export class AntigravityService {
       statusLabel: 'IDLE' as const,
       lastActivityTs: 0,
       conversationId: '',
+      pinnedSessionId: this.pinnedSessionId,
+      sessions: [] as AntigravitySessionSummary[],
       model: '',
       stepCount: 0,
       contextTokens: 0,
@@ -173,25 +261,38 @@ export class AntigravityService {
           if (fs.existsSync(logPath)) {
             mtime = Math.max(mtime, fs.statSync(logPath).mtimeMs);
           }
-          return { name: d.name, full, logPath, mtime };
+          const hasPlan =
+            fs.existsSync(path.join(full, 'implementation_plan.md')) ||
+            fs.existsSync(path.join(full, 'task.md'));
+          return { name: d.name, full, logPath, mtime, hasPlan };
         })
         .sort((a, b) => b.mtime - a.mtime);
 
-      const newest = dirs[0];
-      if (!newest) return empty;
+      if (dirs.length === 0) return empty;
 
-      const tasksDir = path.join(newest.full, '.system_generated', 'tasks');
-      let latestMtime = newest.mtime;
+      const sessions: AntigravitySessionSummary[] = dirs.slice(0, 8).map((d) => ({
+        id: d.name,
+        title: this.extractSessionTitle(d.full, d.logPath, d.mtime, d.name),
+        lastActivityTs: Math.round(d.mtime),
+        hasPlan: d.hasPlan,
+      }));
+
+      const target =
+        (this.pinnedSessionId ? dirs.find((d) => d.name === this.pinnedSessionId) : null) ??
+        dirs[0];
+
+      const tasksDir = path.join(target.full, '.system_generated', 'tasks');
+      let latestMtime = target.mtime;
       let artifactName = '';
       let artifactPreview = '';
       for (const doc of ['implementation_plan.md', 'task.md', 'walkthrough.md']) {
-        const docPath = path.join(newest.full, doc);
+        const docPath = path.join(target.full, doc);
         if (fs.existsSync(docPath)) {
           const st = fs.statSync(docPath);
           if (st.mtimeMs > latestMtime) latestMtime = st.mtimeMs;
           if (!artifactName) {
             artifactName = doc;
-            artifactPreview = fs.readFileSync(docPath, 'utf8').slice(0, 2600);
+            artifactPreview = fs.readFileSync(docPath, 'utf8').slice(0, 3200);
           }
         }
       }
@@ -209,9 +310,10 @@ export class AntigravityService {
       const taskIdMap = new Map<string, AntigravityTerminalRun>();
       let lastType = '';
       let lastHadToolCalls = false;
+      let approvalRequestedTurnId = '';
 
-      if (fs.existsSync(newest.logPath)) {
-        const lines = readTailLines(newest.logPath);
+      if (fs.existsSync(target.logPath)) {
+        const lines = readTailLines(target.logPath);
         for (const raw of lines) {
           try {
             const entry = JSON.parse(raw) as TranscriptEntry;
@@ -250,6 +352,7 @@ export class AntigravityService {
               }
               lastType = 'USER_INPUT';
               lastHadToolCalls = false;
+              approvalRequestedTurnId = '';
             } else if (entry.type === 'PLANNER_RESPONSE') {
               lastType = 'PLANNER_RESPONSE';
               const tcs = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
@@ -265,6 +368,9 @@ export class AntigravityService {
                     .filter((s) => typeof s.title === 'string')
                     .map((s) => ({ title: String(s.title), status: String(s.status || 'pending') }));
                 } else if (tc.name) {
+                  if (tc.name === 'ask_question' || tc.name === 'ask_iphone') {
+                    approvalRequestedTurnId = `turn-a-${entry.step_index}`;
+                  }
                   const info = summarizeToolCall(tc);
                   turnTools.push({ name: tc.name, summary: info.summary, detail: info.detail });
                   recentEvents.push({
@@ -394,7 +500,6 @@ export class AntigravityService {
         }
       }
 
-      // Refresh live log file tail for any still-running background task
       for (const [taskName, run] of taskIdMap.entries()) {
         if (run.status === 'running') {
           const logFile = path.join(tasksDir, `${taskName}.log`);
@@ -418,11 +523,48 @@ export class AntigravityService {
           ? 'WAITING'
           : 'IDLE';
 
+      const recentTerminals = terminalRuns.slice(-8).reverse();
+
+      // Automatic Done / Error / Approval Alerts (only when auto-following the live session)
+      if (!this.pinnedSessionId && this.onAlert) {
+        const latestTerm = recentTerminals[0];
+        if (this.initialized) {
+          if (latestTerm && latestTerm.status === 'error' && latestTerm.id !== this.prevFailedTermId) {
+            this.prevFailedTermId = latestTerm.id;
+            this.onAlert({
+              kind: 'error',
+              message: `Agent command failed (exit ${latestTerm.exitCode ?? 1}): ${latestTerm.summary}`,
+            });
+          } else if (
+            approvalRequestedTurnId &&
+            approvalRequestedTurnId !== this.prevApprovalTurnId
+          ) {
+            this.prevApprovalTurnId = approvalRequestedTurnId;
+            this.onAlert({
+              kind: 'warning',
+              message: 'Antigravity is waiting for your approval / input',
+            });
+          } else if (this.prevLiveStatus === 'WORKING' && statusLabel === 'WAITING') {
+            this.onAlert({
+              kind: 'success',
+              message: 'Antigravity finished — ready for review',
+            });
+          }
+        } else {
+          if (latestTerm?.status === 'error') this.prevFailedTermId = latestTerm.id;
+          if (approvalRequestedTurnId) this.prevApprovalTurnId = approvalRequestedTurnId;
+          this.initialized = true;
+        }
+        this.prevLiveStatus = statusLabel;
+      }
+
       return {
         active,
         statusLabel,
         lastActivityTs: Math.round(latestMtime),
-        conversationId: newest.name,
+        conversationId: target.name,
+        pinnedSessionId: this.pinnedSessionId,
+        sessions,
         model,
         stepCount,
         contextTokens,
@@ -431,7 +573,7 @@ export class AntigravityService {
         steps,
         recentEvents: recentEvents.slice(-14).reverse(),
         chatTurns: chatTurns.slice(-16),
-        terminalRuns: terminalRuns.slice(-8).reverse(),
+        terminalRuns: recentTerminals,
         artifactName,
         artifactPreview,
       };
@@ -469,13 +611,57 @@ export class AntigravityService {
     }
   }
 
+  async getFileDiff(rawFile: string): Promise<AntigravityFileDiff> {
+    const projectDir = this.getProjectDir();
+    const cleaned = rawFile.replace(/^\/+/, '').trim();
+    const resolved = path.resolve(projectDir, cleaned);
+    if (!resolved.startsWith(path.resolve(projectDir))) {
+      throw new Error('Invalid file path outside workspace');
+    }
+
+    let patch = '';
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['diff', '--no-color', '--unified=3', '--', cleaned],
+        { cwd: projectDir, timeout: 3000, maxBuffer: 2 * 1024 * 1024 },
+      );
+      patch = stdout;
+      if (!patch.trim()) {
+        const staged = await execFileAsync(
+          'git',
+          ['diff', '--cached', '--no-color', '--unified=3', '--', cleaned],
+          { cwd: projectDir, timeout: 3000, maxBuffer: 2 * 1024 * 1024 },
+        );
+        patch = staged.stdout;
+      }
+    } catch {
+      patch = '';
+    }
+
+    let added = 0;
+    let removed = 0;
+    for (const line of patch.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added += 1;
+      else if (line.startsWith('-') && !line.startsWith('---')) removed += 1;
+    }
+
+    return {
+      file: cleaned,
+      patch: patch.slice(0, 16_000),
+      added,
+      removed,
+      ts: Date.now(),
+    };
+  }
+
   async refresh(): Promise<AntigravityLiveState> {
     const brain = this.readLatestBrain();
     const diff = await this.readGitDiffStat();
     const next: AntigravityLiveState = { ...brain, ...diff };
 
     const topTerm = next.terminalRuns[0];
-    const digest = `${next.conversationId}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.terminalRuns.length}|${topTerm?.status || ''}|${topTerm?.output.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
+    const digest = `${next.conversationId}|${next.pinnedSessionId || 'auto'}|${next.sessions.length}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.terminalRuns.length}|${topTerm?.status || ''}|${topTerm?.output.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
     this.latest = next;
     if (digest !== this.lastDigest) {
       this.lastDigest = digest;

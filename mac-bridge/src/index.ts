@@ -152,6 +152,7 @@ const deepTelemetry = new DeepTelemetryService(
 const antigravityService = new AntigravityService(
   () => configStore.getAll().projectDir,
   (state) => broadcast({ type: 'antigravity:state', payload: state }),
+  (alert) => broadcast({ type: 'alert:flash', payload: alert }),
 );
 
 // Live bidirectional Antigravity MCP state
@@ -179,7 +180,7 @@ gitService.start(5000);
 clipboardTracker.start(1500);
 processService.start(4500);
 deepTelemetry.start(6000);
-antigravityService.start(2500);
+antigravityService.start(1200);
 
 // --- Express Routes ---
 app.use(
@@ -675,6 +676,28 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
         reply(requestId, true, 'Prompt sent to Antigravity IDE');
       } catch (err) {
         reply(requestId, false, err instanceof Error ? err.message : 'Prompt send failed');
+      }
+      return;
+    }
+
+    case 'antigravity:selectSession': {
+      const { requestId, conversationId } = msg.payload;
+      antigravityService.setSelectedSession(conversationId);
+      reply(
+        requestId,
+        true,
+        conversationId ? `Switched to session ${conversationId.slice(0, 8)}` : 'Auto-following live session',
+      );
+      return;
+    }
+
+    case 'antigravity:diffFile': {
+      const { requestId, file } = msg.payload;
+      try {
+        const diff = await antigravityService.getFileDiff(file);
+        ws.send(JSON.stringify({ type: 'antigravity:diff', payload: diff }));
+      } catch (err) {
+        reply(requestId, false, err instanceof Error ? err.message : 'Could not load file diff');
       }
       return;
     }

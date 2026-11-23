@@ -8,6 +8,7 @@ import type {
   AgentNotification,
   AgentProgress,
   AgentQuestion,
+  AntigravityFileDiff,
   AntigravityLiveState,
   BridgeHello,
   ClientEvent,
@@ -200,6 +201,8 @@ export function useDevDeckSocket() {
     statusLabel: 'IDLE',
     lastActivityTs: 0,
     conversationId: '',
+    pinnedSessionId: null,
+    sessions: [],
     model: '',
     stepCount: 0,
     contextTokens: 0,
@@ -215,6 +218,7 @@ export function useDevDeckSocket() {
     totalAdded: 0,
     totalRemoved: 0,
   });
+  const [antigravityDiff, setAntigravityDiff] = useState<AntigravityFileDiff | null>(null);
   const [speedTest, setSpeedTest] = useState<SpeedTestState>({
     running: false,
     downMbps: null,
@@ -341,6 +345,9 @@ export function useDevDeckSocket() {
               break;
             case 'antigravity:state':
               setAntigravityState(msg.payload);
+              break;
+            case 'antigravity:diff':
+              setAntigravityDiff(msg.payload);
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
@@ -499,6 +506,7 @@ export function useDevDeckSocket() {
     agentQuestion,
     agentProgress,
     antigravityState,
+    antigravityDiff,
     speedTest,
     caffeineActive,
     processes,

@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowDown,
+  ArrowLeft,
+  Bell,
   Bot,
   Brain,
   CheckCircle2,
@@ -14,9 +16,11 @@ import {
   Eye,
   FileCode2,
   FileDiff,
+  History,
   Loader2,
   MessageSquare,
   Mic,
+  Radio,
   Search,
   Send,
   Sparkles,
@@ -31,6 +35,7 @@ import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 import type {
   AntigravityChatTurn,
+  AntigravityFileDiff,
   AntigravityTerminalRun,
   AntigravityToolItem,
 } from '@/types/protocol';
@@ -78,6 +83,15 @@ function formatTime(ts: number): string {
   } catch {
     return '';
   }
+}
+
+function formatRelativeAge(ts: number): string {
+  if (!ts) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return 'now';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+  return `${Math.floor(diffSec / 86400)}d`;
 }
 
 function toolStyle(name: string): { color: string; Icon: typeof Wrench } {
@@ -314,6 +328,142 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
   );
 }
 
+interface ParsedDiffLine {
+  kind: 'meta' | 'hunk' | 'add' | 'del' | 'ctx';
+  oldNum?: number;
+  newNum?: number;
+  text: string;
+}
+
+function parseUnifiedDiff(patch: string): ParsedDiffLine[] {
+  const out: ParsedDiffLine[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (const raw of patch.split('\n')) {
+    if (
+      raw.startsWith('diff --git') ||
+      raw.startsWith('index ') ||
+      raw.startsWith('--- ') ||
+      raw.startsWith('+++ ')
+    ) {
+      continue;
+    }
+    const hunkMatch = raw.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@(.*)$/);
+    if (hunkMatch) {
+      oldLine = Number(hunkMatch[1]);
+      newLine = Number(hunkMatch[2]);
+      out.push({ kind: 'hunk', text: raw });
+      continue;
+    }
+    if (raw.startsWith('+')) {
+      out.push({ kind: 'add', newNum: newLine++, text: raw.slice(1) });
+    } else if (raw.startsWith('-')) {
+      out.push({ kind: 'del', oldNum: oldLine++, text: raw.slice(1) });
+    } else if (raw.startsWith(' ') || raw === '') {
+      if (oldLine > 0 || newLine > 0) {
+        out.push({ kind: 'ctx', oldNum: oldLine++, newNum: newLine++, text: raw.slice(1) });
+      }
+    }
+  }
+  return out;
+}
+
+function ColorDiffInspector({
+  diff,
+  loadingFile,
+  onBack,
+}: {
+  diff: AntigravityFileDiff | null;
+  loadingFile: string | null;
+  onBack: () => void;
+}) {
+  const lines = useMemo(() => (diff?.patch ? parseUnifiedDiff(diff.patch) : []), [diff?.patch]);
+  const isLoading = Boolean(loadingFile && diff?.file !== loadingFile);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-black/80 px-2 py-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex shrink-0 items-center gap-0.5 rounded-md bg-white/[0.07] px-1.5 py-0.5 text-[8.5px] font-bold text-zinc-200"
+          >
+            <ArrowLeft className="h-2.5 w-2.5" />
+            Chat
+          </button>
+          <span className="font-mono-tech truncate text-[9.5px] font-bold text-white">
+            {loadingFile || diff?.file || 'Select a file from Live Diff'}
+          </span>
+        </div>
+        {diff && !isLoading && (
+          <span className="num font-mono-tech shrink-0 text-[9px] font-extrabold">
+            <span className="text-[#34d399]">+{diff.added}</span>{' '}
+            <span className="text-[#ff5d6c]">-{diff.removed}</span>
+          </span>
+        )}
+      </div>
+
+      <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] text-[8.5px] leading-[1.45]">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
+            <Loader2 className="h-4 w-4 animate-spin text-[#22d3ee]" />
+            Loading color diff…
+          </div>
+        ) : lines.length === 0 ? (
+          <div className="grid h-full place-items-center p-4 text-center text-zinc-500">
+            Tap any file in Live Diff on the right to inspect red/green code hunks before approving.
+          </div>
+        ) : (
+          <div className="min-w-max py-1">
+            {lines.map((ln, idx) => {
+              if (ln.kind === 'hunk') {
+                return (
+                  <div
+                    key={idx}
+                    className="my-0.5 border-y border-[#22d3ee]/20 bg-[#22d3ee]/[0.08] px-2 py-0.5 text-[8px] font-bold text-[#22d3ee]"
+                  >
+                    {ln.text}
+                  </div>
+                );
+              }
+              const bg =
+                ln.kind === 'add'
+                  ? 'bg-[#34d399]/[0.12] border-l-2 border-[#34d399] text-[#bbf7d0]'
+                  : ln.kind === 'del'
+                    ? 'bg-[#ff5d6c]/[0.12] border-l-2 border-[#ff5d6c] text-[#fecdd3]'
+                    : 'border-l-2 border-transparent text-zinc-400';
+              const marker = ln.kind === 'add' ? '+' : ln.kind === 'del' ? '-' : ' ';
+              const markerColor =
+                ln.kind === 'add'
+                  ? 'text-[#34d399]'
+                  : ln.kind === 'del'
+                    ? 'text-[#ff5d6c]'
+                    : 'text-zinc-600';
+
+              return (
+                <div key={idx} className={`flex whitespace-pre ${bg}`}>
+                  <span className="w-7 shrink-0 pr-1 text-right text-[8px] text-zinc-600 select-none">
+                    {ln.oldNum ?? ''}
+                  </span>
+                  <span className="w-7 shrink-0 pr-1.5 text-right text-[8px] text-zinc-600 select-none">
+                    {ln.newNum ?? ''}
+                  </span>
+                  <span className={`w-3 shrink-0 font-bold select-none ${markerColor}`}>
+                    {marker}
+                  </span>
+                  <span className="pr-3">{ln.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AgentTerminalPanel({
   runs,
   selectedId,
@@ -360,7 +510,6 @@ function AgentTerminalPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5">
-      {/* Command history tabs */}
       <div className="flex items-center gap-1 overflow-x-auto pb-0.5" data-no-swipe="true">
         {runs.slice(0, compact ? 4 : 6).map((r) => {
           const active = r.id === activeRun.id;
@@ -398,7 +547,6 @@ function AgentTerminalPanel({
         </button>
       </div>
 
-      {/* Command header bar */}
       <div className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.07] bg-black/80 px-2 py-1">
         <div className="font-mono-tech min-w-0 flex-1 truncate text-[9px] text-[#fbbf24]">
           $ {activeRun.command}
@@ -407,27 +555,27 @@ function AgentTerminalPanel({
           className="font-mono-tech shrink-0 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
           style={{ background: `${badgeColor}20`, color: badgeColor }}
         >
-          {activeRun.status === 'running'
-            ? 'RUNNING'
-            : `EXIT ${activeRun.exitCode ?? 0}`}
+          {activeRun.status === 'running' ? 'RUNNING' : `EXIT ${activeRun.exitCode ?? 0}`}
         </span>
       </div>
 
-      {/* Pure-black OLED terminal output well */}
       <pre
         ref={outRef}
-        className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] p-2 text-[8.5px] leading-[1.4] whitespace-pre-wrap break-words text-[#d4f5e9]"
+        className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] p-2 text-[8.5px] leading-[1.4] break-words whitespace-pre-wrap text-[#d4f5e9]"
       >
-        {activeRun.output || (activeRun.status === 'running' ? 'Streaming terminal output…' : '(no output)')}
+        {activeRun.output ||
+          (activeRun.status === 'running' ? 'Streaming terminal output…' : '(no output)')}
       </pre>
     </div>
   );
 }
 
 export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
-  const [mainMode, setMainMode] = useState<'chat' | 'terminal'>('chat');
-  const [sideTab, setSideTab] = useState<'term' | 'live' | 'slash' | 'plan'>('term');
+  const [mainMode, setMainMode] = useState<'chat' | 'terminal' | 'diff'>('chat');
+  const [sideTab, setSideTab] = useState<'term' | 'live' | 'slash' | 'plan'>('live');
   const [selectedTermId, setSelectedTermId] = useState<string | null>(null);
+  const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [promptText, setPromptText] = useState('');
   const [listening, setListening] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
@@ -439,7 +587,9 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   const isWorking = ag.statusLabel === 'WORKING' || prog.active;
   const turns = ag.chatTurns ?? [];
   const terminalRuns = ag.terminalRuns ?? [];
+  const sessions = ag.sessions ?? [];
   const hasRunningTerm = terminalRuns.some((r) => r.status === 'running');
+  const isHistoryMode = Boolean(ag.pinnedSessionId);
 
   useEffect(() => {
     if (!pinnedToBottom || !scrollRef.current || mainMode !== 'chat') return;
@@ -464,6 +614,26 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
     deck.sendEvent({
       type: 'macro:execute',
       payload: { requestId: makeRequestId(), macroId: 'ag-toggle-terminal' },
+    });
+  };
+
+  const openFileDiff = (file: string) => {
+    soundEngine.playClick();
+    setSelectedDiffFile(file);
+    setMainMode('diff');
+    deck.sendEvent({
+      type: 'antigravity:diffFile',
+      payload: { requestId: makeRequestId(), file },
+    });
+  };
+
+  const selectSession = (conversationId: string | null) => {
+    soundEngine.playClick();
+    setSessionMenuOpen(false);
+    setMainMode('chat');
+    deck.sendEvent({
+      type: 'antigravity:selectSession',
+      payload: { requestId: makeRequestId(), conversationId },
     });
   };
 
@@ -514,88 +684,95 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
 
   return (
     <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.8fr 1.05fr' }}>
-      {/* LEFT / MAIN: Live Antigravity Chat Mirror OR Expanded Agent Terminal */}
+      {/* LEFT / MAIN: Live Chat Mirror | Agent Terminal | Color Git Diff Inspector */}
       <div className="tile relative flex min-h-0 flex-col p-2.5">
         <div className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full bg-gradient-to-r from-[#2563eb] via-[#22d3ee] to-[#34d399]" />
 
-        {/* Live Telemetry Header + Chat/Terminal Switch */}
-        <div className="mb-1.5 flex items-center justify-between gap-2 border-b border-white/[0.06] pb-1.5">
+        {/* Top Header: Session Switcher + Mode Tabs + Telemetry + IDE */}
+        <div className="relative mb-1.5 flex items-center justify-between gap-1.5 border-b border-white/[0.06] pb-1.5">
+          {/* Session Switcher Button */}
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="relative h-2 w-2 shrink-0">
-              {isWorking && (
-                <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />
-              )}
-              <i
-                className="absolute inset-0 rounded-full"
-                style={{
-                  background: isWorking
-                    ? '#34d399'
-                    : ag.statusLabel === 'WAITING'
-                      ? '#22d3ee'
-                      : '#6b7080',
-                }}
-              />
-            </span>
-            <span
-              className="font-mono-tech shrink-0 text-[9px] font-extrabold uppercase"
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setSessionMenuOpen((v) => !v);
+              }}
+              className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[8.5px] font-extrabold uppercase transition-colors"
               style={{
-                color: isWorking
-                  ? '#34d399'
-                  : ag.statusLabel === 'WAITING'
-                    ? '#22d3ee'
-                    : '#8b90a0',
+                background: isHistoryMode ? '#fbbf241f' : isWorking ? '#34d3991c' : '#22d3ee18',
+                borderColor: isHistoryMode ? '#fbbf2466' : isWorking ? '#34d39955' : '#22d3ee44',
+                color: isHistoryMode ? '#fbbf24' : isWorking ? '#34d399' : '#22d3ee',
               }}
             >
-              {prog.active ? prog.title : ag.statusLabel}
-            </span>
+              {isHistoryMode ? (
+                <History className="h-2.5 w-2.5" />
+              ) : (
+                <span className="relative h-2 w-2">
+                  {isWorking && (
+                    <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />
+                  )}
+                  <i
+                    className="absolute inset-0 rounded-full"
+                    style={{ background: isWorking ? '#34d399' : '#22d3ee' }}
+                  />
+                </span>
+              )}
+              <span>{isHistoryMode ? 'HISTORY' : prog.active ? 'AGENT' : ag.statusLabel}</span>
+              <ChevronDown className="h-2.5 w-2.5 opacity-80" />
+            </button>
+
             <span className="truncate text-[9.5px] font-medium text-zinc-300">
               {prog.active
                 ? prog.step
                 : ag.currentFocus ||
-                  (ag.conversationId ? `Session ${ag.conversationId.slice(0, 8)}` : 'Antigravity Live')}
+                  sessions.find((s) => s.id === ag.conversationId)?.title ||
+                  'Antigravity Live'}
             </span>
           </div>
 
+          {/* Right Controls: Chat / Term / Diff + Tokens + Alerts + IDE */}
           <div className="flex shrink-0 items-center gap-1">
-            {/* Main view toggle: Chat vs Full-Width Agent Terminal */}
             <div className="flex rounded-full bg-black/75 p-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setMainMode('chat');
-                }}
-                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase"
-                style={{
-                  background: mainMode === 'chat' ? '#1f222c' : 'transparent',
-                  color: mainMode === 'chat' ? '#22d3ee' : '#7c8190',
-                }}
-              >
-                <MessageSquare className="h-2.5 w-2.5" />
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setMainMode('terminal');
-                }}
-                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase"
-                style={{
-                  background: mainMode === 'terminal' ? '#1f222c' : 'transparent',
-                  color: mainMode === 'terminal' ? '#fbbf24' : '#7c8190',
-                }}
-              >
-                <Terminal className="h-2.5 w-2.5" />
-                Term
-                {hasRunningTerm && (
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#34d399]" />
-                )}
-              </button>
+              {(
+                [
+                  { id: 'chat', label: 'Chat', icon: MessageSquare, color: '#22d3ee' },
+                  { id: 'terminal', label: 'Term', icon: Terminal, color: '#fbbf24' },
+                  { id: 'diff', label: 'Diff', icon: FileDiff, color: '#34d399' },
+                ] as const
+              ).map((m) => {
+                const Icon = m.icon;
+                const active = mainMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setMainMode(m.id);
+                    }}
+                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+                    style={{
+                      background: active ? '#1f222c' : 'transparent',
+                      color: active ? m.color : '#7c8190',
+                    }}
+                  >
+                    <Icon className="h-2.5 w-2.5" />
+                    {m.label}
+                    {m.id === 'terminal' && hasRunningTerm && (
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#34d399]" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            <span className="num font-mono-tech rounded-full border border-white/[0.08] bg-black/70 px-1.5 py-0.5 text-[8px] font-bold text-[#a78bfa]">
-              #{ag.stepCount || 0} · {formatTokens(ag.contextTokens)}
+            <span
+              className="num font-mono-tech flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/70 px-1.5 py-0.5 text-[8px] font-bold text-[#a78bfa]"
+              title="Auto Done / Error / Approval Alerts Active"
+            >
+              <Bell className="h-2.5 w-2.5 text-[#34d399]" />
+              {formatTokens(ag.contextTokens)}
             </span>
 
             <button
@@ -614,6 +791,80 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               IDE
             </button>
           </div>
+
+          {/* Session Switcher Dropdown Popover */}
+          {sessionMenuOpen && (
+            <div
+              data-no-swipe="true"
+              className="deck-scroll absolute top-8 left-0 z-30 max-h-56 w-72 overflow-y-auto rounded-2xl border border-white/15 bg-[#0b0d13]/95 p-1.5 shadow-2xl backdrop-blur-md"
+            >
+              <button
+                type="button"
+                onClick={() => selectSession(null)}
+                className="mb-1 flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 text-left transition-colors"
+                style={{
+                  background: !isHistoryMode ? '#34d3991c' : 'rgba(255,255,255,0.03)',
+                  borderColor: !isHistoryMode ? '#34d39955' : 'rgba(255,255,255,0.07)',
+                }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Radio className="h-3 w-3 text-[#34d399]" />
+                  <span className="text-[10px] font-extrabold text-white">
+                    Auto-Follow Live Session
+                  </span>
+                </div>
+                {!isHistoryMode && (
+                  <span className="font-mono-tech text-[8px] font-bold text-[#34d399]">ACTIVE</span>
+                )}
+              </button>
+
+              <div className="mb-1 px-1.5 pt-0.5 text-[8px] font-bold tracking-wider text-zinc-500 uppercase">
+                Recent Brain Conversations ({sessions.length})
+              </div>
+
+              <div className="space-y-1">
+                {sessions.map((s) => {
+                  const selected = ag.pinnedSessionId === s.id;
+                  const isCurrent = ag.conversationId === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => selectSession(s.id)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 text-left transition-colors"
+                      style={{
+                        background: selected
+                          ? '#fbbf241c'
+                          : isCurrent
+                            ? 'rgba(255,255,255,0.06)'
+                            : 'rgba(255,255,255,0.02)',
+                        borderColor: selected ? '#fbbf2466' : 'rgba(255,255,255,0.06)',
+                      }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[10px] font-bold text-zinc-100">
+                          {s.title}
+                        </div>
+                        <div className="font-mono-tech flex items-center gap-1.5 text-[8px] text-zinc-500">
+                          <span>{s.id.slice(0, 8)}</span>
+                          <span>·</span>
+                          <span>{formatRelativeAge(s.lastActivityTs)}</span>
+                          {s.hasPlan && (
+                            <span className="rounded bg-[#a78bfa]/20 px-1 text-[#a78bfa]">
+                              PLAN
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isCurrent && (
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#22d3ee]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Optional Live Progress Bar */}
@@ -626,8 +877,8 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
 
-        {/* Main Body: Live Chat Stream OR Expanded Agent Terminal */}
-        {mainMode === 'chat' ? (
+        {/* Main Body: Chat | Agent Terminal | Color Git Diff Inspector */}
+        {mainMode === 'chat' && (
           <div className="relative min-h-0 flex-1">
             <div
               ref={scrollRef}
@@ -644,7 +895,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                       Waiting for live Antigravity session
                     </div>
                     <div className="sub">
-                      Restart npm run live on Mac to stream full chat & agent terminal
+                      Restart npm run live on Mac to stream chat, terminal & diffs
                     </div>
                   </div>
                 </div>
@@ -662,13 +913,25 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               </button>
             )}
           </div>
-        ) : (
+        )}
+
+        {mainMode === 'terminal' && (
           <div className="min-h-0 flex-1">
             <AgentTerminalPanel
               runs={terminalRuns}
               selectedId={selectedTermId}
               onSelect={setSelectedTermId}
               onToggleIdeTerminal={toggleIdeTerminal}
+            />
+          </div>
+        )}
+
+        {mainMode === 'diff' && (
+          <div className="min-h-0 flex-1">
+            <ColorDiffInspector
+              diff={deck.antigravityDiff}
+              loadingFile={selectedDiffFile}
+              onBack={() => setMainMode('chat')}
             />
           </div>
         )}
@@ -717,7 +980,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
         </form>
       </div>
 
-      {/* RIGHT: Mission Inspector Sidebar (Agent Terminal / Steps & Diff / Slash / Plan + Accept/Reject) */}
+      {/* RIGHT: Mission Inspector Sidebar (Diff & Steps / Agent Terminal / Slash / Plan + Accept/Reject) */}
       <div className="tile flex min-h-0 flex-col gap-2 p-2.5">
         <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#fbbf24] via-[#a78bfa] to-[#34d399]" />
 
@@ -725,10 +988,10 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
         <div className="grid grid-cols-4 gap-0.5 rounded-full bg-black/75 p-0.5">
           {(
             [
-              { id: 'term', label: 'Term', color: '#fbbf24' },
-              { id: 'live', label: 'Diff', color: '#34d399' },
-              { id: 'slash', label: 'Slash', color: '#22d3ee' },
-              { id: 'plan', label: 'Plan', color: '#a78bfa' },
+              { id: 'live', label: 'Diff', color: '#34d399', badge: ag.diffFiles.length },
+              { id: 'term', label: 'Term', color: '#fbbf24', badge: 0 },
+              { id: 'slash', label: 'Slash', color: '#22d3ee', badge: 0 },
+              { id: 'plan', label: 'Plan', color: '#a78bfa', badge: 0 },
             ] as const
           ).map((t) => (
             <button
@@ -747,7 +1010,12 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               {t.id === 'term' && hasRunningTerm && (
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#34d399]" />
               )}
-              {t.label}
+              <span>{t.label}</span>
+              {t.badge > 0 && (
+                <span className="num rounded bg-[#34d399]/20 px-1 text-[7.5px] text-[#34d399]">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -797,11 +1065,12 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 </div>
               )}
 
+              {/* Tap-to-Inspect Live Git Diff List */}
               <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1 text-[9px] font-extrabold text-zinc-300 uppercase">
                     <FileDiff className="h-3 w-3 text-[#34d399]" />
-                    Live Diff
+                    Tap File to Inspect
                   </span>
                   <span className="num font-mono-tech text-[9px] font-extrabold">
                     <span className="text-[#34d399]">+{ag.totalAdded}</span>{' '}
@@ -809,18 +1078,29 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                   </span>
                 </div>
                 <div className="space-y-1">
-                  {ag.diffFiles.map((f) => (
-                    <div
-                      key={f.file}
-                      className="flex items-center justify-between gap-1.5 rounded-lg bg-white/[0.04] px-2 py-1 text-[9px]"
-                    >
-                      <span className="font-mono-tech truncate text-zinc-200">{f.file}</span>
-                      <span className="num shrink-0 font-bold">
-                        <span className="text-[#34d399]">+{f.added}</span>{' '}
-                        <span className="text-[#ff5d6c]">-{f.removed}</span>
-                      </span>
-                    </div>
-                  ))}
+                  {ag.diffFiles.map((f) => {
+                    const active = mainMode === 'diff' && selectedDiffFile === f.file;
+                    return (
+                      <button
+                        key={f.file}
+                        type="button"
+                        onClick={() => openFileDiff(f.file)}
+                        className="flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[9px] transition-colors"
+                        style={{
+                          background: active ? '#34d3991c' : 'rgba(255,255,255,0.04)',
+                          borderColor: active ? '#34d39966' : 'rgba(255,255,255,0.05)',
+                        }}
+                      >
+                        <span className="font-mono-tech min-w-0 flex-1 truncate text-zinc-200">
+                          {f.file}
+                        </span>
+                        <span className="num shrink-0 font-bold">
+                          <span className="text-[#34d399]">+{f.added}</span>{' '}
+                          <span className="text-[#ff5d6c]">-{f.removed}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
                   {ag.diffFiles.length === 0 && (
                     <div className="sub py-3 text-center">Working tree clean</div>
                   )}

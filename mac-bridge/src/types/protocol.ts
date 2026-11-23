@@ -277,11 +277,28 @@ export interface AntigravityTerminalRun {
   ts: number;
 }
 
+export interface AntigravitySessionSummary {
+  id: string;
+  title: string;
+  lastActivityTs: number;
+  hasPlan: boolean;
+}
+
+export interface AntigravityFileDiff {
+  file: string;
+  patch: string;
+  added: number;
+  removed: number;
+  ts: number;
+}
+
 export interface AntigravityLiveState {
   active: boolean;
   statusLabel: 'WORKING' | 'WAITING' | 'IDLE';
   lastActivityTs: number;
   conversationId: string;
+  pinnedSessionId: string | null;
+  sessions: AntigravitySessionSummary[];
   model: string;
   stepCount: number;
   contextTokens: number;
@@ -326,6 +343,7 @@ export type ServerEvent =
   | { type: 'agent:question'; payload: AgentQuestion | null }
   | { type: 'agent:progress'; payload: AgentProgress }
   | { type: 'antigravity:state'; payload: AntigravityLiveState }
+  | { type: 'antigravity:diff'; payload: AntigravityFileDiff }
   | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
@@ -377,4 +395,6 @@ export type ClientEvent =
   | { type: 'agent:answer'; payload: { requestId: string; questionId: string; answer: string } }
   | { type: 'antigravity:slash'; payload: { requestId: string; command: string } }
   | { type: 'antigravity:prompt'; payload: { requestId: string; text: string; submit?: boolean } }
+  | { type: 'antigravity:selectSession'; payload: { requestId: string; conversationId: string | null } }
+  | { type: 'antigravity:diffFile'; payload: { requestId: string; file: string } }
   | { type: 'speedtest:run'; payload: { requestId: string } };
