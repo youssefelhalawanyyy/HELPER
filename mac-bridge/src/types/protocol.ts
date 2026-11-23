@@ -421,11 +421,14 @@ export interface NetworkCommandState {
   pingMs: number | null;
   jitterMs: number | null;
   packetLossPct: number | null;
+  dnsMs: number | null;
   grade: 'ULTRA' | 'FAST' | 'FAIR' | 'SLOW' | 'IDLE';
   devices: NetworkDevice[];
   wifiPassword: string | null;
   wifiPasswordNote: string;
   aiSummary: string;
+  problemsFound: string[];
+  whatWasFixed: string[];
   aiTips: string[];
   fixLog: string[];
   updatedAt: number;

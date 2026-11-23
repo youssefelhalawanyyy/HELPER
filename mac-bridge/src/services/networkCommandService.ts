@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import dns from 'node:dns/promises';
 import os from 'node:os';
 import { promisify } from 'node:util';
 import si from 'systeminformation';
@@ -98,12 +99,15 @@ export class NetworkCommandService {
     pingMs: null,
     jitterMs: null,
     packetLossPct: null,
+    dnsMs: null,
     grade: 'IDLE',
     devices: [],
     wifiPassword: null,
     wifiPasswordNote: '',
     aiSummary:
-      'Tap "SCAN NET" to inspect all devices & IPs on your Wi-Fi, or "SPEED TEST" & "BOOST & FIX" to speed up your internet.',
+      'Tap "SCAN LAN" to inspect all devices & IPs on your Wi-Fi, or "SPEED" & "AI BOOST & FIX" to speed up your internet.',
+    problemsFound: [],
+    whatWasFixed: [],
     aiTips: [],
     fixLog: [],
     updatedAt: 0,
@@ -126,6 +130,8 @@ export class NetworkCommandService {
       ...this.state,
       dnsServers: [...this.state.dnsServers],
       devices: [...this.state.devices],
+      problemsFound: [...this.state.problemsFound],
+      whatWasFixed: [...this.state.whatWasFixed],
       aiTips: [...this.state.aiTips],
       fixLog: [...this.state.fixLog],
     });
@@ -201,15 +207,34 @@ Write-Output ("DNS=" + ($dns -join ','))
     return { gatewayIp, dnsServers: Array.from(dnsSet) };
   }
 
+  private async measureDnsMs(): Promise<number | null> {
+    const t0 = Date.now();
+    try {
+      await dns.lookup('cloudflare.com');
+      return Math.max(1, Date.now() - t0);
+    } catch {
+      return null;
+    }
+  }
+
   private async readWifiInfo(): Promise<{ ssid: string; signalDbm: number | null }> {
+    const cleanSsid = (raw?: string | null) => {
+      const s = (raw || '').trim();
+      if (!s || /<redacted>|unknown/i.test(s)) return '';
+      return s;
+    };
     try {
       const conns = await si.wifiConnections();
       const first = conns[0];
-      if (first?.ssid) {
+      const name = cleanSsid(first?.ssid);
+      if (name) {
         return {
-          ssid: first.ssid,
+          ssid: name,
           signalDbm: typeof first.signalLevel === 'number' ? first.signalLevel : null,
         };
+      }
+      if (typeof first?.signalLevel === 'number') {
+        return { ssid: 'Connected Wi-Fi', signalDbm: first.signalLevel };
       }
     } catch {
       // Fall through
@@ -219,7 +244,7 @@ Write-Output ("DNS=" + ($dns -join ','))
       try {
         const { stdout } = await execFileAsync('netsh', ['wlan', 'show', 'interfaces'], { timeout: 2500 });
         const m = stdout.match(/^\s*SSID\s*:\s*(.+)$/m);
-        if (m?.[1]) return { ssid: m[1].trim(), signalDbm: null };
+        if (cleanSsid(m?.[1])) return { ssid: cleanSsid(m?.[1]), signalDbm: null };
       } catch {
         // Ignore
       }
@@ -229,12 +254,12 @@ Write-Output ("DNS=" + ($dns -join ','))
           timeout: 2000,
         });
         const m = stdout.match(/Current Wi-Fi Network:\s*(.+)/i);
-        if (m?.[1]) return { ssid: m[1].trim(), signalDbm: null };
+        if (cleanSsid(m?.[1])) return { ssid: cleanSsid(m?.[1]), signalDbm: null };
       } catch {
         // Ignore
       }
     }
-    return { ssid: 'Wi-Fi / Ethernet', signalDbm: null };
+    return { ssid: 'Connected Wi-Fi', signalDbm: null };
   }
 
   private async readPublicIp(): Promise<{ publicIp: string; isp: string }> {
@@ -379,37 +404,58 @@ Write-Output ("DNS=" + ($dns -join ','))
     return 'FAST';
   }
 
-  private buildLocalAdvice(): { summary: string; tips: string[] } {
+  private buildLocalAdvice(): { summary: string; problems: string[]; tips: string[] } {
     const s = this.state;
+    const problems: string[] = [];
     const tips: string[] = [];
     const usingFastDns = s.dnsServers.some((d) => d === '1.1.1.1' || d === '8.8.8.8');
 
     if (!usingFastDns) {
-      tips.push('Switch to Cloudflare (1.1.1.1) + Google (8.8.8.8) DNS with 1-tap "BOOST DNS" for faster website loads.');
+      problems.push(
+        `Your computer is using default router/ISP DNS (${s.dnsServers[0] || 'auto'}), which is slower at looking up websites.`,
+      );
+      tips.push('Tap "1.1.1.1 DNS" or "AI BOOST & FIX" to switch to Cloudflare 1.1.1.1 + Google 8.8.8.8 DNS for noticeably faster web browsing.');
     }
     if (s.signalDbm !== null && s.signalDbm < -70) {
-      tips.push(`Wi-Fi signal is weak (${s.signalDbm} dBm) — move closer to your router or switch to 5 GHz.`);
+      problems.push(`Weak Wi-Fi signal (${s.signalDbm} dBm) is reducing your speed and causing dropouts.`);
+      tips.push('Move closer to your Wi-Fi router or connect to the 5 GHz Wi-Fi band.');
     }
     if ((s.packetLossPct ?? 0) > 0) {
-      tips.push(`Detected ${s.packetLossPct}% packet loss — tap "RENEW DHCP" or restart your router.`);
+      problems.push(`Packet loss detected (${s.packetLossPct}%) — data is being dropped between your device and the internet.`);
+      tips.push('Tap "RENEW IP" or restart your router/modem for 30 seconds.');
     }
-    if ((s.jitterMs ?? 0) > 15) {
-      tips.push(`High jitter (${s.jitterMs} ms) — another device on your LAN (${s.devices.length} connected) may be downloading/streaming heavily.`);
+    if ((s.pingMs ?? 0) > 55) {
+      problems.push(`High ping latency (${s.pingMs} ms) makes websites, video calls, and games feel delayed.`);
+    }
+    if ((s.jitterMs ?? 0) > 10) {
+      problems.push(`Unstable jitter (${s.jitterMs} ms) across ${s.devices.length} connected LAN devices.`);
+      tips.push('Check the Devices tab — another phone, TV, or PC on your Wi-Fi may be streaming or downloading heavily.');
+    }
+    if (s.downMbps !== null && s.downMbps < 25) {
+      problems.push(`Slow download speed (${s.downMbps} Mbps) — below ideal speed for HD streaming & fast downloads.`);
+      tips.push('Use an Ethernet cable if possible, or restart your router to clear ISP line congestion.');
     }
     if (s.vpnActive) {
-      tips.push('VPN is currently ON — VPN encryption can reduce peak download speeds by 15–40%.');
+      problems.push('VPN is turned ON, which adds encryption overhead and extra distance.');
+      tips.push('Turn off VPN temporarily when you need maximum download speed.');
     }
     if (tips.length === 0) {
-      tips.push('Your DNS, latency, and connection look fast and healthy!');
+      tips.push('Your Wi-Fi, DNS, and internet latency look healthy and fast!');
     }
 
     const summary =
       s.downMbps !== null
-        ? `Speed is ${s.downMbps} Mbps down / ${s.upMbps ?? 0} Mbps up with ${s.pingMs ?? '--'} ms ping (${s.jitterMs ?? 0} ms jitter) across ${s.devices.length} LAN device(s). ${
-            !usingFastDns ? 'Boosting DNS to 1.1.1.1 can speed up page loads.' : 'Fast DNS is active.'
+        ? `Your internet is ${s.downMbps} Mbps download / ${s.upMbps ?? 0} Mbps upload with ${s.pingMs ?? '--'} ms ping (${s.jitterMs ?? 0} ms jitter)${s.dnsMs ? ` and ${s.dnsMs} ms DNS lookup` : ''}. ${
+            problems.length > 0
+              ? `Found ${problems.length} issue(s) slowing your connection down — see details below.`
+              : 'No major problems found — your connection is running fast and clean!'
           }`
-        : `Connected to ${s.ssid} (${s.localIp}) with ${s.devices.length} device(s) discovered on your local network. Tap SPEED TEST to benchmark throughput.`;
-    return { summary, tips };
+        : `Connected to ${s.ssid} (${s.isp || s.localIp}) with ${s.devices.length} device(s) on your Wi-Fi and ${s.pingMs ?? '--'} ms ping. ${
+            problems.length > 0
+              ? `Found ${problems.length} issue(s) — tap "AI BOOST & FIX" to fix and benchmark speed.`
+              : 'Tap "SPEED" to measure your exact Download & Upload Mbps.'
+          }`;
+    return { summary, problems, tips };
   }
 
   async scanNetwork(): Promise<NetworkCommandState> {
@@ -419,11 +465,12 @@ Write-Output ("DNS=" + ($dns -join ','))
     this.emit();
 
     try {
-      const [wifi, gwDns, pub, pingStats] = await Promise.all([
+      const [wifi, gwDns, pub, pingStats, dnsMs] = await Promise.all([
         this.readWifiInfo(),
         this.readGatewayAndDns(),
         this.readPublicIp(),
         this.measurePingJitter(),
+        this.measureDnsMs(),
       ]);
 
       const devices = await this.scanArpDevices(gwDns.gatewayIp);
@@ -443,13 +490,15 @@ Write-Output ("DNS=" + ($dns -join ','))
         pingMs: pingStats.pingMs,
         jitterMs: pingStats.jitterMs,
         packetLossPct: pingStats.packetLossPct,
+        dnsMs,
         devices,
         updatedAt: Date.now(),
       };
       const adv = this.buildLocalAdvice();
       this.state.aiSummary = adv.summary;
+      this.state.problemsFound = adv.problems;
       this.state.aiTips = adv.tips;
-      this.log(`Scanned LAN: ${devices.length} device(s), Gateway ${gwDns.gatewayIp || '--'}, Ping ${pingStats.pingMs ?? '--'}ms`);
+      this.log(`Scanned LAN: ${devices.length} device(s), Gateway ${gwDns.gatewayIp || '--'}, Ping ${pingStats.pingMs ?? '--'}ms, DNS ${dnsMs ?? '--'}ms`);
       this.emit();
       return this.state;
     } catch {
@@ -516,6 +565,7 @@ Write-Output ("DNS=" + ($dns -join ','))
       };
       const adv = this.buildLocalAdvice();
       this.state.aiSummary = adv.summary;
+      this.state.problemsFound = adv.problems;
       this.state.aiTips = adv.tips;
       this.log(`Speed Test: ↓${downMbps} Mbps · ↑${upMbps} Mbps · Ping ${pingStats.pingMs ?? '--'}ms · Jitter ${pingStats.jitterMs ?? 0}ms`);
       this.emit();
@@ -591,6 +641,7 @@ Write-Output ("DNS=" + ($dns -join ','))
     if (!apiKey) {
       const adv = this.buildLocalAdvice();
       this.state.aiSummary = adv.summary;
+      this.state.problemsFound = adv.problems;
       this.state.aiTips = adv.tips;
       return;
     }
@@ -673,6 +724,10 @@ Data: ${JSON.stringify({
         } else {
           await execFileAsync('dscacheutil', ['-flushcache'], { timeout: 5000 });
         }
+        this.state.whatWasFixed = [
+          'Flushed stale DNS cache so websites resolve cleanly.',
+          ...this.state.whatWasFixed.filter((x) => !x.includes('Flushed stale DNS')),
+        ].slice(0, 6);
         this.log('✅ DNS cache flushed');
       };
 
@@ -688,6 +743,10 @@ Data: ${JSON.stringify({
             timeout: 5000,
           });
         }
+        this.state.whatWasFixed = [
+          'Switched Wi-Fi DNS to Cloudflare (1.1.1.1) & Google (8.8.8.8) for faster web lookups.',
+          ...this.state.whatWasFixed.filter((x) => !x.includes('Cloudflare (1.1.1.1)')),
+        ].slice(0, 6);
         this.log('✅ Fast DNS active (1.1.1.1 & 8.8.8.8)');
       };
 
@@ -698,6 +757,10 @@ Data: ${JSON.stringify({
         } else {
           await execFileAsync('ipconfig', ['set', 'en0', 'DHCP'], { timeout: 8000 }).catch(() => {});
         }
+        this.state.whatWasFixed = [
+          'Renewed DHCP IP lease with your Wi-Fi router.',
+          ...this.state.whatWasFixed.filter((x) => !x.includes('DHCP IP lease')),
+        ].slice(0, 6);
         this.log('✅ DHCP lease refreshed');
       };
 

@@ -36,7 +36,7 @@ function gradeColor(grade: string): string {
 }
 
 export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
-  const [rightTab, setRightTab] = useState<'devices' | 'ai' | 'log'>('devices');
+  const [rightTab, setRightTab] = useState<'ai' | 'devices' | 'log'>('ai');
   const [showPass, setShowPass] = useState(false);
   const autoScannedRef = useRef(false);
   const net = deck.networkState;
@@ -58,12 +58,13 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
 
   const runSpeed = () => {
     soundEngine.playClick();
+    setRightTab('ai');
     deck.sendEvent({ type: 'network:speedtest', payload: { requestId: makeRequestId() } });
   };
 
   const runFix = (action: NetworkFixAction) => {
     soundEngine.playClick();
-    if (action === 'ai_analyze') setRightTab('ai');
+    if (action === 'ai_analyze' || action === 'full_net_fix') setRightTab('ai');
     else setRightTab('log');
     deck.sendEvent({ type: 'network:fix', payload: { requestId: makeRequestId(), action } });
   };
@@ -253,9 +254,24 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
       <div className="tile flex min-h-0 flex-col gap-2 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#22d3ee] via-[#a78bfa] to-[#34d399]" />
 
-        {/* 3-Tab Switcher */}
+        {/* 3-Tab Switcher (English Summary first!) */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex rounded-full bg-black/75 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setRightTab('ai');
+              }}
+              className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+              style={{
+                background: rightTab === 'ai' ? '#1f222c' : 'transparent',
+                color: rightTab === 'ai' ? '#a78bfa' : '#7c8190',
+              }}
+            >
+              <Sparkles className="h-3 w-3" />
+              English Summary
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -270,21 +286,6 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
             >
               <Radio className="h-3 w-3" />
               Devices ({net.devices.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playClick();
-                setRightTab('ai');
-              }}
-              className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
-              style={{
-                background: rightTab === 'ai' ? '#1f222c' : 'transparent',
-                color: rightTab === 'ai' ? '#a78bfa' : '#7c8190',
-              }}
-            >
-              <Sparkles className="h-3 w-3" />
-              AI Diagnosis
             </button>
             <button
               type="button"
@@ -367,25 +368,67 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
 
         {rightTab === 'ai' && (
           <div className="deck-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+            {/* Live status pill when scanning/testing */}
+            {busy && net.activeAction && (
+              <div className="flex items-center gap-2 rounded-xl border border-[#22d3ee]/40 bg-[#22d3ee]/10 px-2.5 py-1.5 text-[9.5px] font-bold text-[#22d3ee]">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <span>{net.activeAction}</span>
+              </div>
+            )}
+
+            {/* Plain-English Verdict */}
             <div className="rounded-xl border border-[#a78bfa]/25 bg-black/70 p-2.5">
-              <div className="mb-1 flex items-center justify-between">
+              <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="flex items-center gap-1 text-[9px] font-extrabold tracking-wider text-[#a78bfa] uppercase">
                   <Sparkles className="h-3 w-3" />
-                  AI Network Engineer Verdict
+                  Plain-English Internet Summary
                 </span>
-                {net.isp && (
-                  <span className="font-mono-tech truncate text-[8px] text-zinc-400">
-                    {net.isp}
-                  </span>
-                )}
+                <span className="font-mono-tech truncate text-[8px] text-zinc-400">
+                  {net.isp || (net.dnsMs ? `DNS ${net.dnsMs}ms` : '')}
+                </span>
               </div>
               <p className="text-[10px] leading-relaxed text-zinc-200">{net.aiSummary}</p>
             </div>
 
+            {/* What Was Fixed */}
+            {net.whatWasFixed.length > 0 && (
+              <div className="rounded-xl border border-[#34d399]/25 bg-black/70 p-2">
+                <div className="mb-1 text-[9px] font-extrabold tracking-wider text-[#34d399] uppercase">
+                  ✓ What Was Fixed
+                </div>
+                <div className="space-y-1 text-[9.5px] text-zinc-200">
+                  {net.whatWasFixed.map((item, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      <span className="mt-[4px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#34d399]" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Problems Found */}
+            {net.problemsFound.length > 0 && (
+              <div className="rounded-xl border border-[#fbbf24]/30 bg-black/70 p-2">
+                <div className="mb-1 text-[9px] font-extrabold tracking-wider text-[#fbbf24] uppercase">
+                  ! What Is Slowing Your Internet Down
+                </div>
+                <div className="space-y-1 text-[9.5px] text-zinc-200">
+                  {net.problemsFound.map((p, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      <span className="mt-[4px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#fbbf24]" />
+                      <span>{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Easy Next Steps */}
             {net.aiTips.length > 0 && (
-              <div className="rounded-xl border border-[#22d3ee]/25 bg-black/70 p-2.5">
+              <div className="rounded-xl border border-[#22d3ee]/25 bg-black/70 p-2">
                 <div className="mb-1 text-[9px] font-extrabold tracking-wider text-[#22d3ee] uppercase">
-                  How To Make Your Internet Faster
+                  What You Should Do To Make It Faster
                 </div>
                 <div className="space-y-1 text-[9.5px] text-zinc-200">
                   {net.aiTips.map((tip, idx) => (
