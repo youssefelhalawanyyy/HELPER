@@ -819,21 +819,91 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
 
     try {
       const doCleanJunk = () => {
-        this.log('Cleaning temporary & cache junk files…');
+        this.log('Deep cleaning temporary files, old logs & safe app caches…');
+        const home = os.homedir();
+        let freed = 0;
+        let count = 0;
+
+        // 1. OS Temp directory
         this.term(`$ clean "${os.tmpdir()}"`);
-        const r1 = cleanDirFilesOlderThan(os.tmpdir(), 10 * 60 * 1000);
-        let freed = r1.freedBytes;
-        let count = r1.deletedCount;
+        const rTmp = cleanDirFilesOlderThan(os.tmpdir(), 5 * 60 * 1000);
+        freed += rTmp.freedBytes;
+        count += rTmp.deletedCount;
+
         if (!IS_WIN) {
-          const diagDir = path.join(os.homedir(), 'Library', 'Logs', 'DiagnosticReports');
-          const r2 = cleanDirFilesOlderThan(diagDir, 7 * 24 * 3600 * 1000);
-          freed += r2.freedBytes;
-          count += r2.deletedCount;
+          // 2. Archive active crash reports so they are preserved safely & cleared from active alert list
+          const diagDir = path.join(home, 'Library', 'Logs', 'DiagnosticReports');
+          const archiveDir = path.join(diagDir, 'DevDeck_Archived');
+          let archivedCrashes = 0;
+          try {
+            if (fs.existsSync(diagDir)) {
+              for (const name of fs.readdirSync(diagDir)) {
+                if (!/\.(ips|crash|diag)$/i.test(name)) continue;
+                const src = path.join(diagDir, name);
+                if (!fs.statSync(src).isFile()) continue;
+                fs.mkdirSync(archiveDir, { recursive: true });
+                fs.renameSync(src, path.join(archiveDir, name));
+                archivedCrashes += 1;
+              }
+            }
+          } catch {
+            // Ignore permission-locked crash logs
+          }
+          if (archivedCrashes > 0) {
+            this.term(`✅ Archived ${archivedCrashes} old crash log(s) → DiagnosticReports/DevDeck_Archived`);
+            whatWasFixed.push(
+              `Archived ${archivedCrashes} past crash report(s) into DiagnosticReports/DevDeck_Archived so only new crashes appear.`,
+            );
+          }
+
+          // 3. Clean old log files in ~/Library/Logs (> 2 hours old)
+          const logsDir = path.join(home, 'Library', 'Logs');
+          this.term(`$ clean old logs in "${logsDir}"`);
+          const rLogs = cleanDirFilesOlderThan(logsDir, 2 * 3600 * 1000);
+          freed += rLogs.freedBytes;
+          count += rLogs.deletedCount;
+
+          // 4. Clean 100% safe regenerable browser & developer caches
+          const safeMacCaches = [
+            path.join(home, 'Library', 'Caches', 'Google', 'Chrome', 'Default', 'Cache'),
+            path.join(home, 'Library', 'Caches', 'com.apple.Safari', 'WebKitCache'),
+            path.join(home, 'Library', 'Caches', 'pip'),
+            path.join(home, 'Library', 'Caches', 'Homebrew'),
+            path.join(home, '.npm', '_cacache'),
+            path.join(home, 'Library', 'Application Support', 'Code', 'CachedData'),
+          ];
+          for (const cacheDir of safeMacCaches) {
+            if (!fs.existsSync(cacheDir)) continue;
+            this.term(`$ clean cache "${cacheDir}"`);
+            const rc = cleanDirFilesOlderThan(cacheDir, 0);
+            freed += rc.freedBytes;
+            count += rc.deletedCount;
+          }
+        } else {
+          // Windows safe regenerable caches
+          const localApp = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+          const safeWinCaches = [
+            path.join(localApp, 'Temp'),
+            path.join(localApp, 'Google', 'Chrome', 'User Data', 'Default', 'Cache'),
+            path.join(localApp, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cache'),
+            path.join(localApp, 'npm-cache'),
+            path.join(localApp, 'pip', 'cache'),
+          ];
+          for (const cacheDir of safeWinCaches) {
+            if (!fs.existsSync(cacheDir)) continue;
+            this.term(`$ clean cache "${cacheDir}"`);
+            const rc = cleanDirFilesOlderThan(cacheDir, 5 * 60 * 1000);
+            freed += rc.freedBytes;
+            count += rc.deletedCount;
+          }
         }
+
         const mb = (freed / (1024 * 1024)).toFixed(1);
-        this.log(`Removed ${count} old temp/log files — freed ${mb} MB.`);
-        whatWasFixed.push(`Cleaned ${count} temporary & old crash log files (${mb} MB reclaimed).`);
-        return `Freed ${mb} MB (${count} junk files removed)`;
+        this.log(`Cleaned ${count} junk/cache/log items — freed ${mb} MB of real disk space.`);
+        whatWasFixed.push(
+          `Cleaned ${count} temporary junk, old log, and browser/dev cache files (${mb} MB freed).`,
+        );
+        return `Freed ${mb} MB (${count} junk/cache items removed)`;
       };
 
       const doFlushDns = async () => {
@@ -953,9 +1023,10 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           return;
         }
 
-        // macOS: auto-quarantine any corrupted .plist files in ~/Library/Preferences so macOS regenerates clean ones
+        // macOS: auto-quarantine any corrupted .plist files into DevDeck_Quarantine so macOS regenerates clean ones
         try {
           const prefsDir = path.join(os.homedir(), 'Library', 'Preferences');
+          const quarantineDir = path.join(prefsDir, 'DevDeck_Quarantine');
           const plists = fs
             .readdirSync(prefsDir)
             .filter((f) => f.endsWith('.plist') && !f.startsWith('.'))
@@ -970,17 +1041,25 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
             for (const line of combined.split('\n')) {
               if (line.includes(':') && !line.trim().endsWith(': OK') && line.includes('.plist')) {
                 const filePath = line.split(':')[0].trim();
+                const base = path.basename(filePath);
                 if (filePath && fs.existsSync(filePath)) {
-                  const bakPath = `${filePath}.corrupt.bak`;
-                  fs.renameSync(filePath, bakPath);
-                  this.term(`✅ Quarantined corrupted config: ${path.basename(filePath)} → .corrupt.bak`);
-                  fixedPlists += 1;
+                  try {
+                    fs.mkdirSync(quarantineDir, { recursive: true });
+                    fs.renameSync(filePath, path.join(quarantineDir, `${base}.bak`));
+                    this.term(`✅ Fixed corrupted config: moved ${base} → DevDeck_Quarantine/`);
+                    fixedPlists += 1;
+                  } catch {
+                    this.term(`⚠ macOS protected ${base} (needs Full Disk Access to move)`);
+                    whatWasNotFixed.push(
+                      `Corrupted config "${base}" is protected by macOS privacy lock — open System Settings → Privacy & Security → Full Disk Access and enable Terminal, then tap Redo Corrupt Fix.`,
+                    );
+                  }
                 }
               }
             }
             if (fixedPlists > 0) {
               whatWasFixed.push(
-                `Repaired ${fixedPlists} corrupted preference file(s) by safely backing up to .corrupt.bak so macOS regenerates clean configs.`,
+                `Repaired ${fixedPlists} corrupted preference file(s) by safely moving them to DevDeck_Quarantine so macOS creates fresh, clean configs.`,
               );
             }
           }
