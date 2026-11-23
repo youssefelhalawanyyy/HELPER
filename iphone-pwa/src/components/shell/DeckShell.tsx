@@ -27,6 +27,7 @@ import { LiveMonitorView } from '@/components/views/LiveMonitorView';
 import { MacInspectorView } from '@/components/views/MacInspectorView';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
+import { SystemDoctorView } from '@/components/views/SystemDoctorView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
@@ -39,7 +40,8 @@ export type DeckViewId =
   | 'mac'
   | 'hardware'
   | 'preview'
-  | 'launch';
+  | 'launch'
+  | 'doctor';
 
 const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
   { id: 'deck', label: 'Deck', accent: '#34d399' },
@@ -49,6 +51,7 @@ const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
   { id: 'hardware', label: 'Trackpad & Snap', accent: '#fbbf24' },
   { id: 'preview', label: 'Desk Clock', accent: '#60a5fa' },
   { id: 'launch', label: 'Launch', accent: '#fbbf24' },
+  { id: 'doctor', label: 'PC Doctor', accent: '#ff5d6c' },
 ];
 
 const PAGE_VARIANTS = {
@@ -510,6 +513,7 @@ export function DeckShell() {
                 {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
                 {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
                 {activeView === 'launch' && <LaunchControlView deck={deck} />}
+                {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
               </motion.div>
             </AnimatePresence>
           </main>

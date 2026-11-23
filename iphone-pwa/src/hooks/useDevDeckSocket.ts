@@ -25,6 +25,7 @@ import type {
   ProfileId,
   ServerEvent,
   SpeedTestState,
+  SystemDoctorReport,
   SystemStats,
   WebhookEvent,
 } from '@/types/protocol';
@@ -219,6 +220,31 @@ export function useDevDeckSocket() {
     totalRemoved: 0,
   });
   const [antigravityDiff, setAntigravityDiff] = useState<AntigravityFileDiff | null>(null);
+  const [doctorReport, setDoctorReport] = useState<SystemDoctorReport>({
+    scanning: false,
+    repairing: false,
+    activeAction: '',
+    score: 0,
+    grade: 'GOOD',
+    summaryEnglish: 'Tap "SCAN" to inspect CPU, RAM, disk health, junk files, crashes, and corrupted system files.',
+    platform: '',
+    scannedAt: 0,
+    metrics: {
+      cpuPct: 0,
+      ramPct: 0,
+      ramUsedGb: 0,
+      ramTotalGb: 0,
+      diskFreeGb: 0,
+      diskPct: 0,
+      tempJunkMb: 0,
+      crashReportsCount: 0,
+      startupCount: 0,
+      uptimeHours: 0,
+      integrityStatus: 'Not Checked',
+    },
+    issues: [],
+    repairLog: [],
+  });
   const [speedTest, setSpeedTest] = useState<SpeedTestState>({
     running: false,
     downMbps: null,
@@ -348,6 +374,9 @@ export function useDevDeckSocket() {
               break;
             case 'antigravity:diff':
               setAntigravityDiff(msg.payload);
+              break;
+            case 'doctor:state':
+              setDoctorReport(msg.payload);
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
@@ -507,6 +536,7 @@ export function useDevDeckSocket() {
     agentProgress,
     antigravityState,
     antigravityDiff,
+    doctorReport,
     speedTest,
     caffeineActive,
     processes,

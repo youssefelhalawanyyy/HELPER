@@ -325,6 +325,50 @@ export interface SpeedTestState {
   ts: number;
 }
 
+export type DoctorRepairAction =
+  | 'clean_junk'
+  | 'flush_dns'
+  | 'free_ram'
+  | 'verify_system_files'
+  | 'full_tuneup';
+
+export interface DoctorIssue {
+  id: string;
+  severity: 'critical' | 'warning' | 'healthy';
+  category: 'cpu' | 'memory' | 'disk' | 'corruption' | 'startup' | 'crashes' | 'network';
+  title: string;
+  plainEnglish: string;
+  impact: string;
+  fixAction?: DoctorRepairAction;
+  fixLabel?: string;
+}
+
+export interface SystemDoctorReport {
+  scanning: boolean;
+  repairing: boolean;
+  activeAction: string;
+  score: number;
+  grade: 'EXCELLENT' | 'GOOD' | 'SLOW' | 'CRITICAL';
+  summaryEnglish: string;
+  platform: string;
+  scannedAt: number;
+  metrics: {
+    cpuPct: number;
+    ramPct: number;
+    ramUsedGb: number;
+    ramTotalGb: number;
+    diskFreeGb: number;
+    diskPct: number;
+    tempJunkMb: number;
+    crashReportsCount: number;
+    startupCount: number;
+    uptimeHours: number;
+    integrityStatus: string;
+  };
+  issues: DoctorIssue[];
+  repairLog: string[];
+}
+
 export type ServerEvent =
   | { type: 'hello'; payload: BridgeHello }
   | { type: 'config:sync'; payload: DevDeckPublicConfig }
@@ -345,6 +389,7 @@ export type ServerEvent =
   | { type: 'agent:progress'; payload: AgentProgress }
   | { type: 'antigravity:state'; payload: AntigravityLiveState }
   | { type: 'antigravity:diff'; payload: AntigravityFileDiff }
+  | { type: 'doctor:state'; payload: SystemDoctorReport }
   | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
@@ -398,4 +443,6 @@ export type ClientEvent =
   | { type: 'antigravity:prompt'; payload: { requestId: string; text: string; submit?: boolean } }
   | { type: 'antigravity:selectSession'; payload: { requestId: string; conversationId: string | null } }
   | { type: 'antigravity:diffFile'; payload: { requestId: string; file: string } }
+  | { type: 'doctor:scan'; payload: { requestId: string } }
+  | { type: 'doctor:repair'; payload: { requestId: string; action: DoctorRepairAction } }
   | { type: 'speedtest:run'; payload: { requestId: string } };
