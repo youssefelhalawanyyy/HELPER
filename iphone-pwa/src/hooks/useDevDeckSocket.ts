@@ -25,6 +25,29 @@ export interface PairingConfig {
   host: string;
   port: number;
   token: string;
+  secure?: boolean;
+}
+
+function buildBridgeUrls(cfg: { host: string; port: number; secure?: boolean }) {
+  const raw = cfg.host.trim().replace(/\/+$/, '');
+  const isFullHttps = /^https:\/\//i.test(raw);
+  const isFullHttp = /^http:\/\//i.test(raw);
+  const pageIsHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+
+  if (isFullHttps || isFullHttp) {
+    const httpBase = raw;
+    const wsBase = raw.replace(/^http/i, 'ws');
+    return { httpBase, wsBase };
+  }
+
+  const useSecure = Boolean(cfg.secure) || cfg.port === 443 || (pageIsHttps && !/^(localhost|127\.0\.0\.1|\d+\.\d+\.\d+\.\d+)$/.test(raw));
+  const httpProto = useSecure ? 'https' : 'http';
+  const wsProto = useSecure ? 'wss' : 'ws';
+  const portSuffix = (useSecure && cfg.port === 443) || (!useSecure && cfg.port === 80) || !cfg.port ? '' : `:${cfg.port}`;
+  return {
+    httpBase: `${httpProto}://${raw}${portSuffix}`,
+    wsBase: `${wsProto}://${raw}${portSuffix}`,
+  };
 }
 
 export type ConnectionState = 'unpaired' | 'connecting' | 'connected' | 'reconnecting';
@@ -188,7 +211,8 @@ export function useDevDeckSocket() {
       }
 
       setStatus(retryCountRef.current > 0 ? 'reconnecting' : 'connecting');
-      const wsUrl = `ws://${cfg.host}:${cfg.port}/ws?token=${encodeURIComponent(cfg.token)}`;
+      const { wsBase } = buildBridgeUrls(cfg);
+      const wsUrl = `${wsBase}/ws?token=${encodeURIComponent(cfg.token)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -321,8 +345,9 @@ export function useDevDeckSocket() {
 
   const pairWithPin = useCallback(
     async (host: string, port: number, pin: string): Promise<{ ok: boolean; error?: string }> => {
+      const { httpBase } = buildBridgeUrls({ host, port });
       try {
-        const res = await fetch(`http://${host}:${port}/api/pair`, {
+        const res = await fetch(`${httpBase}/api/pair`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ pin }),
@@ -335,7 +360,7 @@ export function useDevDeckSocket() {
         soundEngine.playSuccessChime();
         return { ok: true };
       } catch {
-        return { ok: false, error: `Cannot reach Mac bridge at http://${host}:${port}` };
+        return { ok: false, error: `Cannot reach Mac bridge at ${httpBase}` };
       }
     },
     [savePairing],
@@ -353,7 +378,7 @@ export function useDevDeckSocket() {
   const clearLogs = useCallback(() => setLogs([]), []);
   const dismissAgentNotification = useCallback(() => setAgentNotification(null), []);
 
-  const bridgeBaseUrl = pairing ? `http://${pairing.host}:${pairing.port}` : null;
+  const bridgeBaseUrl = pairing ? buildBridgeUrls(pairing).httpBase : null;
 
   return {
     pairing,

@@ -78,14 +78,14 @@ export function PairingOverlay({
         <form onSubmit={handleSubmit} className="grid grid-cols-12 gap-2.5">
           <label className="col-span-5 flex flex-col gap-1">
             <span className="font-mono-tech text-[10px] uppercase tracking-wider text-zinc-400">
-              Mac LAN IP
+              Mac LAN IP or HTTPS URL
             </span>
             <input
               type="text"
               required
               value={host}
               onChange={(e) => setHost(e.target.value)}
-              placeholder="192.168.1.42"
+              placeholder="192.168.1.42 or https://…"
               className="font-mono-tech rounded-lg border border-white/10 bg-black px-2.5 py-2 text-xs text-white outline-none focus:border-cyan-400"
             />
           </label>
