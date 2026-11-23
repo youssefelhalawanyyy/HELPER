@@ -43,7 +43,7 @@ export class AntigravityService {
       }
       const dirs = fs
         .readdirSync(brainRoot, { withFileTypes: true })
-        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .filter((d) => d.isDirectory() && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(d.name))
         .map((d) => {
           const full = path.join(brainRoot, d.name);
           const st = fs.statSync(full);

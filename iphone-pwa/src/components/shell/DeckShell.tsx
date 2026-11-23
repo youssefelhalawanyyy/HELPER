@@ -259,13 +259,18 @@ export function DeckShell() {
           transformOrigin: 'center center',
         }}
       >
-        {/* Safe-area padded full-width layout (always clears iPhone notch / Dynamic Island & Home Indicator) */}
+        {/* True edge-to-edge full-screen padding (uses actual iOS safe-area-insets only) */}
         <div
-          className="flex h-full flex-col gap-2 py-2"
+          className="flex h-full flex-col gap-1.5"
           style={{
-            paddingLeft: viewport.portrait ? 34 : 'max(36px, env(safe-area-inset-left, 36px))',
-            paddingRight: viewport.portrait ? 22 : 'max(18px, env(safe-area-inset-right, 18px))',
-            paddingBottom: viewport.portrait ? 10 : 'max(10px, env(safe-area-inset-bottom, 10px))',
+            paddingTop: 6,
+            paddingLeft: viewport.portrait
+              ? 'max(10px, env(safe-area-inset-top, 10px))'
+              : 'max(10px, env(safe-area-inset-left, 10px))',
+            paddingRight: viewport.portrait
+              ? 'max(10px, env(safe-area-inset-bottom, 10px))'
+              : 'max(10px, env(safe-area-inset-right, 10px))',
+            paddingBottom: 'max(6px, env(safe-area-inset-bottom, 6px))',
           }}
         >
           {/* Ultra-Slim Top Status Bar */}
@@ -562,20 +567,22 @@ export function DeckShell() {
 
             {/* Live Dev Log Marquee */}
             <div className="flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-full border border-white/[0.07] bg-[#101114]">
-              <span className="sub z-10 grid h-full place-items-center bg-white/[0.06] px-2.5 !text-[8.5px]">
+              <span className="sub z-10 grid h-full shrink-0 place-items-center whitespace-nowrap border-r border-white/[0.08] bg-[#1a1b22] px-2.5 !text-[8.5px]">
                 Dev log
               </span>
-              <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#f2f3f7]">
-                {[0, 1].map((dup) => (
-                  <span key={dup} className="flex">
-                    {tickerItems.map(([color, text], i) => (
-                      <span key={`${dup}-${i}`} className="flex items-center gap-1.5 px-4">
-                        <i className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-                        {text}
-                      </span>
-                    ))}
-                  </span>
-                ))}
+              <div className="relative min-w-0 flex-1 overflow-hidden">
+                <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#f2f3f7]">
+                  {[0, 1].map((dup) => (
+                    <span key={dup} className="flex">
+                      {tickerItems.map(([color, text], i) => (
+                        <span key={`${dup}-${i}`} className="flex items-center gap-1.5 px-4">
+                          <i className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                          {text}
+                        </span>
+                      ))}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </footer>
