@@ -387,7 +387,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
             line.includes(':') &&
             !line.trim().endsWith(': OK') &&
             line.includes('.plist') &&
-            !/operation not permitted|permission denied|not readable|does not exist|not a regular file/i.test(line)
+            !/permission|not permitted|not readable|does not exist|not a regular file|couldn.t be opened/i.test(line)
           ) {
             corruptedFilesCount += 1;
             const fileName = path.basename(line.split(':')[0].trim());
@@ -1060,7 +1060,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
                 line.includes(':') &&
                 !line.trim().endsWith(': OK') &&
                 line.includes('.plist') &&
-                !/operation not permitted|permission denied|not readable|does not exist|not a regular file/i.test(line)
+                !/permission|not permitted|not readable|does not exist|not a regular file|couldn.t be opened/i.test(line)
               ) {
                 const filePath = line.split(':')[0].trim();
                 const base = path.basename(filePath);
