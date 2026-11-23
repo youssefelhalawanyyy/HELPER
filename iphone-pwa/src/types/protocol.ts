@@ -262,6 +262,16 @@ export interface AntigravityChatTurn {
   ts: number;
 }
 
+export interface AntigravityTerminalRun {
+  id: string;
+  command: string;
+  summary: string;
+  status: 'running' | 'done' | 'error';
+  exitCode?: number;
+  output: string;
+  ts: number;
+}
+
 export interface AntigravityLiveState {
   active: boolean;
   statusLabel: 'WORKING' | 'WAITING' | 'IDLE';
@@ -275,6 +285,7 @@ export interface AntigravityLiveState {
   steps: AntigravityStepItem[];
   recentEvents: AntigravityFeedEvent[];
   chatTurns: AntigravityChatTurn[];
+  terminalRuns: AntigravityTerminalRun[];
   artifactName: string;
   artifactPreview: string;
   diffFiles: GitDiffFile[];

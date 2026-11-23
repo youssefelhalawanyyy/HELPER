@@ -15,11 +15,13 @@ import {
   FileCode2,
   FileDiff,
   Loader2,
+  MessageSquare,
   Mic,
   Search,
   Send,
   Sparkles,
   Terminal,
+  TerminalSquare,
   Wrench,
   XCircle,
 } from 'lucide-react';
@@ -27,7 +29,11 @@ import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
-import type { AntigravityChatTurn, AntigravityToolItem } from '@/types/protocol';
+import type {
+  AntigravityChatTurn,
+  AntigravityTerminalRun,
+  AntigravityToolItem,
+} from '@/types/protocol';
 
 const SLASH_COMMANDS = [
   { cmd: '/plan', desc: 'Step plan', color: '#22d3ee' },
@@ -95,7 +101,6 @@ function toolStyle(name: string): { color: string; Icon: typeof Wrench } {
 }
 
 function renderInlineSpans(line: string) {
-  // Split inline `code` and **bold** safely without dangerouslySetInnerHTML
   const tokens = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
   return tokens.map((tok, i) => {
     if (tok.startsWith('`') && tok.endsWith('`') && tok.length > 2) {
@@ -237,7 +242,6 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
   return (
     <div className="flex justify-start">
       <div className="w-full rounded-2xl rounded-bl-sm border border-white/[0.08] bg-black/70 px-2.5 py-2">
-        {/* Agent Turn Header */}
         <div className="mb-1.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <span className="grid h-4 w-4 place-items-center rounded-md bg-[#22d3ee]/15 text-[#22d3ee]">
@@ -266,7 +270,6 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
           </div>
         </div>
 
-        {/* Collapsible Thinking / Reasoning Block */}
         {turn.thinking && (
           <div className="mb-1.5 rounded-lg border border-[#a78bfa]/20 bg-[#a78bfa]/[0.06]">
             <button
@@ -297,7 +300,6 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
           </div>
         )}
 
-        {/* Tool Call Cards */}
         {turn.tools.length > 0 && (
           <div className="mb-1.5 space-y-1">
             {turn.tools.map((tool, i) => (
@@ -306,15 +308,126 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
           </div>
         )}
 
-        {/* Agent Response Body */}
         {turn.text && <FormattedAgentText text={turn.text} />}
       </div>
     </div>
   );
 }
 
+function AgentTerminalPanel({
+  runs,
+  selectedId,
+  onSelect,
+  onToggleIdeTerminal,
+  compact = false,
+}: {
+  runs: AntigravityTerminalRun[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onToggleIdeTerminal: () => void;
+  compact?: boolean;
+}) {
+  const outRef = useRef<HTMLPreElement | null>(null);
+  const activeRun = runs.find((r) => r.id === selectedId) ?? runs[0] ?? null;
+
+  useEffect(() => {
+    if (!outRef.current) return;
+    outRef.current.scrollTop = outRef.current.scrollHeight;
+  }, [activeRun?.id, activeRun?.output]);
+
+  if (!activeRun) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+        <TerminalSquare className="h-6 w-6 text-[#fbbf24]/50" />
+        <div className="sub">No agent terminal commands yet</div>
+        <button
+          type="button"
+          onClick={onToggleIdeTerminal}
+          className="rounded-lg border border-white/15 bg-white/[0.05] px-2.5 py-1 text-[9px] font-bold text-zinc-200"
+        >
+          Toggle IDE Terminal ⌘`
+        </button>
+      </div>
+    );
+  }
+
+  const badgeColor =
+    activeRun.status === 'running'
+      ? '#34d399'
+      : activeRun.status === 'error'
+        ? '#ff5d6c'
+        : '#22d3ee';
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
+      {/* Command history tabs */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-0.5" data-no-swipe="true">
+        {runs.slice(0, compact ? 4 : 6).map((r) => {
+          const active = r.id === activeRun.id;
+          const dot =
+            r.status === 'running' ? '#34d399' : r.status === 'error' ? '#ff5d6c' : '#22d3ee';
+          return (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                onSelect(r.id);
+              }}
+              className="flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[8.5px] font-bold transition-colors"
+              style={{
+                background: active ? '#1a1d27' : 'rgba(255,255,255,0.03)',
+                borderColor: active ? `${dot}77` : 'rgba(255,255,255,0.07)',
+                color: active ? '#f4f4f6' : '#8b90a0',
+              }}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${r.status === 'running' ? 'animate-pulse' : ''}`}
+                style={{ background: dot }}
+              />
+              <span className="max-w-[96px] truncate">{r.summary}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onToggleIdeTerminal}
+          className="ml-auto shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[8px] font-extrabold text-[#fbbf24]"
+        >
+          IDE ⌘`
+        </button>
+      </div>
+
+      {/* Command header bar */}
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.07] bg-black/80 px-2 py-1">
+        <div className="font-mono-tech min-w-0 flex-1 truncate text-[9px] text-[#fbbf24]">
+          $ {activeRun.command}
+        </div>
+        <span
+          className="font-mono-tech shrink-0 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+          style={{ background: `${badgeColor}20`, color: badgeColor }}
+        >
+          {activeRun.status === 'running'
+            ? 'RUNNING'
+            : `EXIT ${activeRun.exitCode ?? 0}`}
+        </span>
+      </div>
+
+      {/* Pure-black OLED terminal output well */}
+      <pre
+        ref={outRef}
+        className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] p-2 text-[8.5px] leading-[1.4] whitespace-pre-wrap break-words text-[#d4f5e9]"
+      >
+        {activeRun.output || (activeRun.status === 'running' ? 'Streaming terminal output…' : '(no output)')}
+      </pre>
+    </div>
+  );
+}
+
 export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
-  const [sideTab, setSideTab] = useState<'live' | 'slash' | 'plan'>('live');
+  const [mainMode, setMainMode] = useState<'chat' | 'terminal'>('chat');
+  const [sideTab, setSideTab] = useState<'term' | 'live' | 'slash' | 'plan'>('term');
+  const [selectedTermId, setSelectedTermId] = useState<string | null>(null);
   const [promptText, setPromptText] = useState('');
   const [listening, setListening] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
@@ -325,12 +438,13 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   const prog = deck.agentProgress;
   const isWorking = ag.statusLabel === 'WORKING' || prog.active;
   const turns = ag.chatTurns ?? [];
+  const terminalRuns = ag.terminalRuns ?? [];
+  const hasRunningTerm = terminalRuns.some((r) => r.status === 'running');
 
-  // Auto-scroll to latest turn when pinned to bottom
   useEffect(() => {
-    if (!pinnedToBottom || !scrollRef.current) return;
+    if (!pinnedToBottom || !scrollRef.current || mainMode !== 'chat') return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [turns, ag.currentFocus, pinnedToBottom]);
+  }, [turns, ag.currentFocus, pinnedToBottom, mainMode]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -343,6 +457,14 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
     if (!scrollRef.current) return;
     scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     setPinnedToBottom(true);
+  };
+
+  const toggleIdeTerminal = () => {
+    soundEngine.playClick();
+    deck.sendEvent({
+      type: 'macro:execute',
+      payload: { requestId: makeRequestId(), macroId: 'ag-toggle-terminal' },
+    });
   };
 
   const sendPrompt = (overrideText?: string) => {
@@ -391,15 +513,15 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   };
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.85fr 1fr' }}>
-      {/* LEFT / MAIN: Live Antigravity Chat Mirror + Prompt Composer */}
+    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.8fr 1.05fr' }}>
+      {/* LEFT / MAIN: Live Antigravity Chat Mirror OR Expanded Agent Terminal */}
       <div className="tile relative flex min-h-0 flex-col p-2.5">
         <div className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full bg-gradient-to-r from-[#2563eb] via-[#22d3ee] to-[#34d399]" />
 
-        {/* Live Telemetry Header */}
+        {/* Live Telemetry Header + Chat/Terminal Switch */}
         <div className="mb-1.5 flex items-center justify-between gap-2 border-b border-white/[0.06] pb-1.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="relative h-2.5 w-2.5 shrink-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="relative h-2 w-2 shrink-0">
               {isWorking && (
                 <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />
               )}
@@ -415,7 +537,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               />
             </span>
             <span
-              className="font-mono-tech shrink-0 text-[9.5px] font-extrabold uppercase"
+              className="font-mono-tech shrink-0 text-[9px] font-extrabold uppercase"
               style={{
                 color: isWorking
                   ? '#34d399'
@@ -426,17 +548,56 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             >
               {prog.active ? prog.title : ag.statusLabel}
             </span>
-            <span className="truncate text-[10px] font-medium text-zinc-300">
+            <span className="truncate text-[9.5px] font-medium text-zinc-300">
               {prog.active
                 ? prog.step
-                : ag.currentFocus || (ag.conversationId ? `Session ${ag.conversationId.slice(0, 8)}` : 'Antigravity Live')}
+                : ag.currentFocus ||
+                  (ag.conversationId ? `Session ${ag.conversationId.slice(0, 8)}` : 'Antigravity Live')}
             </span>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className="num font-mono-tech rounded-full border border-white/[0.08] bg-black/70 px-2 py-0.5 text-[8.5px] font-bold text-[#a78bfa]">
-              #{ag.stepCount || 0} · {formatTokens(ag.contextTokens)} ctx
+          <div className="flex shrink-0 items-center gap-1">
+            {/* Main view toggle: Chat vs Full-Width Agent Terminal */}
+            <div className="flex rounded-full bg-black/75 p-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setMainMode('chat');
+                }}
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase"
+                style={{
+                  background: mainMode === 'chat' ? '#1f222c' : 'transparent',
+                  color: mainMode === 'chat' ? '#22d3ee' : '#7c8190',
+                }}
+              >
+                <MessageSquare className="h-2.5 w-2.5" />
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setMainMode('terminal');
+                }}
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase"
+                style={{
+                  background: mainMode === 'terminal' ? '#1f222c' : 'transparent',
+                  color: mainMode === 'terminal' ? '#fbbf24' : '#7c8190',
+                }}
+              >
+                <Terminal className="h-2.5 w-2.5" />
+                Term
+                {hasRunningTerm && (
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#34d399]" />
+                )}
+              </button>
+            </div>
+
+            <span className="num font-mono-tech rounded-full border border-white/[0.08] bg-black/70 px-1.5 py-0.5 text-[8px] font-bold text-[#a78bfa]">
+              #{ag.stepCount || 0} · {formatTokens(ag.contextTokens)}
             </span>
+
             <button
               type="button"
               onClick={() => {
@@ -446,7 +607,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                   payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
                 });
               }}
-              className="flex items-center gap-1 rounded-full bg-[#2563eb] px-2 py-0.5 text-[8.5px] font-extrabold text-white"
+              className="flex items-center gap-0.5 rounded-full bg-[#2563eb] px-2 py-0.5 text-[8px] font-extrabold text-white"
               style={{ boxShadow: '0 0 10px #2563eb88' }}
             >
               <ExternalLink className="h-2.5 w-2.5" />
@@ -465,41 +626,52 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
 
-        {/* Live Chat Stream */}
-        <div className="relative min-h-0 flex-1">
-          <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="deck-scroll h-full space-y-2 overflow-y-auto pr-1"
-          >
-            {turns.length > 0 ? (
-              turns.map((turn) => <ChatTurnBubble key={turn.id} turn={turn} />)
-            ) : (
-              <div className="grid h-full place-items-center text-center">
-                <div className="space-y-1">
-                  <Bot className="mx-auto h-6 w-6 text-[#22d3ee]/60" />
-                  <div className="text-[11px] font-bold text-zinc-300">
-                    Waiting for live Antigravity session
-                  </div>
-                  <div className="sub">
-                    Restart npm run live on Mac to stream full chat turns & tool calls
+        {/* Main Body: Live Chat Stream OR Expanded Agent Terminal */}
+        {mainMode === 'chat' ? (
+          <div className="relative min-h-0 flex-1">
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="deck-scroll h-full space-y-2 overflow-y-auto pr-1"
+            >
+              {turns.length > 0 ? (
+                turns.map((turn) => <ChatTurnBubble key={turn.id} turn={turn} />)
+              ) : (
+                <div className="grid h-full place-items-center text-center">
+                  <div className="space-y-1">
+                    <Bot className="mx-auto h-6 w-6 text-[#22d3ee]/60" />
+                    <div className="text-[11px] font-bold text-zinc-300">
+                      Waiting for live Antigravity session
+                    </div>
+                    <div className="sub">
+                      Restart npm run live on Mac to stream full chat & agent terminal
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
+
+            {!pinnedToBottom && turns.length > 0 && (
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className="absolute right-2 bottom-2 flex items-center gap-1 rounded-full border border-[#22d3ee]/50 bg-black/90 px-2.5 py-1 text-[9px] font-bold text-[#22d3ee] shadow-lg"
+              >
+                <ArrowDown className="h-3 w-3" />
+                Latest
+              </button>
             )}
           </div>
-
-          {!pinnedToBottom && turns.length > 0 && (
-            <button
-              type="button"
-              onClick={scrollToBottom}
-              className="absolute right-2 bottom-2 flex items-center gap-1 rounded-full border border-[#22d3ee]/50 bg-black/90 px-2.5 py-1 text-[9px] font-bold text-[#22d3ee] shadow-lg"
-            >
-              <ArrowDown className="h-3 w-3" />
-              Latest
-            </button>
-          )}
-        </div>
+        ) : (
+          <div className="min-h-0 flex-1">
+            <AgentTerminalPanel
+              runs={terminalRuns}
+              selectedId={selectedTermId}
+              onSelect={setSelectedTermId}
+              onToggleIdeTerminal={toggleIdeTerminal}
+            />
+          </div>
+        )}
 
         {/* Bottom Prompt & Voice Bar -> Sends directly into Antigravity IDE */}
         <form
@@ -545,15 +717,16 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
         </form>
       </div>
 
-      {/* RIGHT: Mission Inspector Sidebar (Steps & Diff / Slash / Plan + Accept/Reject) */}
+      {/* RIGHT: Mission Inspector Sidebar (Agent Terminal / Steps & Diff / Slash / Plan + Accept/Reject) */}
       <div className="tile flex min-h-0 flex-col gap-2 p-2.5">
-        <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#a78bfa] to-[#34d399]" />
+        <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#fbbf24] via-[#a78bfa] to-[#34d399]" />
 
-        {/* 3-Tab Switcher */}
-        <div className="grid grid-cols-3 gap-1 rounded-full bg-black/75 p-0.5">
+        {/* 4-Tab Switcher */}
+        <div className="grid grid-cols-4 gap-0.5 rounded-full bg-black/75 p-0.5">
           {(
             [
-              { id: 'live', label: 'Steps & Diff', color: '#34d399' },
+              { id: 'term', label: 'Term', color: '#fbbf24' },
+              { id: 'live', label: 'Diff', color: '#34d399' },
               { id: 'slash', label: 'Slash', color: '#22d3ee' },
               { id: 'plan', label: 'Plan', color: '#a78bfa' },
             ] as const
@@ -565,22 +738,34 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 setSideTab(t.id);
               }}
-              className="truncate rounded-full px-1.5 py-1 text-[8.5px] font-extrabold uppercase transition-colors"
+              className="flex items-center justify-center gap-1 truncate rounded-full px-1 py-1 text-[8px] font-extrabold uppercase transition-colors"
               style={{
                 background: sideTab === t.id ? '#1f222c' : 'transparent',
                 color: sideTab === t.id ? t.color : '#7c8190',
               }}
             >
+              {t.id === 'term' && hasRunningTerm && (
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#34d399]" />
+              )}
               {t.label}
             </button>
           ))}
         </div>
 
         {/* Tab Body */}
-        <div className="deck-scroll min-h-0 flex-1 overflow-y-auto pr-0.5">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {sideTab === 'term' && (
+            <AgentTerminalPanel
+              runs={terminalRuns}
+              selectedId={selectedTermId}
+              onSelect={setSelectedTermId}
+              onToggleIdeTerminal={toggleIdeTerminal}
+              compact
+            />
+          )}
+
           {sideTab === 'live' && (
-            <div className="space-y-2">
-              {/* Live Step Checklist */}
+            <div className="deck-scroll h-full space-y-2 overflow-y-auto pr-0.5">
               {ag.steps.length > 0 && (
                 <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                   <div className="mb-1 flex items-center justify-between">
@@ -612,7 +797,6 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 </div>
               )}
 
-              {/* Live Git Diff */}
               <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1 text-[9px] font-extrabold text-zinc-300 uppercase">
@@ -646,7 +830,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           )}
 
           {sideTab === 'slash' && (
-            <div className="space-y-2">
+            <div className="deck-scroll h-full space-y-2 overflow-y-auto pr-0.5">
               <div className="flex items-center gap-1">
                 <Sparkles className="h-3 w-3 text-[#a78bfa]" />
                 <span className="sub !text-[8.5px]">One-Tap IDE Slash (⌘L)</span>
@@ -681,7 +865,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           )}
 
           {sideTab === 'plan' && (
-            <div className="space-y-1">
+            <div className="deck-scroll h-full space-y-1 overflow-y-auto pr-0.5">
               <div className="flex items-center justify-between">
                 <span className="sub !text-[8.5px]">Active Artifact</span>
                 <span className="font-mono-tech truncate text-[8.5px] text-[#a78bfa]">

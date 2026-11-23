@@ -8,6 +8,7 @@ import type {
   AntigravityFeedEvent,
   AntigravityLiveState,
   AntigravityStepItem,
+  AntigravityTerminalRun,
   AntigravityToolItem,
   GitDiffFile,
 } from '../types/protocol.js';
@@ -35,6 +36,31 @@ interface TranscriptEntry {
   tool_calls?: TranscriptToolCall[];
 }
 
+function stripAnsi(input: string): string {
+  return input
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
+}
+
+function readTailText(filePath: string, maxBytes = 6000): string {
+  try {
+    const st = fs.statSync(filePath);
+    const start = Math.max(0, st.size - maxBytes);
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const buf = Buffer.alloc(st.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      return stripAnsi(buf.toString('utf8'));
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
 function readTailLines(filePath: string, maxBytes = 320_000): string[] {
   const st = fs.statSync(filePath);
   const start = Math.max(0, st.size - maxBytes);
@@ -50,24 +76,33 @@ function readTailLines(filePath: string, maxBytes = 320_000): string[] {
   }
 }
 
+function cleanArgStr(v: unknown): string {
+  if (typeof v !== 'string') return '';
+  return v.replace(/^"|"$/g, '').trim();
+}
+
 function summarizeToolCall(tc: TranscriptToolCall): { summary: string; detail: string } {
   const name = tc.name || 'tool';
   const args = tc.args || tc.arguments || {};
-  if (typeof args.Path === 'string') {
-    return { summary: path.basename(args.Path), detail: args.Path };
+  const filePath = cleanArgStr(args.Path);
+  if (filePath) {
+    return { summary: path.basename(filePath), detail: filePath };
   }
-  if (typeof args.toolSummary === 'string') {
-    const cmd = typeof args.CommandLine === 'string' ? args.CommandLine.slice(0, 120) : '';
-    return { summary: args.toolSummary, detail: cmd || args.toolSummary };
+  const toolSummary = cleanArgStr(args.toolSummary);
+  const cmdLine = cleanArgStr(args.CommandLine);
+  if (toolSummary) {
+    return { summary: toolSummary, detail: cmdLine.slice(0, 140) || toolSummary };
   }
-  if (typeof args.CommandLine === 'string') {
-    return { summary: args.CommandLine.slice(0, 56), detail: args.CommandLine.slice(0, 140) };
+  if (cmdLine) {
+    return { summary: cmdLine.slice(0, 56), detail: cmdLine.slice(0, 140) };
   }
-  if (typeof args.focus === 'string') {
-    return { summary: args.focus, detail: args.focus };
+  const focus = cleanArgStr(args.focus);
+  if (focus) {
+    return { summary: focus, detail: focus };
   }
-  if (typeof args.query === 'string') {
-    return { summary: args.query, detail: args.query };
+  const query = cleanArgStr(args.query);
+  if (query) {
+    return { summary: query, detail: query };
   }
   return { summary: name, detail: name };
 }
@@ -88,6 +123,7 @@ export class AntigravityService {
     steps: [],
     recentEvents: [],
     chatTurns: [],
+    terminalRuns: [],
     artifactName: '',
     artifactPreview: '',
     diffFiles: [],
@@ -118,6 +154,7 @@ export class AntigravityService {
       steps: [] as AntigravityStepItem[],
       recentEvents: [] as AntigravityFeedEvent[],
       chatTurns: [] as AntigravityChatTurn[],
+      terminalRuns: [] as AntigravityTerminalRun[],
       artifactName: '',
       artifactPreview: '',
     };
@@ -143,6 +180,7 @@ export class AntigravityService {
       const newest = dirs[0];
       if (!newest) return empty;
 
+      const tasksDir = path.join(newest.full, '.system_generated', 'tasks');
       let latestMtime = newest.mtime;
       let artifactName = '';
       let artifactPreview = '';
@@ -166,6 +204,9 @@ export class AntigravityService {
       let steps: AntigravityStepItem[] = [];
       const recentEvents: AntigravityFeedEvent[] = [];
       const chatTurns: AntigravityChatTurn[] = [];
+      const terminalRuns: AntigravityTerminalRun[] = [];
+      const pendingCmds: AntigravityTerminalRun[] = [];
+      const taskIdMap = new Map<string, AntigravityTerminalRun>();
       let lastType = '';
       let lastHadToolCalls = false;
 
@@ -218,7 +259,7 @@ export class AntigravityService {
               for (const tc of tcs) {
                 const args = tc.args || tc.arguments || {};
                 if (tc.name === 'update_focus' && typeof args.focus === 'string') {
-                  currentFocus = args.focus.replace(/^"|"$/g, '');
+                  currentFocus = cleanArgStr(args.focus);
                 } else if (tc.name === 'update_steps' && Array.isArray(args.steps)) {
                   steps = (args.steps as Array<{ title?: string; status?: string }>)
                     .filter((s) => typeof s.title === 'string')
@@ -233,6 +274,20 @@ export class AntigravityService {
                     detail: info.summary,
                     ts,
                   });
+
+                  if (tc.name === 'run_command') {
+                    const cmd = cleanArgStr(args.CommandLine) || info.detail;
+                    const run: AntigravityTerminalRun = {
+                      id: `cmd-${entry.step_index}-${terminalRuns.length}`,
+                      command: cmd,
+                      summary: cleanArgStr(args.toolSummary) || cmd.slice(0, 48),
+                      status: 'running',
+                      output: '',
+                      ts,
+                    };
+                    terminalRuns.push(run);
+                    pendingCmds.push(run);
+                  }
                 }
               }
 
@@ -241,7 +296,6 @@ export class AntigravityService {
 
               if (text || turnTools.length > 0 || thinking) {
                 const prev = chatTurns[chatTurns.length - 1];
-                // Merge consecutive agent tool-calling steps into one clean rich chat bubble
                 if (prev && prev.role === 'agent' && !prev.text && turnTools.length > 0) {
                   prev.tools = [...prev.tools, ...turnTools].slice(-12);
                   if (thinking) prev.thinking = thinking.slice(0, 320);
@@ -275,6 +329,64 @@ export class AntigravityService {
                   ts,
                 });
               }
+            } else if (entry.type === 'GENERIC' && entry.content) {
+              const content = entry.content;
+              const bgMatch = content.match(/background task with task id:\s*[^\s/]+\/(task-\d+)/i);
+              const exitMatch = content.match(/Command exited with code\s+(-?\d+)\./i);
+
+              if (bgMatch) {
+                const taskName = bgMatch[1];
+                const run = pendingCmds.shift();
+                if (run) {
+                  taskIdMap.set(taskName, run);
+                  const logFile = path.join(tasksDir, `${taskName}.log`);
+                  if (fs.existsSync(logFile)) {
+                    const st = fs.statSync(logFile);
+                    if (st.mtimeMs > latestMtime) latestMtime = st.mtimeMs;
+                    run.output = readTailText(logFile, 3200);
+                  } else {
+                    const outIdx = content.indexOf('Log output:');
+                    if (outIdx !== -1) {
+                      run.output = stripAnsi(content.slice(outIdx + 'Log output:'.length)).slice(-3200);
+                    }
+                  }
+                }
+              } else if (exitMatch) {
+                const code = Number(exitMatch[1]);
+                const run = pendingCmds.shift();
+                if (run) {
+                  run.exitCode = code;
+                  run.status = code === 0 ? 'done' : 'error';
+                  const outIdx = content.indexOf('Command output:');
+                  if (outIdx !== -1) {
+                    run.output = stripAnsi(content.slice(outIdx + 'Command output:'.length)).slice(-3200);
+                  }
+                }
+              }
+            } else if (entry.type === 'SYSTEM_MESSAGE' && entry.content) {
+              const finMatch = entry.content.match(
+                /Task id\s+"[^"]+\/(task-\d+)"\s+finished with result:[\s\S]*?Command exited with code\s+(-?\d+)\./i,
+              );
+              if (finMatch) {
+                const taskName = finMatch[1];
+                const code = Number(finMatch[2]);
+                const run = taskIdMap.get(taskName);
+                if (run) {
+                  run.exitCode = code;
+                  run.status = code === 0 ? 'done' : 'error';
+                  const logFile = path.join(tasksDir, `${taskName}.log`);
+                  if (fs.existsSync(logFile)) {
+                    run.output = readTailText(logFile, 3200);
+                  } else {
+                    const outIdx = entry.content.indexOf('Command output:');
+                    if (outIdx !== -1) {
+                      run.output = stripAnsi(
+                        entry.content.slice(outIdx + 'Command output:'.length),
+                      ).slice(-3200);
+                    }
+                  }
+                }
+              }
             }
           } catch {
             // Skip malformed JSONL line
@@ -282,9 +394,24 @@ export class AntigravityService {
         }
       }
 
+      // Refresh live log file tail for any still-running background task
+      for (const [taskName, run] of taskIdMap.entries()) {
+        if (run.status === 'running') {
+          const logFile = path.join(tasksDir, `${taskName}.log`);
+          if (fs.existsSync(logFile)) {
+            const st = fs.statSync(logFile);
+            if (st.mtimeMs > latestMtime) latestMtime = st.mtimeMs;
+            run.output = readTailText(logFile, 3200);
+          }
+        }
+      }
+
       const ageMs = Date.now() - latestMtime;
+      const hasRunningTask = terminalRuns.some((r) => r.status === 'running');
       const active =
-        ageMs < 15_000 || (ageMs < 45_000 && (lastType === 'USER_INPUT' || lastHadToolCalls));
+        hasRunningTask ||
+        ageMs < 15_000 ||
+        (ageMs < 45_000 && (lastType === 'USER_INPUT' || lastHadToolCalls));
       const statusLabel: 'WORKING' | 'WAITING' | 'IDLE' = active
         ? 'WORKING'
         : ageMs < 5 * 60_000
@@ -304,6 +431,7 @@ export class AntigravityService {
         steps,
         recentEvents: recentEvents.slice(-14).reverse(),
         chatTurns: chatTurns.slice(-16),
+        terminalRuns: terminalRuns.slice(-8).reverse(),
         artifactName,
         artifactPreview,
       };
@@ -346,7 +474,8 @@ export class AntigravityService {
     const diff = await this.readGitDiffStat();
     const next: AntigravityLiveState = { ...brain, ...diff };
 
-    const digest = `${next.conversationId}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
+    const topTerm = next.terminalRuns[0];
+    const digest = `${next.conversationId}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.terminalRuns.length}|${topTerm?.status || ''}|${topTerm?.output.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
     this.latest = next;
     if (digest !== this.lastDigest) {
       this.lastDigest = digest;

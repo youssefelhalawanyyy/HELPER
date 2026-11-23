@@ -208,6 +208,7 @@ export function useDevDeckSocket() {
     steps: [],
     recentEvents: [],
     chatTurns: [],
+    terminalRuns: [],
     artifactName: '',
     artifactPreview: '',
     diffFiles: [],
