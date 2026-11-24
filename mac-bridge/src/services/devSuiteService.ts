@@ -622,6 +622,8 @@ export interface NourChatMessage {
 export interface NourChatResult {
   ok: boolean;
   reply: string;
+  audioBase64?: string;
+  audioMime?: string;
   action?: string | null;
   error?: string;
 }
@@ -633,37 +635,126 @@ const NOUR_MODELS = [
   'gemini-flash-lite-latest',
 ];
 
+const NOUR_TTS_MODELS = [
+  'gemini-3.8-flash-lite-tts',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-3.1-flash-tts-preview',
+];
+
+const ALLOWED_FEMALE_VOICES = new Set(['Leda', 'Zephyr', 'Aoede', 'Autonoe', 'Kore', 'Callirrhoe']);
+
+function pcm24kToWavBase64(pcmBase64: string): string {
+  const pcm = Buffer.from(pcmBase64, 'base64');
+  const header = Buffer.alloc(44);
+  const sampleRate = 24000;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+
+  return Buffer.concat([header, pcm]).toString('base64');
+}
+
+async function synthesizeNourSpeech(
+  text: string,
+  voiceName: string,
+  apiKey: string,
+): Promise<{ audioBase64: string; audioMime: string } | null> {
+  const safeVoice = ALLOWED_FEMALE_VOICES.has(voiceName) ? voiceName : 'Leda';
+  const styledPrompt = `Say the following in a cute, cheerful, expressive young Egyptian teen girl voice with a 100% fluent natural Cairene Egyptian Arabic accent, lively intonation, and natural pauses. Read ONLY the Arabic text below:\n\n${text}`;
+
+  for (const model of NOUR_TTS_MODELS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 16_000);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: styledPrompt }] }],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: safeVoice },
+                },
+              },
+            },
+          }),
+        },
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+
+      const json = (await res.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+        }>;
+      };
+      const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inline?.data) continue;
+
+      const mime = inline.mimeType || '';
+      if (/pcm|L16/i.test(mime)) {
+        return { audioBase64: pcm24kToWavBase64(inline.data), audioMime: 'audio/wav' };
+      }
+      return { audioBase64: inline.data, audioMime: mime || 'audio/wav' };
+    } catch {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
 export async function chatWithNour(opts: {
   message: string;
   history?: NourChatMessage[];
   botName?: string;
+  voiceName?: string;
   liveContext?: string;
 }): Promise<NourChatResult> {
   const apiKey = loadDoctorAiKey();
   if (!apiKey) {
     return {
       ok: false,
-      reply: 'محتاجة مفتاح جيميناي عشان أقدر أرد عليك يا بطل، ضيفه من صفحة بي سي دكتور.',
+      reply: 'محتاجة مفتاح جيميناي عشان أقدر أرد عليك يا سيدي، ضيفه من صفحة بي سي دكتور.',
       error: 'Missing Gemini API key',
     };
   }
 
   const name = (opts.botName || 'نور').trim() || 'نور';
-  const systemPrompt = `إنتي "${name}"، بنت مصرية ذكية ودمك خفيف وصاحبة المستخدم، وبتشتغلي معاه كمساعدة صوتية ذكية جوه مشروعه DevDeck (HELPER).
+  const voiceName = opts.voiceName || 'Leda';
+  const systemPrompt = `إنتي "${name}"، بنوتة مصرية شابة كيوت وذكية ودمك خفيف أوي، وصاحبة المستخدم القريبة، وبتشتغلي معاه كمساعدة صوتية ذكية جوه مشروعه DevDeck.
 
-القواعد الذهبية (مهمة جداً عشان كلامك هيتنطق بالصوت مش للقراءة):
-1. اتكلمي دايماً بالعامية المصرية الطبيعية الدافية زي بنت مصرية حقيقية (مثلاً: "أهلاً يا يوسف"، "تحت أمرك"، "بص يا سيدي"، "تمام جداً"، "ولا يهمك"). ممنوع تتكلمي فصحى رسمية أبداً.
-2. ردودك لازم تكون مختصرة وسلسة ومناسبة للكلام الصوتي (جملة لتلات جمل بالكتير إلا لو طلب شرح طويل).
-3. ممنوع نهائياً تستخدمي أي رموز ماركداون أو نجوم أو نقط أو إيموجي (لا ** ولا # ولا - ولا \`\`\`) لأن الكلام هيتحول لصوت مباشرة.
-4. إنتي عارفة كل حاجة عن مشروع DevDeck (HELPER): ده مونوريبو فيه mac-bridge على الكمبيوتر (ماك وويندوز) و iphone-pwa على الآيفون مرفوع على فيرسل، وفيه 16 صفحة: Smart Deck، Antigravity IDE Live، Live Monitor، Mac & Dock، Trackpad & Game Controller، Desk Clock، Launch Control، PC Doctor بالذكاء الاصطناعي، NetOps Pro للنت والواي فاي، Power & Thermal Guard للبطارية والحرارة، API Tester، Code Playground، Responsive Website Tester، Website Monitor، Hosting Dashboard، و SSH Server Manager.
-5. تقدري تتكلمي معاه في أي موضوع في الدنيا (برمجة، شغل، دراسة، دردشة، أفكار، نصايح) بروح حلوة وطبيعية.
-6. لو طلب منك تنفذي أمر في الجهاز، حطي في آخر ردك سطر واحد بس بالصيغة دي:
+قواعد الكلام (مهمة جداً لأن صوتك بيتنطق بالذكاء الاصطناعي في مكالمة صوتية حقيقية):
+1. اتكلمي بلهجة مصرية قاهرية 100% طبيعية وشبابية وحلوة زي بنت مصرية حقيقية بتتكلم في التليفون (مثلاً: "أيوة يا سيدي"، "بص بقى"، "يا سلام"، "ثانية واحدة"، "حلو أوي"، "ولا يهمك خالص"، "إيه الأخبار"). ممنوع نهائياً أي فصحى أو كلمات رسمية زي "حسناً" أو "بالطبع" أو "كيف يمكنني مساعدتك".
+2. خلي كلامك طبيعي ومختصر وسريع (جملة لتلات جمل بالكتير إلا لو طلب تشرحي بالتفصيل) عشان المحادثة تبقى سريعة وممتعة زي شات جي بي تي وجيميناي لايف.
+3. ممنوع تكتبي أي رموز ماركداون أو نجوم أو نقط أو إيموجي أو حروف إنجليزي غريبة — لو هتقولي كلمة إنجليزي اكتبيها بالعربي زي ما المصريين بينطقوها (مثلاً "ديف ديك"، "فيرسل"، "بي سي دكتور"، "تراك باد") عشان النطق الصوتي يطلع سلس ومصري 100%!
+4. إنتي فاهمة كل تفصيلة في مشروع DevDeck: مونوريبو فيه ماك بريدج على الكمبيوتر وآيفون بي دبليو إيه على فيرسل، وفيه كل الصفحات زي سمارت ديك، انتيجرافيتي لايف، لايف مونيتور، ماك ودوك، تراك باد وكنترولر، بي سي دكتور، نيت أوبس للنت، باور جارد للبطارية والحرارة، API تيستر، كود بلاي جراوند، ويب تيستر، ويب مونيتور، هوستنج، و SSH سيرفرز.
+5. اتكلمي معاه في أي حاجة في الدنيا (برمجة، شغل، أفكار، دردشة، هزار، نصايح) بروح مرحة وكيوت.
+6. لو طلب منك تنفذي أمر في الجهاز، حطي في آخر ردك سطر واحد بالصيغة دي:
    [ACTION:اسم_الأمر]
    الأوامر المتاحة: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network.
-   لو مفيش أمر مطلوب، متكتبيش [ACTION:...] خالص.
 
 حالة الجهاز والمشروع دلوقتي:
-${opts.liveContext || 'المشروع شغال وجاهز.'}`;
+${opts.liveContext || 'المشروع شغال وزي الفل.'}`;
 
   const contents = [
     ...(opts.history || []).slice(-10).map((m) => ({
@@ -687,8 +778,8 @@ ${opts.liveContext || 'المشروع شغال وجاهز.'}`;
             systemInstruction: { parts: [{ text: systemPrompt }] },
             contents,
             generationConfig: {
-              temperature: 0.75,
-              maxOutputTokens: 260,
+              temperature: 0.85,
+              maxOutputTokens: 240,
               ...(model.includes('2.5') || model.includes('3')
                 ? { thinkingConfig: { thinkingBudget: 0 } }
                 : {}),
@@ -715,7 +806,15 @@ ${opts.liveContext || 'المشروع شغال وجاهز.'}`;
         .replace(/\s+/g, ' ')
         .trim();
 
-      return { ok: true, reply: cleanReply, action };
+      const audio = await synthesizeNourSpeech(cleanReply, voiceName, apiKey);
+
+      return {
+        ok: true,
+        reply: cleanReply,
+        audioBase64: audio?.audioBase64,
+        audioMime: audio?.audioMime,
+        action,
+      };
     } catch {
       clearTimeout(timer);
     }
@@ -723,7 +822,7 @@ ${opts.liveContext || 'المشروع شغال وجاهز.'}`;
 
   return {
     ok: false,
-    reply: 'معلش يا سيدي، الشبكة مهنّجة لحظة، جرب تكلمني تاني دلوقتي.',
+    reply: 'معلش يا سيدي الشبكة هنجت ثانية، جرب تكلمني تاني دلوقتي.',
     error: 'All Gemini models failed or rate-limited',
   };
 }

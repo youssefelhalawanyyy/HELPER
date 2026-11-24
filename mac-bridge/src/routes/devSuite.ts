@@ -101,10 +101,11 @@ export function createDevSuiteRouter(opts: {
   });
 
   router.post('/nour/chat', async (req, res) => {
-    const { message, history, botName, liveContext } = req.body as {
+    const { message, history, botName, voiceName, liveContext } = req.body as {
       message?: string;
       history?: NourChatMessage[];
       botName?: string;
+      voiceName?: string;
       liveContext?: string;
     };
     if (!message?.trim()) {
@@ -115,6 +116,7 @@ export function createDevSuiteRouter(opts: {
       message: message.trim(),
       history,
       botName,
+      voiceName,
       liveContext,
     });
     res.json(result);
