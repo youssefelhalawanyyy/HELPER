@@ -97,8 +97,8 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 
 async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBuffer | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Say the following in a cute, cheerful, expressive young Egyptian teen girl voice with a 100% fluent natural Cairene Egyptian Arabic accent, lively intonation, and natural pauses. Read ONLY the Arabic text below:\n\n${text}`;
-  for (const model of ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts']) {
+  const styled = `Speak cheerfully like a cute, super friendly young Egyptian teen girl in fluent natural Cairene Egyptian Arabic:\n${text}`;
+  for (const model of ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts']) {
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
@@ -164,6 +164,9 @@ export function NourVoiceView({
   const mutedRef = useRef(false);
   const abortReqRef = useRef<AbortController | null>(null);
   const restartTimerRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const latestTranscriptRef = useRef('');
+  const submittedTurnRef = useRef(false);
 
   // Web Audio playback + real-time orb meter + Echo-Cancelled Barge-In VAD!
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -232,6 +235,10 @@ export function NourVoiceView({
   }, [stopVad]);
 
   const stopRecognition = useCallback(() => {
+    if (silenceTimerRef.current) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     if (restartTimerRef.current) {
       window.clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
@@ -535,6 +542,8 @@ export function NourVoiceView({
 
       stopRecognition();
       activeListeningRef.current = mode === 'active';
+      latestTranscriptRef.current = '';
+      submittedTurnRef.current = false;
       setPhase(mode === 'active' ? 'listening' : 'wake_listening');
       setLiveTranscript('');
 
@@ -542,6 +551,20 @@ export function NourVoiceView({
       rec.lang = 'ar-EG';
       rec.continuous = mode === 'wake';
       rec.interimResults = true;
+
+      const submitCaptured = (text: string) => {
+        const clean = text.trim();
+        if (!clean || submittedTurnRef.current) return;
+        submittedTurnRef.current = true;
+        activeListeningRef.current = false;
+        latestTranscriptRef.current = '';
+        if (silenceTimerRef.current) {
+          window.clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+        soundEngine.playDetent();
+        void askNour(clean);
+      };
 
       rec.onresult = (ev) => {
         let full = '';
@@ -553,12 +576,20 @@ export function NourVoiceView({
         const trimmed = full.trim();
         if (!trimmed) return;
         setLiveTranscript(trimmed);
+        latestTranscriptRef.current = trimmed;
 
         if (activeListeningRef.current) {
           if (isFinal) {
-            activeListeningRef.current = false;
-            void askNour(trimmed);
+            submitCaptured(trimmed);
+            return;
           }
+          // iOS Safari often omits isFinal -> auto-send cleanly after 1.05s of pause!
+          if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = window.setTimeout(() => {
+            if (activeListeningRef.current && latestTranscriptRef.current) {
+              submitCaptured(latestTranscriptRef.current);
+            }
+          }, 1050);
           return;
         }
 
@@ -569,10 +600,16 @@ export function NourVoiceView({
           const afterWake = (m[1] || '').trim();
           if (isFinal && afterWake.length >= 2) {
             soundEngine.playSuccessChime();
-            void askNour(afterWake);
+            submitCaptured(afterWake);
           } else if (isFinal) {
             soundEngine.playSuccessChime();
-            void askNour('يا نور');
+            submitCaptured('يا نور');
+          } else {
+            if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = window.setTimeout(() => {
+              soundEngine.playSuccessChime();
+              submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور');
+            }, 1050);
           }
         }
       };
@@ -588,18 +625,23 @@ export function NourVoiceView({
 
       rec.onend = () => {
         if (phaseRef.current === 'thinking' || phaseRef.current === 'speaking') return;
+        // Flush any buffered iOS Safari interim transcript that didn't emit isFinal!
+        if (activeListeningRef.current && latestTranscriptRef.current && !submittedTurnRef.current) {
+          submitCaptured(latestTranscriptRef.current);
+          return;
+        }
         if (liveCallRef.current) {
           restartTimerRef.current = window.setTimeout(() => {
             if (liveCallRef.current && phaseRef.current !== 'speaking' && phaseRef.current !== 'thinking') {
               startRecognitionRef.current('active');
             }
-          }, 250);
+          }, 200);
         } else if (wakeWordRef.current) {
           restartTimerRef.current = window.setTimeout(() => {
             if (wakeWordRef.current && phaseRef.current !== 'speaking' && phaseRef.current !== 'thinking') {
               startRecognitionRef.current('wake');
             }
-          }, 350);
+          }, 300);
         } else {
           setPhase('idle');
         }

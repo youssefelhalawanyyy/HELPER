@@ -636,17 +636,35 @@ const NOUR_MODELS = [
 ];
 
 const NOUR_TTS_MODELS = [
-  'gemini-3.8-flash-lite-tts',
   'gemini-2.5-flash-preview-tts',
+  'gemini-3.8-flash-lite-tts',
   'gemini-3.1-flash-tts-preview',
 ];
 
 const ALLOWED_FEMALE_VOICES = new Set(['Leda', 'Zephyr', 'Aoede', 'Autonoe', 'Kore', 'Callirrhoe']);
 
-function pcm24kToWavBase64(pcmBase64: string): string {
-  const pcm = Buffer.from(pcmBase64, 'base64');
+/**
+ * Downsamples 24kHz 16-bit mono PCM -> 16kHz 16-bit mono WAV (33% smaller over Cloudflare,
+ * wideband HD voice quality, <1ms CPU time).
+ */
+function pcm24kToWav16kBase64(pcmBase64: string): string {
+  const src = Buffer.from(pcmBase64, 'base64');
+  const srcSamples = Math.floor(src.length / 2);
+  const dstSamples = Math.floor((srcSamples * 2) / 3);
+  const pcm = Buffer.alloc(dstSamples * 2);
+
+  for (let i = 0; i < dstSamples; i += 1) {
+    const pos = i * 1.5;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const s0 = src.readInt16LE(Math.min(idx, srcSamples - 1) * 2);
+    const s1 = src.readInt16LE(Math.min(idx + 1, srcSamples - 1) * 2);
+    const val = Math.max(-32768, Math.min(32767, Math.round(s0 + (s1 - s0) * frac)));
+    pcm.writeInt16LE(val, i * 2);
+  }
+
   const header = Buffer.alloc(44);
-  const sampleRate = 24000;
+  const sampleRate = 16000;
   const numChannels = 1;
   const bitsPerSample = 16;
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
@@ -657,7 +675,7 @@ function pcm24kToWavBase64(pcmBase64: string): string {
   header.write('WAVE', 8);
   header.write('fmt ', 12);
   header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 20);
   header.writeUInt16LE(numChannels, 22);
   header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
@@ -675,11 +693,11 @@ async function synthesizeNourSpeech(
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
   const safeVoice = ALLOWED_FEMALE_VOICES.has(voiceName) ? voiceName : 'Leda';
-  const styledPrompt = `Say the following in a cute, cheerful, expressive young Egyptian teen girl voice with a 100% fluent natural Cairene Egyptian Arabic accent, lively intonation, and natural pauses. Read ONLY the Arabic text below:\n\n${text}`;
+  const styledPrompt = `Speak cheerfully like a cute, super friendly young Egyptian teen girl in fluent natural Cairene Egyptian Arabic:\n${text}`;
 
   for (const model of NOUR_TTS_MODELS) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 16_000);
+    const timer = setTimeout(() => ctrl.abort(), 9000);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -713,7 +731,7 @@ async function synthesizeNourSpeech(
 
       const mime = inline.mimeType || '';
       if (/pcm|L16/i.test(mime)) {
-        return { audioBase64: pcm24kToWavBase64(inline.data), audioMime: 'audio/wav' };
+        return { audioBase64: pcm24kToWav16kBase64(inline.data), audioMime: 'audio/wav' };
       }
       return { audioBase64: inline.data, audioMime: mime || 'audio/wav' };
     } catch {
@@ -741,23 +759,20 @@ export async function chatWithNour(opts: {
 
   const name = (opts.botName || 'نور').trim() || 'نور';
   const voiceName = opts.voiceName || 'Leda';
-  const systemPrompt = `إنتي "${name}"، بنوتة مصرية شابة كيوت وذكية ودمك خفيف أوي، وصاحبة المستخدم القريبة، وبتشتغلي معاه كمساعدة صوتية ذكية جوه مشروعه DevDeck.
+  const systemPrompt = `إنتي "${name}"، بنوتة مصرية شابة كيوت ومرحة أوي ودمك خفيف وذكية جداً وعارفة كل حاجة في الدنيا — صاحبة المستخدم المقربة ومساعدته الصوتية الشخصية جوه مشروعه ديف ديك.
 
-قواعد الكلام (مهمة جداً لأن صوتك بيتنطق بالذكاء الاصطناعي في مكالمة صوتية حقيقية):
-1. اتكلمي بلهجة مصرية قاهرية 100% طبيعية وشبابية وحلوة زي بنت مصرية حقيقية بتتكلم في التليفون (مثلاً: "أيوة يا سيدي"، "بص بقى"، "يا سلام"، "ثانية واحدة"، "حلو أوي"، "ولا يهمك خالص"، "إيه الأخبار"). ممنوع نهائياً أي فصحى أو كلمات رسمية زي "حسناً" أو "بالطبع" أو "كيف يمكنني مساعدتك".
-2. خلي كلامك طبيعي ومختصر وسريع (جملة لتلات جمل بالكتير إلا لو طلب تشرحي بالتفصيل) عشان المحادثة تبقى سريعة وممتعة زي شات جي بي تي وجيميناي لايف.
-3. ممنوع تكتبي أي رموز ماركداون أو نجوم أو نقط أو إيموجي أو حروف إنجليزي غريبة — لو هتقولي كلمة إنجليزي اكتبيها بالعربي زي ما المصريين بينطقوها (مثلاً "ديف ديك"، "فيرسل"، "بي سي دكتور"، "تراك باد") عشان النطق الصوتي يطلع سلس ومصري 100%!
-4. إنتي فاهمة كل تفصيلة في مشروع DevDeck: مونوريبو فيه ماك بريدج على الكمبيوتر وآيفون بي دبليو إيه على فيرسل، وفيه كل الصفحات زي سمارت ديك، انتيجرافيتي لايف، لايف مونيتور، ماك ودوك، تراك باد وكنترولر، بي سي دكتور، نيت أوبس للنت، باور جارد للبطارية والحرارة، API تيستر، كود بلاي جراوند، ويب تيستر، ويب مونيتور، هوستنج، و SSH سيرفرز.
-5. اتكلمي معاه في أي حاجة في الدنيا (برمجة، شغل، أفكار، دردشة، هزار، نصايح) بروح مرحة وكيوت.
-6. لو طلب منك تنفذي أمر في الجهاز، حطي في آخر ردك سطر واحد بالصيغة دي:
-   [ACTION:اسم_الأمر]
-   الأوامر المتاحة: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network.
+قواعد ذهبية لردودك (عشان المكالمة تكون سريعة وحلوة زي شات جي بي تي وجيميناي لايف):
+1. اتكلمي بلهجة مصرية قاهرية 100% طبيعية، دافية، حنونة، وشبابية (زي: "يا أهلاً يا قمر"، "بص يا سيدي"، "حاضر من عيوني"، "يا سلام عليك"، "ده كلام جامد أوي"، "ولا يهمك خالص"). ممنوع أي فصحى أو برود رسمي!
+2. خلي ردك سريع ومختصر ومركز (جملة أو جملتين حلوين بالكتير إلا لو طلب تشرحي موضوع طويل) عشان الصوت يطلع فوراً بدون أي تأخير.
+3. ممنوع أي رموز ماركداون أو نجوم أو إيموجي أو حروف إنجليزي معقدة — اكتبي أسماء التكنولوجيا بالعربي السهل (مثلاً "ديف ديك"، "فيرسل"، "بي سي دكتور"، "نيت أوبس"، "باور جارد") عشان النطق الصوتي يطلع مصري طبيعي 100%.
+4. إنتي موسوعة شاملة: بتعرفي تجاوبي على أي سؤال في العالم (برمجة، ذكاء اصطناعي، علوم، تاريخ، رياضة، أفلام، بزنس، دراسة، نصايح حياة، هزار) وبردو فاهمة كل تفصيلة في مشروع ديف ديك (ماك بريدج على الماك والويندوز، وتطبيق الآيفون على فيرسل، وكل الصفحات: سمارت ديك، انتيجرافيتي، لايف مونيتور، ماك ودوك، تراك باد وكنترولر، بي سي دكتور، نيت أوبس للنت، باور جارد للبطارية والحرارة، ويب تيستر، ويب مونيتور، هوستنج، و SSH سيرفرز).
+5. لو طلب أمر في الجهاز، حطي في آخر سطر: [ACTION:اسم_الأمر] (المتاح: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network).
 
-حالة الجهاز والمشروع دلوقتي:
-${opts.liveContext || 'المشروع شغال وزي الفل.'}`;
+حالة الجهاز دلوقتي:
+${opts.liveContext || 'الجهاز والمشروع شغالين زي الفل.'}`;
 
   const contents = [
-    ...(opts.history || []).slice(-10).map((m) => ({
+    ...(opts.history || []).slice(-8).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.text }],
     })),
@@ -766,7 +781,7 @@ ${opts.liveContext || 'المشروع شغال وزي الفل.'}`;
 
   for (const model of NOUR_MODELS) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 14_000);
+    const timer = setTimeout(() => ctrl.abort(), 7000);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -778,8 +793,8 @@ ${opts.liveContext || 'المشروع شغال وزي الفل.'}`;
             systemInstruction: { parts: [{ text: systemPrompt }] },
             contents,
             generationConfig: {
-              temperature: 0.85,
-              maxOutputTokens: 240,
+              temperature: 0.9,
+              maxOutputTokens: 135,
               ...(model.includes('2.5') || model.includes('3')
                 ? { thinkingConfig: { thinkingBudget: 0 } }
                 : {}),
@@ -822,7 +837,7 @@ ${opts.liveContext || 'المشروع شغال وزي الفل.'}`;
 
   return {
     ok: false,
-    reply: 'معلش يا سيدي الشبكة هنجت ثانية، جرب تكلمني تاني دلوقتي.',
+    reply: 'معلش يا قمر الشبكة هنجت ثانية، قول تاني وأنا سامعاك!',
     error: 'All Gemini models failed or rate-limited',
   };
 }
