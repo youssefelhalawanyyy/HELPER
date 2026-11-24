@@ -190,11 +190,19 @@ export function DeckShell() {
     } catch {
       // iOS Safari uses CSS 90deg lock below
     }
+  }, []);
 
+  const smartDeckActive = activeView === 'deck';
+  useEffect(() => {
     const updateViewport = () => {
       const vv = window.visualViewport;
       const w = vv?.width ?? window.innerWidth;
       const h = vv?.height ?? window.innerHeight;
+      // Give the library real desktop space while retaining the handheld landscape console.
+      if (smartDeckActive && Math.min(w, h) >= 600) {
+        setViewport({ stageW: w, stageH: h, scale: 1, portrait: false });
+        return;
+      }
       const portrait = h > w;
 
       // Exact landscape dimensions after 90deg rotation when phone is held upright
@@ -222,7 +230,7 @@ export function DeckShell() {
       window.visualViewport?.removeEventListener('resize', updateViewport);
       document.removeEventListener('fullscreenchange', onFsChange);
     };
-  }, []);
+  }, [smartDeckActive]);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length !== 1 || pairingModalOpen || snippetsOpen || deck.agentQuestion) return;
