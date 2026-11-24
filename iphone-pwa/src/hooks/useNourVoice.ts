@@ -38,14 +38,11 @@ interface SpeechRecognitionLike {
 const ENV_GEMINI_KEY = (process.env.NEXT_PUBLIC_DEVDECK_DOCTOR_AI_KEY || '').trim();
 const STORAGE_NAME = 'devdeck.nour.name.v1';
 
-const CLIENT_TEXT_MODELS = [
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash-lite',
-  'gemini-2.0-flash',
-  'gemini-2.5-flash',
-  'gemini-flash-lite-latest',
+const CLIENT_TEXT_MODELS: Array<{ id: string; thinkZero: boolean }> = [
+  { id: 'gemini-3.5-flash-lite', thinkZero: false },
+  { id: 'gemini-3.5-flash', thinkZero: true },
+  { id: 'gemini-flash-lite-latest', thinkZero: false },
 ];
-let clientTextCursor = 0;
 const clientTextCooldown = new Map<string, number>();
 
 let clientTtsCursor = 0;
@@ -478,14 +475,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         } else if (ENV_GEMINI_KEY.length >= 12) {
           const sys = `إنتي "${botNameRef.current}"، بنت مصرية عندك 24 سنة وصاحبته المقربة جداً. اتكلمي بلهجة قاهرية طبيعية وهادية ومباشرة من غير أي كليشيهات أو أوفر (ممنوع يا قمر/يا سيدي/يا بطل/فصحى). خلي ردك جملة أو جملتين بالكتير ومن غير نجوم أو إيموجي. حالة الجهاز:\n${liveContext}`;
           const now = Date.now();
-          const start = clientTextCursor % CLIENT_TEXT_MODELS.length;
-          clientTextCursor += 1;
-
           for (let i = 0; i < CLIENT_TEXT_MODELS.length; i += 1) {
-            const m = CLIENT_TEXT_MODELS[(start + i) % CLIENT_TEXT_MODELS.length];
-            if ((clientTextCooldown.get(m) || 0) > now) continue;
+            const spec = CLIENT_TEXT_MODELS[i];
+            if ((clientTextCooldown.get(spec.id) || 0) > now) continue;
             const res = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
+              `https://generativelanguage.googleapis.com/v1beta/models/${spec.id}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
               {
                 method: 'POST',
                 signal: ctrl.signal,
@@ -499,13 +493,13 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
                   generationConfig: {
                     temperature: 0.78,
                     maxOutputTokens: 80,
-                    ...(m.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+                    ...(spec.thinkZero ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
                   },
                 }),
               },
             );
-            if (res.status === 429) {
-              clientTextCooldown.set(m, Date.now() + 35_000);
+            if (res.status === 429 || res.status === 404) {
+              clientTextCooldown.set(spec.id, Date.now() + 45_000);
               continue;
             }
             if (!res.ok) continue;

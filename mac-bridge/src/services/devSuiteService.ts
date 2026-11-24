@@ -629,17 +629,18 @@ export interface NourChatResult {
   error?: string;
 }
 
-const NOUR_MODELS = [
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash-lite',
-  'gemini-2.0-flash',
-  'gemini-2.5-flash',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-flash-lite-latest',
-];
+interface NourModelSpec {
+  id: string;
+  useThinkingZero: boolean;
+}
 
-let nourTextCursor = 0;
-const textCooldownUntil = new Map<string, number>();
+// Verified live active sub-second models (Nov 2026):
+// gemini-3.5-flash-lite (~1.0s, no thinkingConfig) + gemini-3.5-flash (~1.2s, thinkingBudget: 0)
+const NOUR_MODELS: NourModelSpec[] = [
+  { id: 'gemini-3.5-flash-lite', useThinkingZero: false },
+  { id: 'gemini-3.5-flash', useThinkingZero: true },
+  { id: 'gemini-flash-lite-latest', useThinkingZero: false },
+];
 
 // Persistent pre-warmed Cairo Egyptian Arabic 24yo Female Neural Voice (ar-EG-SalmaNeural)
 // -> ~350ms synthesis, ~30KB MP3, ZERO API quota limits (talks non-stop for hours!)
@@ -789,71 +790,82 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
     { role: 'user', parts: [{ text: opts.message }] },
   ];
 
-  const now = Date.now();
-  const startIdx = nourTextCursor % NOUR_MODELS.length;
-  nourTextCursor += 1;
+  const callOneModel = async (spec: NourModelSpec, signal: AbortSignal): Promise<string> => {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${spec.id}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: {
+            temperature: 0.78,
+            maxOutputTokens: 80,
+            ...(spec.useThinkingZero ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          },
+        }),
+      },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = (await res.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join(' ').trim();
+    if (!raw) throw new Error('Empty reply');
+    return raw;
+  };
 
-  for (let offset = 0; offset < NOUR_MODELS.length; offset += 1) {
-    const model = NOUR_MODELS[(startIdx + offset) % NOUR_MODELS.length];
-    if ((textCooldownUntil.get(model) || 0) > now) continue;
+  // Hedged parallel race: fire primary immediately (~1.0s), hedge with secondary at 1.1s so spikes never cause 20s waits!
+  const controllers = NOUR_MODELS.map(() => new AbortController());
+  const globalTimer = setTimeout(() => controllers.forEach((c) => c.abort()), 5500);
+  let hedgeTimer1: NodeJS.Timeout | null = null;
+  let hedgeTimer2: NodeJS.Timeout | null = null;
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3800);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          signal: ctrl.signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: {
-              temperature: 0.78,
-              maxOutputTokens: 80,
-              ...(model.includes('2.5') || model.includes('3')
-                ? { thinkingConfig: { thinkingBudget: 0 } }
-                : {}),
-            },
-          }),
-        },
-      );
-      clearTimeout(timer);
-      if (res.status === 429) {
-        textCooldownUntil.set(model, Date.now() + 35_000);
-        continue;
-      }
-      if (!res.ok) continue;
+  try {
+    const p0 = callOneModel(NOUR_MODELS[0], controllers[0].signal);
+    const p1 = new Promise<string>((resolve, reject) => {
+      hedgeTimer1 = setTimeout(() => {
+        callOneModel(NOUR_MODELS[1], controllers[1].signal).then(resolve, reject);
+      }, 1100);
+    });
+    const p2 = new Promise<string>((resolve, reject) => {
+      hedgeTimer2 = setTimeout(() => {
+        callOneModel(NOUR_MODELS[2], controllers[2].signal).then(resolve, reject);
+      }, 2400);
+    });
 
-      const json = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join(' ').trim();
-      if (!raw) continue;
+    const raw = await Promise.any([p0, p1, p2]);
+    clearTimeout(globalTimer);
+    if (hedgeTimer1) clearTimeout(hedgeTimer1);
+    if (hedgeTimer2) clearTimeout(hedgeTimer2);
+    controllers.forEach((c) => c.abort());
 
-      let action: string | null = null;
-      const actionMatch = raw.match(/\[ACTION:([a-z_]+)\]/i);
-      if (actionMatch) action = actionMatch[1].toLowerCase();
+    let action: string | null = null;
+    const actionMatch = raw.match(/\[ACTION:([a-z_]+)\]/i);
+    if (actionMatch) action = actionMatch[1].toLowerCase();
 
-      const cleanReply = raw
-        .replace(/\[ACTION:[a-z_]+\]/gi, '')
-        .replace(/[*#_`~]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    const cleanReply = raw
+      .replace(/\[ACTION:[a-z_]+\]/gi, '')
+      .replace(/[*#_`~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-      const audio = await synthesizeNourSpeech(cleanReply);
+    const audio = await synthesizeNourSpeech(cleanReply);
 
-      return {
-        ok: true,
-        reply: cleanReply,
-        audioBase64: audio?.audioBase64,
-        audioMime: audio?.audioMime,
-        action,
-      };
-    } catch {
-      clearTimeout(timer);
-    }
+    return {
+      ok: true,
+      reply: cleanReply,
+      audioBase64: audio?.audioBase64,
+      audioMime: audio?.audioMime,
+      action,
+    };
+  } catch {
+    clearTimeout(globalTimer);
+    if (hedgeTimer1) clearTimeout(hedgeTimer1);
+    if (hedgeTimer2) clearTimeout(hedgeTimer2);
+    controllers.forEach((c) => c.abort());
   }
 
   const fallbackMsg = 'ثانية واحدة الصوت قطع عندي، قول تاني كده؟';
