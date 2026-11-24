@@ -27,7 +27,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   const [selectedPreset, setSelectedPreset] = useState('');
   const [logFilter, setLogFilter] = useState('');
   const [dialVal, setDialVal] = useState(deck.mediaState.volume);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logPanelRef = useRef<HTMLDivElement | null>(null);
   const lastSendRef = useRef(0);
 
   const isConnected = deck.status === 'connected';
@@ -45,8 +45,9 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   }, [deck.logs, logFilter]);
 
   useEffect(() => {
-    if (tab === 'logs') logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [filteredLogs.length, tab]);
+    const panel = logPanelRef.current;
+    if (tab === 'logs' && panel) panel.scrollTop = panel.scrollHeight;
+  }, [filteredLogs, tab]);
 
   const handleToggleStream = () => {
     soundEngine.playClick();
@@ -76,16 +77,16 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   };
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1fr 1.4fr 148px' }}>
+    <div className="screen-grid layout-monitor">
       {/* Column 1: Real Mac Telemetry Rings */}
       <div className="tile flex flex-col justify-between p-3.5">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
         <div className="disp text-[26px]">Telemetry</div>
-        <div className="flex items-center justify-around">
+        <div className="telemetry-gauges flex items-center justify-around">
           <GlowRing value={isConnected ? deck.stats.cpuPct : 0} color="#22d3ee" label="CPU %" />
           <GlowRing value={isConnected ? deck.stats.ramPct : 0} color="#f472b6" label="RAM %" />
         </div>
-        <div className="space-y-0.5 text-[10px]">
+        <div className="telemetry-readings text-console-caption">
           <div className="num flex justify-between text-zinc-300">
             <span className="sub">Disk</span>
             <span>
@@ -126,7 +127,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setTab(id);
                 }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-[9.5px] font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-full px-2.5 py-1 text-console-caption font-extrabold uppercase"
                 style={{
                   background: tab === id ? '#1f222c' : 'transparent',
                   color:
@@ -171,7 +172,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                 value={activePresetId}
                 onChange={(e) => setSelectedPreset(e.target.value)}
                 disabled={!isConnected}
-                className="font-mono-tech min-w-0 flex-1 rounded-full border border-white/10 bg-black px-2.5 py-1 text-[10px] text-white outline-none"
+                className="font-mono-tech min-w-0 flex-1 rounded-full border border-white/10 bg-black px-2.5 py-1 text-console-caption text-white outline-none"
               >
                 {presets.length === 0 ? (
                   <option value="">Connect Mac for presets</option>
@@ -188,7 +189,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                 type="button"
                 whileTap={{ scale: 0.92 }}
                 onClick={handleToggleStream}
-                className="flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[10px] font-extrabold"
+                className="flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-console-caption font-extrabold"
                 style={{
                   background: deck.logStatus.running ? '#e5484d' : '#34d399',
                   color: deck.logStatus.running ? '#ffffff' : '#04130c',
@@ -209,7 +210,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
               </motion.button>
             </div>
 
-            <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/80 p-2 text-[9.5px] leading-relaxed">
+            <div ref={logPanelRef} className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/80 p-2 text-console-caption leading-relaxed">
               {filteredLogs.length === 0 ? (
                 <div className="sub grid h-full place-items-center text-center">
                   {isConnected ? 'Tap Stream to run real stdout/stderr' : 'Connect Mac to stream logs'}
@@ -232,7 +233,6 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                   </div>
                 ))
               )}
-              <div ref={logEndRef} />
             </div>
 
             <div className="mt-1.5 flex items-center gap-1.5">
@@ -243,7 +243,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                   value={logFilter}
                   onChange={(e) => setLogFilter(e.target.value)}
                   placeholder="Filter logs…"
-                  className="font-mono-tech w-full rounded-full border border-white/10 bg-black py-1 pr-2 pl-6 text-[10px] text-white outline-none"
+                  className="font-mono-tech w-full rounded-full border border-white/10 bg-black py-1 pr-2 pl-6 text-console-caption text-white outline-none"
                 />
               </div>
               <button
@@ -267,8 +267,8 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                 className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.04] px-2.5 py-1.5"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[11px] font-bold text-white">{proc.name}</div>
-                  <div className="num text-[9.5px] text-[#8b90a0]">
+                  <div className="truncate text-console-body font-bold text-white">{proc.name}</div>
+                  <div className="num text-console-caption text-[#8b90a0]">
                     PID {proc.pid} · <span className="text-[#fbbf24]">CPU {proc.cpuPct}%</span> · RAM{' '}
                     {proc.memPct}%
                   </div>
@@ -283,7 +283,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                       payload: { requestId: makeRequestId(), pid: proc.pid },
                     });
                   }}
-                  className="rounded-full px-2.5 py-1 text-[9.5px] font-extrabold text-white"
+                  className="rounded-full px-2.5 py-1 text-console-caption font-extrabold text-white"
                   style={{ background: '#e5484d', boxShadow: '0 2px 0 #7a1d20' }}
                 >
                   KILL
@@ -314,9 +314,9 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                         className="h-1.5 w-1.5 shrink-0 rounded-full"
                         style={{ background: running ? '#34d399' : '#6b7080' }}
                       />
-                      <span className="truncate text-[11px] font-bold text-white">{c.name}</span>
+                      <span className="truncate text-console-body font-bold text-white">{c.name}</span>
                     </div>
-                    <div className="truncate text-[9px] text-[#8b90a0]">{c.status}</div>
+                    <div className="truncate text-console-caption text-[#8b90a0]">{c.status}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
@@ -332,7 +332,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                           },
                         });
                       }}
-                      className="rounded-full px-2 py-1 text-[9px] font-extrabold"
+                      className="rounded-full px-2 py-1 text-console-caption font-extrabold"
                       style={{
                         background: running ? '#e5484d' : '#34d399',
                         color: running ? '#fff' : '#04130c',
@@ -373,9 +373,9 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
       </div>
 
       {/* Column 3: Real Mac Volume Dial */}
-      <div className="tile flex flex-col items-center justify-between p-3">
+      <div className="volume-panel tile flex flex-col items-center justify-between p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#fbbf24]" />
-        <div className="text-center text-[11px] leading-tight font-extrabold">
+        <div className="text-center text-console-body leading-tight font-extrabold">
           Mac volume
           <div className="sub mt-0.5">{deck.mediaState.muted ? 'Muted' : 'Live output'}</div>
         </div>
@@ -393,7 +393,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
               payload: { requestId: makeRequestId(), muted: !deck.mediaState.muted },
             });
           }}
-          className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-1 text-[9.5px] font-bold"
+          className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-1 text-console-caption font-bold"
           style={{ color: deck.mediaState.muted ? '#ff5d6c' : '#fbbf24' }}
         >
           {deck.mediaState.muted ? (

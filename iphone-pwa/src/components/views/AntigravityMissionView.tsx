@@ -121,7 +121,7 @@ function renderInlineSpans(line: string) {
       return (
         <code
           key={i}
-          className="font-mono-tech rounded bg-white/[0.08] px-1 py-0.5 text-[9.5px] text-[#22d3ee]"
+          className="font-mono-tech rounded bg-white/[0.08] px-1 py-0.5 text-console-caption text-[#22d3ee]"
         >
           {tok.slice(1, -1)}
         </code>
@@ -141,14 +141,14 @@ function renderInlineSpans(line: string) {
 function FormattedAgentText({ text }: { text: string }) {
   const blocks = text.split(/(```[\s\S]*?```)/g);
   return (
-    <div className="space-y-1 text-[10.5px] leading-[1.45] text-zinc-200">
+    <div className="space-y-1 text-console-caption leading-[1.45] text-zinc-200">
       {blocks.map((block, bIdx) => {
         if (block.startsWith('```') && block.endsWith('```')) {
           const inner = block.replace(/^```[^\n]*\n?/, '').replace(/```$/, '').trim();
           return (
             <pre
               key={bIdx}
-              className="font-mono-tech overflow-x-auto rounded-lg border border-white/[0.07] bg-black/80 px-2 py-1.5 text-[9px] leading-snug text-[#a5f3fc]"
+              className="font-mono-tech overflow-x-auto rounded-lg border border-white/[0.07] bg-black/80 px-2 py-1.5 text-console-caption leading-snug text-[#a5f3fc]"
             >
               {inner}
             </pre>
@@ -162,7 +162,7 @@ function FormattedAgentText({ text }: { text: string }) {
               if (!line.trim()) return <div key={lIdx} className="h-1" />;
               if (/^#{1,3}\s+/.test(line)) {
                 return (
-                  <div key={lIdx} className="pt-0.5 text-[11px] font-extrabold text-white">
+                  <div key={lIdx} className="pt-0.5 text-console-body font-extrabold text-white">
                     {renderInlineSpans(line.replace(/^#{1,3}\s+/, ''))}
                   </div>
                 );
@@ -206,10 +206,10 @@ function ToolCallChip({ tool }: { tool: AntigravityToolItem }) {
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left"
       >
         <Icon className="h-3 w-3 shrink-0" style={{ color }} />
-        <span className="font-mono-tech shrink-0 text-[9px] font-extrabold" style={{ color }}>
+        <span className="font-mono-tech shrink-0 text-console-caption font-extrabold" style={{ color }}>
           {tool.name}
         </span>
-        <span className="font-mono-tech min-w-0 flex-1 truncate text-[9px] text-zinc-300">
+        <span className="font-mono-tech min-w-0 flex-1 truncate text-console-caption text-zinc-300">
           {tool.summary}
         </span>
         {hasDetail &&
@@ -220,7 +220,7 @@ function ToolCallChip({ tool }: { tool: AntigravityToolItem }) {
           ))}
       </button>
       {open && hasDetail && (
-        <div className="font-mono-tech border-t border-white/[0.05] bg-black/50 px-2 py-1 text-[8.5px] break-all text-zinc-400">
+        <div className="font-mono-tech border-t border-white/[0.05] bg-black/50 px-2 py-1 text-console-micro break-all text-zinc-400">
           {tool.detail}
         </div>
       )}
@@ -236,16 +236,16 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
       <div className="flex justify-end">
         <div className="max-w-[88%] rounded-2xl rounded-br-sm border border-[#22d3ee]/30 bg-gradient-to-br from-[#2563eb]/25 to-[#22d3ee]/12 px-2.5 py-1.5">
           <div className="mb-0.5 flex items-center justify-end gap-1.5">
-            <span className="font-mono-tech text-[8px] font-bold tracking-wider text-[#22d3ee] uppercase">
+            <span className="font-mono-tech text-console-micro font-bold tracking-wider text-[#22d3ee] uppercase">
               You
             </span>
             {turn.ts > 0 && (
-              <span className="font-mono-tech text-[8px] text-zinc-400">
+              <span className="font-mono-tech text-console-micro text-zinc-400">
                 {formatTime(turn.ts)}
               </span>
             )}
           </div>
-          <p className="text-[10.5px] leading-snug break-words whitespace-pre-wrap text-white">
+          <p className="text-console-caption leading-snug break-words whitespace-pre-wrap text-white">
             {turn.text}
           </p>
         </div>
@@ -261,23 +261,23 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
             <span className="grid h-4 w-4 place-items-center rounded-md bg-[#22d3ee]/15 text-[#22d3ee]">
               <Bot className="h-2.5 w-2.5" />
             </span>
-            <span className="font-mono-tech text-[9px] font-extrabold tracking-wider text-[#22d3ee] uppercase">
+            <span className="font-mono-tech text-console-caption font-extrabold tracking-wider text-[#22d3ee] uppercase">
               Antigravity
             </span>
             {turn.model && (
-              <span className="font-mono-tech rounded bg-white/[0.06] px-1.5 py-0.5 text-[8px] text-zinc-400">
+              <span className="font-mono-tech rounded bg-white/[0.06] px-1.5 py-0.5 text-console-micro text-zinc-400">
                 {shortModel(turn.model)}
               </span>
             )}
           </div>
           <div className="flex items-center gap-1.5">
             {Boolean(turn.tokens) && (
-              <span className="num font-mono-tech text-[8px] text-[#a78bfa]">
+              <span className="num font-mono-tech text-console-micro text-[#a78bfa]">
                 +{formatTokens(turn.tokens || 0)} tok
               </span>
             )}
             {turn.ts > 0 && (
-              <span className="font-mono-tech text-[8px] text-zinc-500">
+              <span className="font-mono-tech text-console-micro text-zinc-500">
                 {formatTime(turn.ts)}
               </span>
             )}
@@ -292,11 +292,11 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
               className="flex w-full items-center gap-1.5 px-2 py-1 text-left"
             >
               <Brain className="h-3 w-3 shrink-0 text-[#a78bfa]" />
-              <span className="font-mono-tech shrink-0 text-[8.5px] font-bold text-[#a78bfa] uppercase">
+              <span className="font-mono-tech shrink-0 text-console-micro font-bold text-[#a78bfa] uppercase">
                 Thought
               </span>
               {!thinkingOpen && (
-                <span className="min-w-0 flex-1 truncate text-[9px] text-zinc-400 italic">
+                <span className="min-w-0 flex-1 truncate text-console-caption text-zinc-400 italic">
                   {turn.thinking}
                 </span>
               )}
@@ -307,7 +307,7 @@ function ChatTurnBubble({ turn }: { turn: AntigravityChatTurn }) {
               )}
             </button>
             {thinkingOpen && (
-              <div className="border-t border-[#a78bfa]/15 px-2 py-1.5 text-[9.5px] leading-relaxed break-words whitespace-pre-wrap text-zinc-300 italic">
+              <div className="border-t border-[#a78bfa]/15 px-2 py-1.5 text-console-caption leading-relaxed break-words whitespace-pre-wrap text-zinc-300 italic">
                 {turn.thinking}
               </div>
             )}
@@ -388,24 +388,24 @@ function ColorDiffInspector({
           <button
             type="button"
             onClick={onBack}
-            className="flex shrink-0 items-center gap-0.5 rounded-md bg-white/[0.07] px-1.5 py-0.5 text-[8.5px] font-bold text-zinc-200"
+            className="flex shrink-0 items-center gap-0.5 rounded-md bg-white/[0.07] px-1.5 py-0.5 text-console-micro font-bold text-zinc-200"
           >
             <ArrowLeft className="h-2.5 w-2.5" />
             Chat
           </button>
-          <span className="font-mono-tech truncate text-[9.5px] font-bold text-white">
+          <span className="font-mono-tech truncate text-console-caption font-bold text-white">
             {loadingFile || diff?.file || 'Select a file from Live Diff'}
           </span>
         </div>
         {diff && !isLoading && (
-          <span className="num font-mono-tech shrink-0 text-[9px] font-extrabold">
+          <span className="num font-mono-tech shrink-0 text-console-caption font-extrabold">
             <span className="text-[#34d399]">+{diff.added}</span>{' '}
             <span className="text-[#ff5d6c]">-{diff.removed}</span>
           </span>
         )}
       </div>
 
-      <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] text-[8.5px] leading-[1.45]">
+      <div className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] text-console-micro leading-[1.45]">
         {isLoading ? (
           <div className="flex h-full items-center justify-center gap-2 text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin text-[#22d3ee]" />
@@ -422,7 +422,7 @@ function ColorDiffInspector({
                 return (
                   <div
                     key={idx}
-                    className="my-0.5 border-y border-[#22d3ee]/20 bg-[#22d3ee]/[0.08] px-2 py-0.5 text-[8px] font-bold text-[#22d3ee]"
+                    className="my-0.5 border-y border-[#22d3ee]/20 bg-[#22d3ee]/[0.08] px-2 py-0.5 text-console-micro font-bold text-[#22d3ee]"
                   >
                     {ln.text}
                   </div>
@@ -444,10 +444,10 @@ function ColorDiffInspector({
 
               return (
                 <div key={idx} className={`flex whitespace-pre ${bg}`}>
-                  <span className="w-7 shrink-0 pr-1 text-right text-[8px] text-zinc-600 select-none">
+                  <span className="w-7 shrink-0 pr-1 text-right text-console-micro text-zinc-600 select-none">
                     {ln.oldNum ?? ''}
                   </span>
-                  <span className="w-7 shrink-0 pr-1.5 text-right text-[8px] text-zinc-600 select-none">
+                  <span className="w-7 shrink-0 pr-1.5 text-right text-console-micro text-zinc-600 select-none">
                     {ln.newNum ?? ''}
                   </span>
                   <span className={`w-3 shrink-0 font-bold select-none ${markerColor}`}>
@@ -493,7 +493,7 @@ function AgentTerminalPanel({
         <button
           type="button"
           onClick={onToggleIdeTerminal}
-          className="rounded-lg border border-white/15 bg-white/[0.05] px-2.5 py-1 text-[9px] font-bold text-zinc-200"
+          className="rounded-lg border border-white/15 bg-white/[0.05] px-2.5 py-1 text-console-caption font-bold text-zinc-200"
         >
           Toggle IDE Terminal ⌘`
         </button>
@@ -523,7 +523,7 @@ function AgentTerminalPanel({
                 soundEngine.playClick();
                 onSelect(r.id);
               }}
-              className="flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-[8.5px] font-bold transition-colors"
+              className="flex shrink-0 items-center gap-1 rounded-lg border px-2 py-0.5 text-console-micro font-bold transition-colors"
               style={{
                 background: active ? '#1a1d27' : 'rgba(255,255,255,0.03)',
                 borderColor: active ? `${dot}77` : 'rgba(255,255,255,0.07)',
@@ -541,18 +541,18 @@ function AgentTerminalPanel({
         <button
           type="button"
           onClick={onToggleIdeTerminal}
-          className="ml-auto shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[8px] font-extrabold text-[#fbbf24]"
+          className="ml-auto shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-console-micro font-extrabold text-[#fbbf24]"
         >
           IDE ⌘`
         </button>
       </div>
 
       <div className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.07] bg-black/80 px-2 py-1">
-        <div className="font-mono-tech min-w-0 flex-1 truncate text-[9px] text-[#fbbf24]">
+        <div className="font-mono-tech min-w-0 flex-1 truncate text-console-caption text-[#fbbf24]">
           $ {activeRun.command}
         </div>
         <span
-          className="font-mono-tech shrink-0 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+          className="font-mono-tech shrink-0 rounded px-1.5 py-0.5 text-console-micro font-extrabold uppercase"
           style={{ background: `${badgeColor}20`, color: badgeColor }}
         >
           {activeRun.status === 'running' ? 'RUNNING' : `EXIT ${activeRun.exitCode ?? 0}`}
@@ -561,7 +561,7 @@ function AgentTerminalPanel({
 
       <pre
         ref={outRef}
-        className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] p-2 text-[8.5px] leading-[1.4] break-words whitespace-pre-wrap text-[#d4f5e9]"
+        className="deck-scroll font-mono-tech min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-[#040508] p-2 text-console-micro leading-[1.4] break-words whitespace-pre-wrap text-[#d4f5e9]"
       >
         {activeRun.output ||
           (activeRun.status === 'running' ? 'Streaming terminal output…' : '(no output)')}
@@ -685,7 +685,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   };
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.8fr 1.05fr' }}>
+    <div className="screen-grid layout-mission">
       {/* LEFT / MAIN: Live Chat Mirror | Agent Terminal | Color Git Diff Inspector */}
       <div className="tile relative flex min-h-0 flex-col p-2.5">
         <div className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full bg-gradient-to-r from-[#2563eb] via-[#22d3ee] to-[#34d399]" />
@@ -700,7 +700,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 setSessionMenuOpen((v) => !v);
               }}
-              className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[8.5px] font-extrabold uppercase transition-colors"
+              className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-console-micro font-extrabold uppercase transition-colors"
               style={{
                 background: isHistoryMode ? '#fbbf241f' : isWorking ? '#34d3991c' : '#22d3ee18',
                 borderColor: isHistoryMode ? '#fbbf2466' : isWorking ? '#34d39955' : '#22d3ee44',
@@ -724,7 +724,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               <ChevronDown className="h-2.5 w-2.5 opacity-80" />
             </button>
 
-            <span className="truncate text-[9.5px] font-medium text-zinc-300">
+            <span className="truncate text-console-caption font-medium text-zinc-300">
               {prog.active
                 ? prog.step
                 : ag.currentFocus ||
@@ -753,7 +753,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                       soundEngine.playClick();
                       setMainMode(m.id);
                     }}
-                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-console-micro font-extrabold uppercase"
                     style={{
                       background: active ? '#1f222c' : 'transparent',
                       color: active ? m.color : '#7c8190',
@@ -770,7 +770,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             </div>
 
             <span
-              className="num font-mono-tech flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/70 px-1.5 py-0.5 text-[8px] font-bold text-[#a78bfa]"
+              className="num font-mono-tech flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/70 px-1.5 py-0.5 text-console-micro font-bold text-[#a78bfa]"
               title="Auto Done / Error / Approval Alerts Active"
             >
               <Bell className="h-2.5 w-2.5 text-[#34d399]" />
@@ -786,7 +786,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                   payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
                 });
               }}
-              className="flex items-center gap-0.5 rounded-full bg-[#2563eb] px-2 py-0.5 text-[8px] font-extrabold text-white"
+              className="flex items-center gap-0.5 rounded-full bg-[#2563eb] px-2 py-0.5 text-console-micro font-extrabold text-white"
               style={{ boxShadow: '0 0 10px #2563eb88' }}
             >
               <ExternalLink className="h-2.5 w-2.5" />
@@ -811,16 +811,16 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               >
                 <div className="flex items-center gap-1.5">
                   <Radio className="h-3 w-3 text-[#34d399]" />
-                  <span className="text-[10px] font-extrabold text-white">
+                  <span className="text-console-caption font-extrabold text-white">
                     Auto-Follow Live Session
                   </span>
                 </div>
                 {!isHistoryMode && (
-                  <span className="font-mono-tech text-[8px] font-bold text-[#34d399]">ACTIVE</span>
+                  <span className="font-mono-tech text-console-micro font-bold text-[#34d399]">ACTIVE</span>
                 )}
               </button>
 
-              <div className="mb-1 px-1.5 pt-0.5 text-[8px] font-bold tracking-wider text-zinc-500 uppercase">
+              <div className="mb-1 px-1.5 pt-0.5 text-console-micro font-bold tracking-wider text-zinc-500 uppercase">
                 Recent Brain Conversations ({sessions.length})
               </div>
 
@@ -844,10 +844,10 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                       }}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[10px] font-bold text-zinc-100">
+                        <div className="truncate text-console-caption font-bold text-zinc-100">
                           {s.title}
                         </div>
-                        <div className="font-mono-tech flex items-center gap-1.5 text-[8px] text-zinc-500">
+                        <div className="font-mono-tech flex items-center gap-1.5 text-console-micro text-zinc-500">
                           <span>{s.id.slice(0, 8)}</span>
                           <span>·</span>
                           <span>{formatRelativeAge(s.lastActivityTs)}</span>
@@ -893,7 +893,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 <div className="grid h-full place-items-center text-center">
                   <div className="space-y-1">
                     <Bot className="mx-auto h-6 w-6 text-[#22d3ee]/60" />
-                    <div className="text-[11px] font-bold text-zinc-300">
+                    <div className="text-console-body font-bold text-zinc-300">
                       Waiting for live Antigravity session
                     </div>
                     <div className="sub">
@@ -908,7 +908,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               <button
                 type="button"
                 onClick={scrollToBottom}
-                className="absolute right-2 bottom-2 flex items-center gap-1 rounded-full border border-[#22d3ee]/50 bg-black/90 px-2.5 py-1 text-[9px] font-bold text-[#22d3ee] shadow-lg"
+                className="absolute right-2 bottom-2 flex items-center gap-1 rounded-full border border-[#22d3ee]/50 bg-black/90 px-2.5 py-1 text-console-caption font-bold text-[#22d3ee] shadow-lg"
               >
                 <ArrowDown className="h-3 w-3" />
                 Latest
@@ -967,14 +967,14 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             value={promptText}
             onChange={(e) => setPromptText(e.target.value)}
             placeholder={listening ? 'Listening…' : 'Send prompt to Antigravity IDE…'}
-            className="h-7 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/75 px-2.5 text-[10.5px] text-white outline-none placeholder:text-zinc-500 focus:border-[#22d3ee]"
+            className="h-7 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/75 px-2.5 text-console-caption text-white outline-none placeholder:text-zinc-500 focus:border-[#22d3ee]"
           />
 
           <motion.button
             type="submit"
             whileTap={{ scale: 0.94 }}
             disabled={!promptText.trim()}
-            className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-[#22d3ee] px-2.5 text-[10px] font-extrabold text-[#041016] disabled:opacity-35"
+            className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-[#22d3ee] px-2.5 text-console-caption font-extrabold text-[#041016] disabled:opacity-35"
           >
             <Send className="h-3 w-3" />
             SEND
@@ -1003,7 +1003,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 setSideTab(t.id);
               }}
-              className="flex items-center justify-center gap-1 truncate rounded-full px-1 py-1 text-[8px] font-extrabold uppercase transition-colors"
+              className="flex items-center justify-center gap-1 truncate rounded-full px-1 py-1 text-console-micro font-extrabold uppercase transition-colors"
               style={{
                 background: sideTab === t.id ? '#1f222c' : 'transparent',
                 color: sideTab === t.id ? t.color : '#7c8190',
@@ -1014,7 +1014,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               )}
               <span>{t.label}</span>
               {t.badge > 0 && (
-                <span className="num rounded bg-[#34d399]/20 px-1 text-[7.5px] text-[#34d399]">
+                <span className="num rounded bg-[#34d399]/20 px-1 text-console-micro text-[#34d399]">
                   {t.badge}
                 </span>
               )}
@@ -1039,14 +1039,14 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               {ag.steps.length > 0 && (
                 <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="sub !text-[8px]">Active Checklist</span>
-                    <span className="num font-mono-tech text-[8.5px] text-[#22d3ee]">
+                    <span className="sub !text-console-micro">Active Checklist</span>
+                    <span className="num font-mono-tech text-console-micro text-[#22d3ee]">
                       {ag.steps.filter((s) => s.status === 'done').length}/{ag.steps.length}
                     </span>
                   </div>
                   <div className="space-y-1">
                     {ag.steps.map((s, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 text-[9.5px]">
+                      <div key={idx} className="flex items-center gap-1.5 text-console-caption">
                         {s.status === 'done' ? (
                           <CheckCircle2 className="h-3 w-3 shrink-0 text-[#34d399]" />
                         ) : s.status === 'in_progress' ? (
@@ -1070,11 +1070,11 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
               {/* Tap-to-Inspect Live Git Diff List */}
               <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                 <div className="mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1 text-[9px] font-extrabold text-zinc-300 uppercase">
+                  <span className="flex items-center gap-1 text-console-caption font-extrabold text-zinc-300 uppercase">
                     <FileDiff className="h-3 w-3 text-[#34d399]" />
                     Tap File to Inspect
                   </span>
-                  <span className="num font-mono-tech text-[9px] font-extrabold">
+                  <span className="num font-mono-tech text-console-caption font-extrabold">
                     <span className="text-[#34d399]">+{ag.totalAdded}</span>{' '}
                     <span className="text-[#ff5d6c]">-{ag.totalRemoved}</span>
                   </span>
@@ -1087,7 +1087,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                         key={f.file}
                         type="button"
                         onClick={() => openFileDiff(f.file)}
-                        className="flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[9px] transition-colors"
+                        className="flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-console-caption transition-colors"
                         style={{
                           background: active ? '#34d3991c' : 'rgba(255,255,255,0.04)',
                           borderColor: active ? '#34d39966' : 'rgba(255,255,255,0.05)',
@@ -1115,7 +1115,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
             <div className="deck-scroll h-full space-y-2 overflow-y-auto pr-0.5">
               <div className="flex items-center gap-1">
                 <Sparkles className="h-3 w-3 text-[#a78bfa]" />
-                <span className="sub !text-[8.5px]">One-Tap IDE Slash ({modKey}L)</span>
+                <span className="sub !text-console-micro">One-Tap IDE Slash ({modKey}L)</span>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {SLASH_COMMANDS.map((item) => (
@@ -1134,12 +1134,12 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                     className="rounded-xl border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-left hover:border-white/25"
                   >
                     <div
-                      className="font-mono-tech truncate text-[10.5px] font-extrabold"
+                      className="font-mono-tech truncate text-console-caption font-extrabold"
                       style={{ color: item.color }}
                     >
                       {item.cmd}
                     </div>
-                    <div className="truncate text-[8.5px] text-[#7c8190]">{item.desc}</div>
+                    <div className="truncate text-console-micro text-[#7c8190]">{item.desc}</div>
                   </motion.button>
                 ))}
               </div>
@@ -1149,12 +1149,12 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           {sideTab === 'plan' && (
             <div className="deck-scroll h-full space-y-1 overflow-y-auto pr-0.5">
               <div className="flex items-center justify-between">
-                <span className="sub !text-[8.5px]">Active Artifact</span>
-                <span className="font-mono-tech truncate text-[8.5px] text-[#a78bfa]">
+                <span className="sub !text-console-micro">Active Artifact</span>
+                <span className="font-mono-tech truncate text-console-micro text-[#a78bfa]">
                   {ag.artifactName || 'none'}
                 </span>
               </div>
-              <div className="font-mono-tech rounded-xl border border-white/[0.06] bg-black/75 p-2 text-[9px] leading-relaxed whitespace-pre-wrap text-zinc-200">
+              <div className="font-mono-tech rounded-xl border border-white/[0.06] bg-black/75 p-2 text-console-caption leading-relaxed whitespace-pre-wrap text-zinc-200">
                 {ag.artifactPreview || 'No implementation_plan.md or task.md in active conversation.'}
               </div>
             </div>
@@ -1173,7 +1173,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 payload: { requestId: makeRequestId(), macroId: 'ag-reject-changes' },
               });
             }}
-            className="flex items-center justify-center gap-1 rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 py-2 text-[9.5px] font-extrabold text-[#ff5d6c]"
+            className="flex items-center justify-center gap-1 rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 py-2 text-console-caption font-extrabold text-[#ff5d6c]"
           >
             <XCircle className="h-3.5 w-3.5" />
             REJECT {modKey}⌫
@@ -1188,7 +1188,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 payload: { requestId: makeRequestId(), macroId: 'ag-accept-changes' },
               });
             }}
-            className="flex items-center justify-center gap-1 rounded-xl bg-[#34d399] py-2 text-[9.5px] font-extrabold text-[#04130c]"
+            className="flex items-center justify-center gap-1 rounded-xl bg-[#34d399] py-2 text-console-caption font-extrabold text-[#04130c]"
             style={{ boxShadow: '0 2px 0 #14664a' }}
           >
             <CheckCircle2 className="h-3.5 w-3.5" />

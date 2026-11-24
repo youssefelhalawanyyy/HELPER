@@ -59,7 +59,7 @@ export function AgentNotificationBanner({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -12, scale: 0.96 }}
           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-          className={`absolute top-9 right-3 z-40 w-[360px] max-w-[82%] rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${style.border}`}
+          className={`agent-notice absolute top-9 right-3 z-40 w-[360px] max-w-[82%] rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${style.border}`}
         >
           <div className="flex items-start justify-between gap-2.5">
             <div className="flex min-w-0 items-start gap-2.5">

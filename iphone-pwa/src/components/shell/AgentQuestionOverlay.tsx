@@ -29,14 +29,9 @@ export function AgentQuestionOverlay({
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.94, y: 8 }}
             transition={DECK_SPRING}
-            className="tile relative w-full max-w-[480px] p-5"
-            style={{
-              borderRadius: 24,
-              borderColor: 'rgba(34,211,238,0.55)',
-              boxShadow: '0 0 40px -8px rgba(34,211,238,0.55), 0 24px 60px rgba(0,0,0,0.95)',
-            }}
+            role="dialog" aria-modal="true" aria-label="Antigravity question"
+            className="question-sheet tile relative w-full max-w-[480px] p-5"
           >
-            <div className="absolute top-0 left-0 h-[3px] w-full bg-gradient-to-r from-[#22d3ee] via-[#34d399] to-[#2563eb]" />
             <div className="mb-2 flex items-center gap-2">
               <div className="grid h-8 w-8 place-items-center rounded-xl bg-[#22d3ee]/15 text-[#22d3ee]">
                 <Bot className="h-4 w-4" />

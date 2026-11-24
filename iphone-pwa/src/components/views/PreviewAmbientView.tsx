@@ -116,12 +116,12 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
 
   if (mode === 'preview') {
     return (
-      <div className="tile flex h-full flex-col p-2.5">
+      <div className="tile preview-browser flex min-h-0 flex-1 flex-col p-2.5">
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
             onClick={() => setMode('ambient')}
-            className="flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-[10px] font-bold"
+            className="flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-console-caption font-bold"
           >
             <Moon className="h-3 w-3 text-[#22d3ee]" />
             Desk Clock
@@ -140,11 +140,11 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              className="font-mono-tech flex-1 rounded-full border border-white/10 bg-black px-3 py-1 text-[10.5px] text-white outline-none"
+              className="font-mono-tech flex-1 rounded-full border border-white/10 bg-black px-3 py-1 text-console-caption text-white outline-none"
             />
             <button
               type="submit"
-              className="rounded-full bg-[#34d399] px-3 py-1 text-[10px] font-extrabold text-[#04130c]"
+              className="rounded-full bg-[#34d399] px-3 py-1 text-console-caption font-extrabold text-[#04130c]"
             >
               Sync
             </button>
@@ -168,7 +168,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
   }
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.15fr 1fr' }}>
+    <div className="screen-grid layout-clock">
       {/* Left: OLED Desk Clock + Weather + World Clocks + Quick Break Timers + Mac Stats */}
       <div className="tile flex flex-col justify-between p-3.5">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#60a5fa]" />
@@ -178,7 +178,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
           <div className="flex items-center gap-2">
             <span className="sub">{dateStr}</span>
             {weather && (
-              <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold text-[#fbbf24]">
+              <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-console-caption font-bold text-[#fbbf24]">
                 <CloudSun className="h-3 w-3" />
                 {weather.tempC}°C · {weather.label}
               </span>
@@ -190,7 +190,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
               soundEngine.playClick();
               setMode('preview');
             }}
-            className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-0.5 text-[9.5px] font-bold text-[#34d399]"
+            className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-0.5 text-console-caption font-bold text-[#34d399]"
           >
             <Globe className="h-3 w-3" />
             PREVIEW
@@ -204,14 +204,14 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
             <span className="text-[18px] font-extrabold text-[#60a5fa]">:{secStr}</span>
           </div>
 
-          <div className="num space-y-1 text-right text-[10px]">
+          <div className="num space-y-1 text-right text-console-caption">
             {[
               ['CAI', 'Africa/Cairo'],
               ['LON', 'Europe/London'],
               ['NYC', 'America/New_York'],
             ].map(([code, tz]) => (
               <div key={code} className="flex items-center justify-end gap-1.5">
-                <span className="sub !text-[8.5px]">{code}</span>
+                <span className="sub !text-console-micro">{code}</span>
                 <span className="font-bold text-zinc-200">{formatWorldClock(now, tz)}</span>
               </div>
             ))}
@@ -229,7 +229,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setBreakSec(0);
                 }}
-                className="num rounded-full bg-[#fbbf24] px-2.5 py-0.5 text-[10px] font-extrabold text-black"
+                className="num rounded-full bg-[#fbbf24] px-2.5 py-0.5 text-console-caption font-extrabold text-black"
               >
                 {formatTimer(breakSec)} · STOP
               </button>
@@ -242,7 +242,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
                     soundEngine.playClick();
                     setBreakSec(m * 60);
                   }}
-                  className="rounded-full bg-white/[0.07] px-2 py-0.5 text-[9.5px] font-bold text-zinc-200 hover:bg-[#fbbf24]/20 hover:text-[#fbbf24]"
+                  className="rounded-full bg-white/[0.07] px-2 py-0.5 text-console-caption font-bold text-zinc-200 hover:bg-[#fbbf24]/20 hover:text-[#fbbf24]"
                 >
                   {m}m
                 </button>
@@ -250,7 +250,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
             )}
           </div>
 
-          <div className="num flex items-center gap-2 text-[9.5px] font-bold text-zinc-300">
+          <div className="num flex items-center gap-2 text-console-caption font-bold text-zinc-300">
             <span className="flex items-center gap-0.5 text-[#22d3ee]">
               <Cpu className="h-3 w-3" />
               {isConnected ? `${deck.stats.cpuPct}%` : '--'}
@@ -265,8 +265,8 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
         {/* Mac Media Controls */}
         <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-2">
           <div className="min-w-0">
-            <div className="truncate text-[11px] font-bold">{deck.mediaState.track}</div>
-            <div className="sub truncate !text-[8.5px]">{deck.mediaState.artist}</div>
+            <div className="truncate text-console-body font-bold">{deck.mediaState.track}</div>
+            <div className="sub truncate !text-console-micro">{deck.mediaState.artist}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {(['prev', 'playpause', 'next'] as const).map((action) => (
@@ -331,7 +331,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
                   }}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <p className="font-mono-tech line-clamp-2 text-[10px] text-zinc-200">
+                  <p className="font-mono-tech line-clamp-2 text-console-caption text-zinc-200">
                     {item.text}
                   </p>
                 </button>
@@ -341,7 +341,7 @@ export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
                     href={detectedUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-1 text-[9px] font-extrabold text-[#041317]"
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-1 text-console-caption font-extrabold text-[#041317]"
                   >
                     <ExternalLink className="h-2.5 w-2.5" />
                     Open

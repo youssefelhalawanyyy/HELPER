@@ -178,7 +178,8 @@ export function PairingOverlay({
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={DECK_SPRING}
             onClick={(e) => e.stopPropagation()}
-            className="tile deck-scroll relative max-h-[372px] w-full max-w-[740px] overflow-y-auto p-3.5"
+            role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') onClose?.(); }} aria-label="Pair with computer"
+            className="pair-sheet tile deck-scroll relative w-full max-w-[740px] overflow-y-auto p-3.5"
             style={{
               borderRadius: 24,
               borderColor: 'rgba(255,255,255,0.12)',
@@ -186,26 +187,6 @@ export function PairingOverlay({
                 'inset 0 1px 0 rgba(255,255,255,0.09), 0 30px 80px -15px rgba(0,0,0,0.95)',
             }}
           >
-            {/* Top-left neon L-accent bar */}
-            <div
-              className="absolute top-0 left-0 h-[3px] w-3/5 rounded-r-full transition-colors duration-500"
-              style={{
-                background:
-                  mode === 'tunnel'
-                    ? 'linear-gradient(90deg, #22d3ee, #34d399)'
-                    : 'linear-gradient(90deg, #34d399, #fbbf24)',
-              }}
-            />
-            <div
-              className="absolute top-0 left-0 h-1/2 w-[3px] rounded-b-full"
-              style={{
-                background:
-                  mode === 'tunnel'
-                    ? 'linear-gradient(#22d3ee, transparent)'
-                    : 'linear-gradient(#34d399, transparent)',
-              }}
-            />
-
             {/* Compact Header Row */}
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
@@ -245,7 +226,8 @@ export function PairingOverlay({
                   type="button"
                   whileTap={{ scale: 0.88 }}
                   onClick={onClose}
-                  aria-label="Close pairing dialog"
+                  autoFocus
+                aria-label="Close pairing dialog"
                   className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.05] text-[#8b90a0] hover:bg-white/10 hover:text-white"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -253,8 +235,7 @@ export function PairingOverlay({
               )}
             </div>
 
-            {/* Always 2-Column Landscape Layout inside 844x390 locked stage */}
-            <div className="grid grid-cols-12 gap-3">
+            <div className="pair-columns grid grid-cols-12 gap-3">
               {/* Left Column: Mode Tabs + Inputs + OTP PIN + Submit */}
               <form onSubmit={handleSubmit} className="col-span-7 flex flex-col gap-2.5">
                 {/* Mode Tabs */}

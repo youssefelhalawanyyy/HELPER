@@ -1,103 +1,93 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import { useEffect, useRef } from 'react';
+import Link from 'next/link';
 import {
   Activity,
-  ClipboardList,
+  ArrowUpRight,
+  BookOpen,
+  Bot,
+  Clock3,
+  Command,
   Grid2X2,
-  MonitorSmartphone,
+  HeartPulse,
+  Monitor,
+  MousePointer2,
+  Network,
   Rocket,
-  Sliders,
 } from 'lucide-react';
-import { soundEngine } from '@/lib/soundEngine';
 
-export type DeckViewId = 'deck' | 'monitor' | 'launch' | 'hardware' | 'preview';
+export const PAGES = [
+  { id: 'deck', label: 'Deck', title: 'Smart Deck', icon: Grid2X2, accent: '#ccbaff' },
+  { id: 'antigravity', label: 'Antigravity', title: 'Antigravity', icon: Bot, accent: '#96d9ea' },
+  { id: 'monitor', label: 'Monitor', title: 'Live Monitor', icon: Activity, accent: '#a5dfbe' },
+  { id: 'mac', label: 'Mac & Dock', title: 'Mac & Dock', icon: Monitor, accent: '#b6c5f5' },
+  {
+    id: 'hardware',
+    label: 'Trackpad & Snap',
+    title: 'Trackpad & Snap',
+    icon: MousePointer2,
+    accent: '#f0cc9b',
+  },
+  { id: 'preview', label: 'Desk Clock', title: 'Desk Clock', icon: Clock3, accent: '#aecaf4' },
+  { id: 'launch', label: 'Launch', title: 'Launch Control', icon: Rocket, accent: '#edbb9e' },
+  { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#efb6c7' },
+  { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#9cd5ca' },
+] as const;
 
-interface LeftNavRailProps {
-  activeView: DeckViewId;
-  onSelectView: (view: DeckViewId) => void;
-  onOpenSnippets: () => void;
-  webhookCount: number;
-  uncommittedCount: number;
+export type DeckViewId = (typeof PAGES)[number]['id'];
+
+export function Brand() {
+  return (
+    <span className="console-brand">
+      <span aria-hidden="true">
+        <Command size={20} strokeWidth={2.4} />
+      </span>
+      DevDeck
+    </span>
+  );
 }
 
-const NAV_ITEMS: Array<{ id: DeckViewId; label: string; icon: typeof Grid2X2; accent: string }> = [
-  { id: 'deck', label: 'Smart Deck', icon: Grid2X2, accent: 'text-cyan-400' },
-  { id: 'monitor', label: 'Live Monitor', icon: Activity, accent: 'text-emerald-400' },
-  { id: 'launch', label: 'Launch Control', icon: Rocket, accent: 'text-amber-400' },
-  { id: 'hardware', label: 'Hardware Tools', icon: Sliders, accent: 'text-violet-400' },
-  { id: 'preview', label: 'Preview & Ambient', icon: MonitorSmartphone, accent: 'text-sky-400' },
-];
-
 export function LeftNavRail({
-  activeView,
-  onSelectView,
-  onOpenSnippets,
-  webhookCount,
-  uncommittedCount,
-}: LeftNavRailProps) {
+  index,
+  onSelect,
+  inert,
+}: {
+  index: number;
+  onSelect: (index: number) => void;
+  inert: boolean;
+}) {
+  const selected = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    selected.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  }, [index]);
+
   return (
-    <nav
-      aria-label="Primary Deck Navigation"
-      className="flex h-full w-[58px] shrink-0 flex-col items-center justify-between border-r border-white/[0.08] bg-[#08080A] py-2"
-    >
-      <div className="flex flex-col items-center gap-1.5">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeView === item.id;
-          const badge =
-            item.id === 'launch' && (uncommittedCount > 0 || webhookCount > 0)
-              ? uncommittedCount || webhookCount
-              : 0;
-
-          return (
-            <motion.button
-              key={item.id}
-              type="button"
-              whileTap={{ scale: 0.9 }}
-              onClick={() => {
-                soundEngine.playClick();
-                onSelectView(item.id);
-              }}
-              aria-label={item.label}
-              title={item.label}
-              className={`relative flex h-11 w-11 items-center justify-center rounded-xl border transition-colors ${
-                isActive
-                  ? 'border-white/20 bg-[#18181D] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
-                  : 'border-transparent bg-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200'
-              }`}
-            >
-              {isActive && (
-                <motion.span
-                  layoutId="rail-active-pill"
-                  className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full bg-cyan-400 shadow-[0_0_8px_#06B6D4]"
-                />
-              )}
-              <Icon className={`h-5 w-5 ${isActive ? item.accent : ''}`} />
-              {badge > 0 && (
-                <span className="font-mono-tech absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-black">
-                  {badge > 9 ? '9+' : badge}
-                </span>
-              )}
-            </motion.button>
-          );
-        })}
+    <aside inert={inert} className="console-rail" data-no-swipe="true">
+      <div className="rail-brand">
+        <Brand />
       </div>
-
-      {/* Quick Snippet Injector Drawer Trigger */}
-      <motion.button
-        type="button"
-        whileTap={{ scale: 0.9 }}
-        onClick={() => {
-          soundEngine.playClick();
-          onOpenSnippets();
-        }}
-        aria-label="Quick Snippet Injector"
-        title="Quick Snippet Injector"
-        className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10 text-cyan-400 transition-colors hover:bg-cyan-500/20"
-      >
-        <ClipboardList className="h-4 w-4" />
-      </motion.button>
-    </nav>
+      <nav className="console-nav" aria-label="Workspace screens">
+        {PAGES.map(({ id, label, title, icon: Icon }, i) => (
+          <button
+            type="button"
+            key={id}
+            ref={i === index ? selected : undefined}
+            aria-label={`Go to ${label}`}
+            aria-current={i === index ? 'page' : undefined}
+            title={title}
+            onClick={() => onSelect(i)}
+          >
+            <Icon size={18} strokeWidth={1.7} />
+            <span>{title}</span>
+          </button>
+        ))}
+      </nav>
+      <Link className="rail-setup" href="/setup">
+        <BookOpen size={16} />
+        Setup guide
+        <ArrowUpRight size={14} />
+      </Link>
+    </aside>
   );
 }

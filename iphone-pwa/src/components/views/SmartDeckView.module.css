@@ -2,7 +2,7 @@
   height: 100%;
   container: smartdeck / size;
   color: #f4f3fa;
-  --surface: #17171c;
+  --surface: #211f2a;
   --line: #34343b;
   --muted: #b4b2bf;
   --lilac: #c6b4ff;
@@ -12,12 +12,10 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: clamp(12px, 2cqw, 32px);
+  padding: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: #101013;
-  border: 1px solid #25252c;
-  border-radius: 20px;
+  background: transparent;
 }
 .hero {
   position: relative;
@@ -536,8 +534,7 @@ button.key:active {
 @container smartdeck (max-height: 470px) {
   .workspace {
     gap: 7px;
-    padding: 6px;
-    border-radius: 13px;
+    padding: 0;
   }
   .hero {
     flex-basis: 80px;
@@ -680,4 +677,26 @@ button.key:active {
   .key {
     transition: none;
   }
+}
+
+@container smartdeck (max-width: 570px) {
+  .workspace { gap: 10px; }
+  .hero { min-height: 156px; flex-basis: auto; }
+  .heroCopy { display: block; width: 68%; max-width: none; padding: 16px; }
+  .hero h1 { margin: 6px 0; font-size: 39px; }
+  .hero p { margin: 6px 0 10px; font-size: 12px; }
+  .heroButton { min-height: 34px; }
+  .hero::before { max-width: 44%; background-size: auto 108%; }
+  .panels { flex: none; grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .heading { flex-wrap: wrap; }
+  .library, .context, .ports { padding: 12px; }
+  .keys, .keys[data-preview='true'] { flex: none; max-height: none; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .keys .key { min-height: 100px; padding: 10px; }
+  .keyCopy small { font-size: 11px; }
+  .keyCopy strong { font-size: 14px; }
+  .sidebar { grid-template-columns: minmax(0,1fr); grid-template-rows: auto auto; gap: 10px; }
+  .ports { min-height: 112px; }
+  .profileBar { flex-wrap: wrap; }
+  .search { min-height: 34px; flex: 1; }
+  .profiles button, .follow { min-height: 32px; }
 }

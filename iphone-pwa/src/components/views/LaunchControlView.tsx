@@ -72,7 +72,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
   const { gitStatus } = deck;
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1fr 1.25fr' }}>
+    <div className="screen-grid layout-launch">
       {/* Left: Git HUD + 3s Hold-to-Deploy */}
       <div className="tile flex flex-col justify-between p-3.5">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#fbbf24]" />
@@ -80,7 +80,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
         <div className="flex items-start justify-between">
           <div>
             <div className="disp text-[26px]">Launch</div>
-            <div className="mt-1 flex items-center gap-2 text-[11px] font-bold">
+            <div className="mt-1 flex items-center gap-2 text-console-body font-bold">
               <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-[#22d3ee]">
                 <GitBranch className="h-3 w-3" />
                 {gitStatus.branch || 'main'}
@@ -142,7 +142,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
                 className="h-5 w-5"
                 style={{ color: deployMode === 'push' ? '#fbbf24' : '#34d399' }}
               />
-              <span className="mt-1 text-[10px] font-extrabold uppercase tracking-wider">
+              <span className="mt-1 text-console-caption font-extrabold uppercase tracking-wider">
                 {holding ? `${Math.ceil((1 - holdProgress) * 3)}s…` : 'Hold 3s'}
               </span>
             </div>
@@ -151,7 +151,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
 
         <div className="flex items-center justify-between">
           <span className="sub">Safety interlock</span>
-          <div className="flex gap-1 rounded-full bg-black/60 p-0.5 text-[9.5px] font-bold">
+          <div className="flex gap-1 rounded-full bg-black/60 p-0.5 text-console-caption font-bold">
             <button
               type="button"
               onClick={() => setDeployMode('push')}
@@ -195,7 +195,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
             >
               <div className="flex min-w-0 items-center gap-2">
                 <span
-                  className="rounded-full px-2 py-0.5 text-[9px] font-extrabold"
+                  className="rounded-full px-2 py-0.5 text-console-caption font-extrabold"
                   style={{
                     background: ev.method === 'POST' ? 'rgba(52,211,153,.18)' : 'rgba(34,211,238,.18)',
                     color: ev.method === 'POST' ? '#34d399' : '#22d3ee',
@@ -203,7 +203,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
                 >
                   {ev.method}
                 </span>
-                <span className="font-mono-tech truncate text-[11px]">{ev.path}</span>
+                <span className="font-mono-tech truncate text-console-body">{ev.path}</span>
               </div>
               <span className="num sub shrink-0 !text-[#34d399]">
                 {ev.statusCode} · {ev.latencyMs}ms
@@ -214,7 +214,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
           {deck.webhooks.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-1.5 text-center">
               <span className="sub">Waiting for HTTP requests</span>
-              <code className="font-mono-tech rounded-lg bg-black/70 px-2.5 py-1 text-[10px] text-[#22d3ee]">
+              <code className="font-mono-tech rounded-lg bg-black/70 px-2.5 py-1 text-console-caption text-[#22d3ee]">
                 POST :4747/hook/test
               </code>
             </div>
@@ -234,7 +234,7 @@ export function LaunchControlView({ deck }: { deck: DevDeckState }) {
               <span>{selectedWebhook.latencyMs}ms</span>
               <span>{formatTimeShort(selectedWebhook.ts)}</span>
             </div>
-            <pre className="deck-scroll font-mono-tech max-h-[160px] overflow-auto rounded-xl bg-black p-3 text-[11px] text-[#34d399]">
+            <pre className="deck-scroll font-mono-tech max-h-[160px] overflow-auto rounded-xl bg-black p-3 text-console-body text-[#34d399]">
               {JSON.stringify({ query: selectedWebhook.query, body: selectedWebhook.body }, null, 2)}
             </pre>
             <div className="flex justify-end gap-2">

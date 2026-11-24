@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { AnimatePresence, motion } from 'framer-motion';
+import type { CSSProperties } from 'react';
+import { Brand, LeftNavRail, PAGES, type DeckViewId } from './LeftNavRail';
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'framer-motion';
 import {
   Battery,
   BatteryCharging,
@@ -73,34 +75,11 @@ const NetworkCommandView = dynamic(
   { loading: ViewSkeleton },
 );
 
-export type DeckViewId =
-  | 'deck'
-  | 'antigravity'
-  | 'monitor'
-  | 'mac'
-  | 'hardware'
-  | 'preview'
-  | 'launch'
-  | 'doctor'
-  | 'network';
-
-const PAGES: Array<{ id: DeckViewId; label: string; accent: string }> = [
-  { id: 'deck', label: 'Deck', accent: '#34d399' },
-  { id: 'antigravity', label: 'Antigravity', accent: '#22d3ee' },
-  { id: 'monitor', label: 'Monitor', accent: '#f472b6' },
-  { id: 'mac', label: 'Mac & Dock', accent: '#a78bfa' },
-  { id: 'hardware', label: 'Trackpad & Snap', accent: '#fbbf24' },
-  { id: 'preview', label: 'Desk Clock', accent: '#60a5fa' },
-  { id: 'launch', label: 'Launch', accent: '#fbbf24' },
-  { id: 'doctor', label: 'PC Doctor', accent: '#ff5d6c' },
-  { id: 'network', label: 'NetOps Pro', accent: '#22d3ee' },
-];
-
 const PAGE_VARIANTS = {
   enter: (dir: number) => ({
-    x: dir > 0 ? 160 : -160,
+    x: dir > 0 ? 26 : -26,
     opacity: 0,
-    scale: 0.96,
+    scale: 0.995,
   }),
   center: {
     x: 0,
@@ -108,9 +87,9 @@ const PAGE_VARIANTS = {
     scale: 1,
   },
   exit: (dir: number) => ({
-    x: dir > 0 ? -160 : 160,
+    x: dir > 0 ? -26 : 26,
     opacity: 0,
-    scale: 0.96,
+    scale: 0.995,
   }),
 };
 
@@ -124,14 +103,8 @@ export function DeckShell() {
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [viewport, setViewport] = useState({
-    stageW: 844,
-    stageH: 390,
-    scale: 1,
-    portrait: false,
-  });
-
-  // Swipe gesture tracking (works in both landscape & 90deg-rotated portrait)
+  const reduceMotion = useReducedMotion();
+  const overlayOpen = pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion);
   const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
 
   const activePage = PAGES[pageIdx];
@@ -182,61 +155,18 @@ export function DeckShell() {
   }, []);
 
   useEffect(() => {
-    try {
-      const orient = screen.orientation as ScreenOrientation & {
-        lock?: (o: string) => Promise<void>;
-      };
-      void orient?.lock?.('landscape')?.catch(() => {});
-    } catch {
-      // iOS Safari uses CSS 90deg lock below
-    }
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
-
-  const smartDeckActive = activeView === 'deck';
-  useEffect(() => {
-    const updateViewport = () => {
-      const vv = window.visualViewport;
-      const w = vv?.width ?? window.innerWidth;
-      const h = vv?.height ?? window.innerHeight;
-      // Give the library real desktop space while retaining the handheld landscape console.
-      if (smartDeckActive && Math.min(w, h) >= 600) {
-        setViewport({ stageW: w, stageH: h, scale: 1, portrait: false });
-        return;
-      }
-      const portrait = h > w;
-
-      // Exact landscape dimensions after 90deg rotation when phone is held upright
-      const landW = portrait ? h : w;
-      const landH = portrait ? w : h;
-
-      // Always fill 100% of the screen edge-to-edge in BOTH orientations (zero black bars)
-      const stageH = 390;
-      const stageW = Math.max(660, Math.round(stageH * (landW / Math.max(1, landH))));
-      const scale = landH / stageH;
-
-      setViewport({ stageW, stageH, scale, portrait });
-    };
-
-    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
-
-    updateViewport();
-    window.addEventListener('resize', updateViewport);
-    window.addEventListener('orientationchange', updateViewport);
-    window.visualViewport?.addEventListener('resize', updateViewport);
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => {
-      window.removeEventListener('resize', updateViewport);
-      window.removeEventListener('orientationchange', updateViewport);
-      window.visualViewport?.removeEventListener('resize', updateViewport);
-      document.removeEventListener('fullscreenchange', onFsChange);
-    };
-  }, [smartDeckActive]);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length !== 1 || pairingModalOpen || snippetsOpen || deck.agentQuestion) return;
     const target = e.target as HTMLElement | null;
     const blocked = Boolean(
-      target?.closest('[data-no-swipe="true"], input, textarea, select, iframe'),
+      target?.closest(
+        '[data-no-swipe="true"], input, textarea, select, iframe, dialog, [role="slider"]',
+      ),
     );
     swipeStartRef.current = {
       x: e.touches[0].clientX,
@@ -250,12 +180,8 @@ export function DeckShell() {
     swipeStartRef.current = null;
     if (!start || start.blocked || e.changedTouches.length === 0) return;
 
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-
-    // When rotated 90deg clockwise in portrait, the stage's horizontal axis is physical Y
-    const stageDx = viewport.portrait ? endY - start.y : endX - start.x;
-    const stageDy = viewport.portrait ? -(endX - start.x) : endY - start.y;
+    const stageDx = e.changedTouches[0].clientX - start.x;
+    const stageDy = e.changedTouches[0].clientY - start.y;
 
     if (Math.abs(stageDx) > 48 && Math.abs(stageDx) > Math.abs(stageDy) * 1.25) {
       if (stageDx < 0) {
@@ -323,220 +249,201 @@ export function DeckShell() {
         : '#34d399';
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-black">
+    <MotionConfig reducedMotion="user">
       <div
+        className="console-shell"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        className="relative shrink-0 overflow-hidden bg-black"
-        style={{
-          width: viewport.stageW,
-          height: viewport.stageH,
-          transform: viewport.portrait
-            ? `rotate(90deg) scale(${viewport.scale})`
-            : `scale(${viewport.scale})`,
-          transformOrigin: 'center center',
-        }}
+        style={{ '--page-accent': activePage.accent } as CSSProperties}
       >
-        {/* Precision edge-to-edge full-screen padding (clears notch cleanly without wasted margins) */}
-        <div
-          className="flex h-full flex-col gap-1.5"
-          style={{
-            paddingTop: 5,
-            paddingLeft: viewport.portrait
-              ? 'max(8px, calc(env(safe-area-inset-top, 0px) * 0.5))'
-              : 'max(8px, calc(env(safe-area-inset-left, 0px) * 0.5))',
-            paddingRight: viewport.portrait
-              ? 'max(8px, calc(env(safe-area-inset-bottom, 0px) * 0.4))'
-              : 'max(8px, calc(env(safe-area-inset-right, 0px) * 0.5))',
-            paddingBottom: 'max(5px, calc(env(safe-area-inset-bottom, 0px) * 0.35))',
-          }}
-        >
-          {/* Ultra-Slim Single-Line Top Status Bar */}
-          <header className="flex h-6 shrink-0 items-center gap-1.5 overflow-hidden text-[9.5px] font-bold">
-            <div className="mr-0.5 flex shrink-0 items-center gap-1.5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/icons/icon-192.png"
-                alt="DevDeck logo"
-                className="h-5 w-5 shrink-0 rounded-[5px] border border-[#22d3ee]/40 object-cover shadow-[0_0_8px_rgba(34,211,238,0.35)]"
-              />
-              <span className="sub whitespace-nowrap !text-[10.5px] !tracking-[0.14em] !text-[#f2f3f7]">
-                DevDeck
+        <LeftNavRail index={pageIdx} onSelect={goToIndex} inert={overlayOpen} />
+        <div className="console-main" inert={overlayOpen}>
+          <header className="console-topbar" data-no-swipe="true">
+            <div className="console-status">
+              <span className="mobile-brand">
+                <Brand />
               </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                soundEngine.playClick();
-                setPairingModalOpen(true);
-              }}
-              className="flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap"
-              style={{
-                background: isConnected
-                  ? 'rgba(52,211,153,.12)'
-                  : isReconnecting
-                    ? 'rgba(251,191,36,.14)'
-                    : 'rgba(255,93,108,.14)',
-                color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-              }}
-            >
-              <span className="relative h-1.5 w-1.5">
-                <i
-                  className="anim-ping absolute inset-0 rounded-full"
-                  style={{
-                    background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                  }}
-                />
-                <i
-                  className="absolute inset-0 rounded-full"
-                  style={{
-                    background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                  }}
-                />
-              </span>
-              <span className="max-w-[96px] truncate">
-                {isConnected
-                  ? deck.hello?.hostname || 'CONNECTED'
-                  : isReconnecting
-                    ? 'RECONNECTING…'
-                    : 'PAIR COMPUTER'}
-              </span>
-            </button>
-
-            <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
-              CPU <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
-            </span>
-            <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
-              RAM{' '}
-              <b className="ml-1">
-                {isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}G` : '--'}
-              </b>
-            </span>
-
-            {isConnected && deck.stats.batteryPct !== null && (
-              <span
-                className="num flex h-5 items-center gap-0.5 rounded-full bg-white/[0.06] px-2"
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setPairingModalOpen(true);
+                }}
+                className="flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap"
                 style={{
-                  color: deck.stats.batteryCharging
-                    ? '#34d399'
-                    : deck.stats.batteryPct <= 20
-                      ? '#ff5d6c'
-                      : '#f2f3f7',
+                  background: isConnected
+                    ? 'rgba(52,211,153,.12)'
+                    : isReconnecting
+                      ? 'rgba(251,191,36,.14)'
+                      : 'rgba(255,93,108,.14)',
+                  color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
                 }}
               >
-                {deck.stats.batteryCharging ? (
-                  <BatteryCharging className="h-3 w-3" />
+                <span className="relative h-1.5 w-1.5">
+                  <i
+                    className="anim-ping absolute inset-0 rounded-full"
+                    style={{
+                      background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                    }}
+                  />
+                  <i
+                    className="absolute inset-0 rounded-full"
+                    style={{
+                      background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                    }}
+                  />
+                </span>
+                <span className="max-w-[96px] truncate">
+                  {isConnected
+                    ? deck.hello?.hostname || 'CONNECTED'
+                    : isReconnecting
+                      ? 'Reconnecting…'
+                      : 'Pair computer'}
+                </span>
+              </button>
+
+              <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
+                CPU{' '}
+                <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
+              </span>
+              <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
+                RAM{' '}
+                <b className="ml-1">{isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}G` : '--'}</b>
+              </span>
+
+              {isConnected && deck.stats.batteryPct !== null && (
+                <span
+                  className="num flex h-5 items-center gap-0.5 rounded-full bg-white/[0.06] px-2"
+                  style={{
+                    color: deck.stats.batteryCharging
+                      ? '#34d399'
+                      : deck.stats.batteryPct <= 20
+                        ? '#ff5d6c'
+                        : '#f2f3f7',
+                  }}
+                >
+                  {deck.stats.batteryCharging ? (
+                    <BatteryCharging className="h-3 w-3" />
+                  ) : (
+                    <Battery className="h-3 w-3" />
+                  )}
+                  {deck.stats.batteryPct}%
+                </span>
+              )}
+
+              {deck.focusState.active && (
+                <span className="num flex h-5 items-center rounded-full bg-[#fbbf24]/15 px-2 text-[#fbbf24]">
+                  {formatTimer(deck.focusState.remainingSec)}
+                </span>
+              )}
+            </div>
+            <div className="console-utilities" role="group" aria-label="Quick controls">
+              {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
+              <motion.button
+                type="button"
+                aria-label="Quick Snippets"
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setSnippetsOpen(true);
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#22d3ee]"
+              >
+                <ClipboardList className="h-3 w-3" />
+              </motion.button>
+
+              <motion.button
+                type="button"
+                aria-label="Toggle fullscreen"
+                aria-pressed={isFullscreen}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  if (document.fullscreenElement) {
+                    void document.exitFullscreen?.().catch(() => {});
+                  } else {
+                    void document.documentElement.requestFullscreen?.().catch(() => {
+                      deck.showToast(
+                        true,
+                        'On iPhone: tap Share → Add to Home Screen for full screen',
+                      );
+                    });
+                  }
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0] hover:text-white"
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-3 w-3" />
                 ) : (
-                  <Battery className="h-3 w-3" />
+                  <Maximize2 className="h-3 w-3" />
                 )}
-                {deck.stats.batteryPct}%
-              </span>
-            )}
+              </motion.button>
 
-            {deck.focusState.active && (
-              <span className="num flex h-5 items-center rounded-full bg-[#fbbf24]/15 px-2 text-[#fbbf24]">
-                {formatTimer(deck.focusState.remainingSec)}
-              </span>
-            )}
+              <motion.button
+                type="button"
+                aria-label="Toggle sound"
+                aria-pressed={soundOn}
+                whileTap={{ scale: 0.9 }}
+                onClick={toggleSound}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0]"
+              >
+                {soundOn ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
+              </motion.button>
 
-            <div className="flex-1" />
-
-            {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
-            <motion.button
-              type="button"
-              aria-label="Quick Snippets"
-              whileTap={{ scale: 0.9 }}
-              onClick={() => {
-                soundEngine.playClick();
-                setSnippetsOpen(true);
-              }}
-              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#22d3ee]"
-            >
-              <ClipboardList className="h-3 w-3" />
-            </motion.button>
-
-            <motion.button
-              type="button"
-              aria-label="Toggle fullscreen"
-              whileTap={{ scale: 0.9 }}
-              onClick={() => {
-                soundEngine.playClick();
-                if (document.fullscreenElement) {
-                  void document.exitFullscreen?.().catch(() => {});
-                } else {
-                  void document.documentElement.requestFullscreen?.().catch(() => {
-                    deck.showToast(true, 'On iPhone: tap Share → Add to Home Screen for full screen');
-                  });
-                }
-              }}
-              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0] hover:text-white"
-            >
-              {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-            </motion.button>
-
-            <motion.button
-              type="button"
-              aria-label="Toggle sound"
-              whileTap={{ scale: 0.9 }}
-              onClick={toggleSound}
-              className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0]"
-            >
-              {soundOn ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
-            </motion.button>
-
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.92 }}
-              title={wakeLock.active ? 'Keep Mac & Screen Awake' : 'Toggle Mac Caffeine'}
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({
-                  type: 'hardware:caffeine',
-                  payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
-                });
-              }}
-              className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold whitespace-nowrap"
-              style={{
-                background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
-                color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
-                boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
-              }}
-            >
-              <Coffee className="h-[10px] w-[10px] shrink-0" />
-              CAFFEINE
-            </motion.button>
-
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.92 }}
-              aria-pressed={activeView === 'antigravity'}
-              onClick={() => {
-                soundEngine.playClick();
-                setAntigravityMode(true);
-                goToView('antigravity');
-                if (isConnected) {
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.92 }}
+                aria-pressed={deck.caffeineActive}
+                title={wakeLock.active ? 'Keep Mac & Screen Awake' : 'Toggle Mac Caffeine'}
+                onClick={() => {
+                  soundEngine.playClick();
                   deck.sendEvent({
-                    type: 'app:focus',
-                    payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
+                    type: 'hardware:caffeine',
+                    payload: { requestId: makeRequestId(), active: !deck.caffeineActive },
                   });
-                }
-              }}
-              className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2.5 text-[9px] font-extrabold whitespace-nowrap text-white"
-              style={{
-                background:
-                  activeView === 'antigravity' || deck.antigravityState.active
-                    ? '#2563eb'
-                    : '#23252d',
-                boxShadow:
-                  activeView === 'antigravity' || deck.antigravityState.active
-                    ? '0 0 14px #2563eb88'
-                    : 'none',
-              }}
-            >
-              <Zap className="h-[10px] w-[10px] shrink-0 fill-current" />
-              ANTIGRAVITY IDE
-            </motion.button>
+                }}
+                className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold whitespace-nowrap"
+                style={{
+                  background: deck.caffeineActive ? 'rgba(251,191,36,.2)' : 'rgba(255,255,255,.06)',
+                  color: deck.caffeineActive ? '#fbbf24' : '#8b90a0',
+                  boxShadow: deck.caffeineActive ? '0 0 12px rgba(251,191,36,.4)' : 'none',
+                }}
+              >
+                <Coffee className="h-[10px] w-[10px] shrink-0" />
+                Caffeine
+              </motion.button>
+
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.92 }}
+                aria-pressed={activeView === 'antigravity'}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setAntigravityMode(true);
+                  goToView('antigravity');
+                  if (isConnected) {
+                    deck.sendEvent({
+                      type: 'app:focus',
+                      payload: { requestId: makeRequestId(), appName: 'Antigravity IDE' },
+                    });
+                  }
+                }}
+                className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2.5 text-[9px] font-extrabold whitespace-nowrap text-white"
+                style={{
+                  background:
+                    activeView === 'antigravity' || deck.antigravityState.active
+                      ? '#2563eb'
+                      : '#23252d',
+                  boxShadow:
+                    activeView === 'antigravity' || deck.antigravityState.active
+                      ? '0 0 14px #2563eb88'
+                      : 'none',
+                }}
+              >
+                <Zap className="h-[10px] w-[10px] shrink-0 fill-current" />
+                Antigravity IDE
+              </motion.button>
+            </div>
           </header>
 
           {/* Live Antigravity Agent Progress HUD (instant across EVERY page) */}
@@ -565,18 +472,34 @@ export function DeckShell() {
           </AnimatePresence>
 
           {/* Smooth Directional Swipe Carousel Canvas */}
-          <main className="relative min-h-0 flex-1 overflow-hidden">
+          <main className="console-canvas">
             <AnimatePresence mode="popLayout" custom={direction} initial={false}>
               <motion.div
                 key={activeView}
                 custom={direction}
                 variants={PAGE_VARIANTS}
-                initial="enter"
+                initial={reduceMotion ? false : 'enter'}
                 animate="center"
                 exit="exit"
-                transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.85 }}
-                className="h-full w-full"
+                transition={
+                  reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 350, damping: 34 }
+                }
+                className="console-view"
+                data-screen={activeView}
               >
+                {activeView !== 'deck' && (
+                  <header className="screen-masthead">
+                    <div className="masthead-copy">
+                      <activePage.icon size={22} aria-hidden="true" />
+                      <h1>{activePage.title}</h1>
+                    </div>
+                    <div className="masthead-art" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </div>
+                  </header>
+                )}
                 {activeView === 'deck' && (
                   <SmartDeckView
                     deck={deck}
@@ -588,10 +511,7 @@ export function DeckShell() {
                 {activeView === 'antigravity' && <AntigravityMissionView deck={deck} />}
                 {activeView === 'monitor' && <LiveMonitorView deck={deck} />}
                 {activeView === 'mac' && (
-                  <MacInspectorView
-                    deck={deck}
-                    onNavigateToMonitor={() => goToView('monitor')}
-                  />
+                  <MacInspectorView deck={deck} onNavigateToMonitor={() => goToView('monitor')} />
                 )}
                 {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
                 {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
@@ -603,7 +523,7 @@ export function DeckShell() {
           </main>
 
           {/* Bottom Bar: Interactive Swipe Page Dots + Live Dev Log Marquee */}
-          <footer className="flex h-6 shrink-0 items-center gap-2">
+          <footer className="console-footer">
             {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
             <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/[0.08] bg-[#101114] px-2 py-0.5">
               <button
@@ -621,25 +541,6 @@ export function DeckShell() {
               >
                 {activePage.label}
               </span>
-
-              <div className="flex items-center gap-1 px-1">
-                {PAGES.map((p, idx) => {
-                  const active = idx === pageIdx;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      aria-label={`Go to ${p.label}`}
-                      onClick={() => goToIndex(idx)}
-                      className="h-1.5 rounded-full transition-all duration-300"
-                      style={{
-                        width: active ? 16 : 6,
-                        background: active ? p.accent : 'rgba(255,255,255,0.2)',
-                      }}
-                    />
-                  );
-                })}
-              </div>
 
               <button
                 type="button"
@@ -700,7 +601,8 @@ export function DeckShell() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
-              className="pointer-events-none absolute right-4 bottom-9 z-40 max-w-[340px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
+              role="status"
+              className="console-toast pointer-events-none absolute right-4 bottom-9 z-40 max-w-[340px] truncate rounded-full border px-3 py-1 text-[10px] font-bold shadow-2xl"
               style={{
                 background: deck.toast.ok ? '#0b1e16' : '#240c10',
                 borderColor: deck.toast.ok ? '#34d39955' : '#ff5d6c66',
@@ -712,7 +614,6 @@ export function DeckShell() {
           )}
         </AnimatePresence>
 
-        {/* Overlays locked inside the 844x390 landscape stage */}
         <SnippetDrawer
           open={snippetsOpen}
           snippets={deck.config?.snippets ?? []}
@@ -740,6 +641,6 @@ export function DeckShell() {
           }}
         />
       </div>
-    </div>
+    </MotionConfig>
   );
 }

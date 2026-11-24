@@ -66,7 +66,8 @@ export function SnippetDrawer({ open, snippets, onClose, onSend }: SnippetDrawer
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
-            className="absolute top-0 right-0 bottom-0 z-40 flex w-[340px] max-w-[85%] flex-col border-l border-white/10 bg-[#0B0B0E] shadow-2xl"
+            role="dialog" aria-label="Quick snippets" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') onClose?.(); }}
+            className="snippet-sheet absolute top-0 right-0 bottom-0 z-40 flex flex-col shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-white/[0.08] px-3.5 py-2.5">
               <div className="flex items-center gap-2">
@@ -87,7 +88,8 @@ export function SnippetDrawer({ open, snippets, onClose, onSend }: SnippetDrawer
                 <button
                   type="button"
                   onClick={onClose}
-                  aria-label="Close snippets"
+                  autoFocus
+                aria-label="Close snippets"
                   className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-zinc-400 hover:text-white"
                 >
                   <X className="h-4 w-4" />

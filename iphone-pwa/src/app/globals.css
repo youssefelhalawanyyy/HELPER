@@ -1,4 +1,11 @@
 @import "tailwindcss";
+@import "./console.css";
+
+@theme inline {
+  --text-console-micro: var(--console-micro);
+  --text-console-caption: var(--console-caption);
+  --text-console-body: var(--console-body);
+}
 
 :root {
   color-scheme: only dark;
@@ -20,7 +27,7 @@ body {
   width: 100vw;
   margin: 0;
   padding: 0;
-  background: #000000;
+  background: var(--canvas);
   overflow: hidden;
   color: #f2f3f7;
   font-family: 'Archivo', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -42,44 +49,31 @@ button:focus-visible {
 
 /* Signature condensed display typography */
 .disp {
-  font-stretch: 68%;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-  line-height: 0.88;
-  text-transform: uppercase;
+  font-weight: 720;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
 }
 
 /* Signature DevDeck hardware tile */
-.tile {
+.tile, .hw-panel {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, #16171c, #101114);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 22px;
+  background: var(--panel-fill);
+  border: 1px solid var(--stroke);
+  border-radius: var(--panel-radius);
   text-align: left;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 10px 24px -12px #000000;
+  box-shadow: var(--panel-shadow);
 }
 
 .sub {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: #7c8190;
+  font: 600 var(--console-micro)/1.3 ui-monospace, Menlo, monospace;
+  letter-spacing: .065em;
+  color: var(--muted-ink);
   text-transform: uppercase;
 }
 
 .num {
   font-variant-numeric: tabular-nums;
-}
-
-.hw-panel {
-  background: linear-gradient(180deg, #16171c, #101114);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 10px 24px -12px #000000;
 }
 
 .hw-key {
@@ -128,7 +122,10 @@ button:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   * {
-    animation-duration: 0s !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -163,8 +160,8 @@ dialog.hw-dialog {
   margin: auto;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 22px;
-  background: linear-gradient(180deg, #16171c, #101114);
+  border-radius: var(--panel-radius);
+  background: var(--panel-fill);
   color: #f2f3f7;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.07),

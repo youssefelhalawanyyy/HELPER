@@ -4,9 +4,9 @@
   "description": "OLED hardware macro deck, Antigravity IDE live mirror, trackpad & PC/Mac Doctor for iPhone",
   "start_url": "/",
   "display": "standalone",
-  "orientation": "landscape",
-  "background_color": "#000000",
-  "theme_color": "#000000",
+  "orientation": "any",
+  "background_color": "#101019",
+  "theme_color": "#101019",
   "icons": [
     {
       "src": "/icons/icon-192.png",

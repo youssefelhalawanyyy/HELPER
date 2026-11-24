@@ -180,7 +180,7 @@ export function BrushedDial({
       aria-valuemax={100}
       tabIndex={0}
       style={{ width: size, height: size }}
-      className="relative cursor-grab touch-none"
+      className="relative cursor-grab touch-none overflow-clip"
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         lastAngRef.current = getAngle(e);

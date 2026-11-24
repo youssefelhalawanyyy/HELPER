@@ -74,8 +74,8 @@ export function HardwareDialog({ open, title, onClose, children }: HardwareDialo
       {...({ closedby: 'any' } as Record<string, string>)}
       className="hw-dialog w-full"
     >
-      <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-2.5">
-        <h1 id={titleId} className="text-xs font-semibold tracking-wider text-white uppercase">
+      <div className="sheet-heading flex items-center justify-between border-b border-white/[0.08] px-5 py-4">
+        <h1 id={titleId} className="text-lg font-bold tracking-tight text-white">
           {title}
         </h1>
         <button

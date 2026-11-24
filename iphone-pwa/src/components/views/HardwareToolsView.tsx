@@ -254,11 +254,11 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   // --- Wireless Trackpad + Presentation Remote Mode ---
   if (subTab === 'remote') {
     return (
-      <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
+      <div className="screen-grid layout-trackpad">
         {/* Left: Smooth Multi-Touch Wireless Trackpad */}
         <div className="tile flex flex-col gap-2 p-3">
           <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <MousePointer2 className="h-4 w-4 text-[#22d3ee]" />
               <span className="disp text-[22px]">Trackpad</span>
@@ -278,7 +278,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     soundEngine.playClick();
                     setPadPreset(id);
                   }}
-                  className="rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
+                  className="rounded-full px-2 py-0.5 text-console-micro font-extrabold uppercase"
                   style={{
                     background: padPreset === id ? '#22d3ee' : 'rgba(255,255,255,0.06)',
                     color: padPreset === id ? '#041317' : '#7c8190',
@@ -293,7 +293,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setSubTab('controls');
                 }}
-                className="ml-1 flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-[9.5px] font-bold text-zinc-200"
+                className="ml-1 flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-console-caption font-bold text-zinc-200"
               >
                 <Sliders className="h-3 w-3 text-[#fbbf24]" />
                 Dial
@@ -356,13 +356,9 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const prev = pointersRef.current.get(e.pointerId);
               if (!prev) return;
 
-              const rawScreenDx = e.clientX - prev.x;
-              const rawScreenDy = e.clientY - prev.y;
+              const rawDx = e.clientX - prev.x;
+              const rawDy = e.clientY - prev.y;
               pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-              const isPortrait = window.innerHeight > window.innerWidth;
-              const rawDx = isPortrait ? rawScreenDy : rawScreenDx;
-              const rawDy = isPortrait ? -rawScreenDx : rawScreenDy;
               const dist = Math.hypot(rawDx, rawDy);
               padMovedDistRef.current += dist;
 
@@ -465,7 +461,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
           >
             <div className="pointer-events-none text-center">
               <div className="sub">1-Finger Move &amp; Tap · 2-Finger Scroll &amp; Right-Click</div>
-              <div className="mt-0.5 text-[9px] text-[#22d3ee]/70">
+              <div className="mt-0.5 text-console-caption text-[#22d3ee]/70">
                 One-Euro Filter · 120Hz Native CoreGraphics Interpolation
               </div>
             </div>
@@ -479,7 +475,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 deck.sendEvent({ type: 'trackpad:click', payload: { button: 'left' } });
               }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10px] font-extrabold text-white"
+              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-console-caption font-extrabold text-white"
             >
               LEFT CLICK
             </motion.button>
@@ -492,7 +488,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 setDragLock(next);
                 deck.sendEvent({ type: 'trackpad:drag', payload: { down: next } });
               }}
-              className="rounded-xl border py-2 text-[10px] font-extrabold"
+              className="rounded-xl border py-2 text-console-caption font-extrabold"
               style={{
                 background: dragLock ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.06)',
                 borderColor: dragLock ? '#34d399' : 'rgba(255,255,255,0.1)',
@@ -508,7 +504,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 soundEngine.playClick();
                 deck.sendEvent({ type: 'trackpad:click', payload: { button: 'right' } });
               }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-[10px] font-extrabold text-[#22d3ee]"
+              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-console-caption font-extrabold text-[#22d3ee]"
             >
               RIGHT CLICK
             </motion.button>
@@ -528,7 +524,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setRemoteRightTab('controller');
                 }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
                   background: remoteRightTab === 'controller' ? '#1f222c' : 'transparent',
                   color: remoteRightTab === 'controller' ? '#a78bfa' : '#7c8190',
@@ -543,7 +539,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setRemoteRightTab('slides');
                 }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
                   background: remoteRightTab === 'slides' ? '#1f222c' : 'transparent',
                   color: remoteRightTab === 'slides' ? '#34d399' : '#7c8190',
@@ -553,7 +549,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 Slides
               </button>
             </div>
-            <span className="font-mono-tech text-[8px] text-zinc-500 uppercase">L1 / D-PAD</span>
+            <span className="font-mono-tech text-console-micro text-zinc-500 uppercase">L1 / D-PAD</span>
           </div>
 
           {remoteRightTab === 'controller' ? (
@@ -573,7 +569,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => fireShortcut(b.id)}
-                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-[8.5px] font-extrabold whitespace-nowrap"
+                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-console-micro font-extrabold whitespace-nowrap"
                     style={{ color: b.color }}
                   >
                     {b.label}
@@ -645,7 +641,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => fireShortcut('nav.escape')}
-                    className="flex flex-col items-center justify-center rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 text-[8.5px] font-extrabold text-[#ff5d6c]"
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/15 text-console-micro font-extrabold text-[#ff5d6c]"
                   >
                     <X className="h-3.5 w-3.5" />
                     ESC
@@ -654,7 +650,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => fireShortcut('nav.space')}
-                    className="flex flex-col items-center justify-center rounded-xl border border-[#34d399]/40 bg-[#34d399]/15 text-[8.5px] font-extrabold text-[#34d399]"
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#34d399]/40 bg-[#34d399]/15 text-console-micro font-extrabold text-[#34d399]"
                   >
                     <Play className="h-3.5 w-3.5 fill-current" />
                     SPACE
@@ -663,7 +659,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => fireShortcut('nav.backspace')}
-                    className="flex flex-col items-center justify-center rounded-xl border border-[#fbbf24]/40 bg-[#fbbf24]/15 text-[8.5px] font-extrabold text-[#fbbf24]"
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#fbbf24]/40 bg-[#fbbf24]/15 text-console-micro font-extrabold text-[#fbbf24]"
                   >
                     <Delete className="h-3.5 w-3.5" />
                     DEL
@@ -672,7 +668,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.92 }}
                     onClick={() => fireShortcut('system.undo')}
-                    className="flex flex-col items-center justify-center rounded-xl border border-[#a78bfa]/40 bg-[#a78bfa]/15 text-[8.5px] font-extrabold text-[#c4b5fd]"
+                    className="flex flex-col items-center justify-center rounded-xl border border-[#a78bfa]/40 bg-[#a78bfa]/15 text-console-micro font-extrabold text-[#c4b5fd]"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                     UNDO
@@ -695,7 +691,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                     type="button"
                     whileTap={{ scale: 0.93 }}
                     onClick={() => fireShortcut(b.id)}
-                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-[8.5px] font-extrabold whitespace-nowrap text-zinc-200"
+                    className="h-7 rounded-xl border border-white/[0.08] bg-white/[0.05] text-console-micro font-extrabold whitespace-nowrap text-zinc-200"
                   >
                     {b.label}
                   </motion.button>
@@ -737,7 +733,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   style={{ boxShadow: '0 4px 0 #14664a' }}
                 >
                   <ChevronRight className="h-8 w-8" />
-                  <span className="mt-1 text-[10px] font-extrabold uppercase tracking-wider">
+                  <span className="mt-1 text-console-caption font-extrabold uppercase tracking-wider">
                     NEXT SLIDE
                   </span>
                 </motion.button>
@@ -753,7 +749,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                       payload: { requestId: makeRequestId(), action: 'start' },
                     });
                   }}
-                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#34d399]"
+                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-console-caption font-bold text-[#34d399]"
                 >
                   <Play className="h-3 w-3 fill-current" />
                   Present
@@ -767,7 +763,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                       payload: { requestId: makeRequestId(), action: 'escape' },
                     });
                   }}
-                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-[10px] font-bold text-[#ff5d6c]"
+                  className="flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.05] py-1.5 text-console-caption font-bold text-[#ff5d6c]"
                 >
                   <X className="h-3 w-3" />
                   Exit (Esc)
@@ -782,13 +778,11 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
 
   return (
     <div
-      className="grid h-full gap-2"
-      style={{ gridTemplateColumns: '195px 1fr 1fr', gridTemplateRows: '1fr 1fr' }}
+      className="screen-grid layout-hardware"
     >
       {/* Left Spanning Rotary Smart Dial + Remote Switch */}
       <div
         className="tile flex flex-col items-center justify-between p-3"
-        style={{ gridRow: '1 / span 2', gridColumn: 1 }}
       >
         <div
           className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full"
@@ -838,7 +832,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             soundEngine.playClick();
             setSubTab('remote');
           }}
-          className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[#22d3ee]/35 bg-[#22d3ee]/10 py-1.5 text-[9.5px] font-extrabold text-[#22d3ee]"
+          className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[#22d3ee]/35 bg-[#22d3ee]/10 py-1.5 text-console-caption font-extrabold text-[#22d3ee]"
         >
           <MousePointer2 className="h-3 w-3" />
           TRACKPAD &amp; SLIDES
@@ -866,7 +860,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   payload: { requestId: makeRequestId(), position: opt.id },
                 });
               }}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.05] py-1.5 text-[10px] font-extrabold text-zinc-200 hover:border-[#22d3ee]/50 hover:text-[#22d3ee]"
+              className="rounded-lg border border-white/[0.08] bg-white/[0.05] py-1.5 text-console-caption font-extrabold text-zinc-200 hover:border-[#22d3ee]/50 hover:text-[#22d3ee]"
             >
               {opt.label}
             </motion.button>
@@ -942,7 +936,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 role="button"
                 tabIndex={0}
                 onClick={() => setFlipAction(a)}
-                className="rounded-full px-1.5 py-0.5 text-[8.5px] font-extrabold uppercase"
+                className="rounded-full px-1.5 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
                   background: flipAction === a ? '#a78bfa' : 'rgba(255,255,255,.07)',
                   color: flipAction === a ? '#090612' : '#7c8190',

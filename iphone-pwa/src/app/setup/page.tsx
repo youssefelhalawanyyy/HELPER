@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Brand } from '@/components/shell/LeftNavRail';
 import {
   Activity,
   ArrowLeft,
@@ -202,39 +203,13 @@ npm run live`;
 }`;
 
   return (
-    <div className="deck-scroll fixed inset-0 overflow-y-auto bg-[#030407] text-[#f2f3f7] select-text">
-      {/* Subtle Ambient Top Glow */}
-      <div
-        className="pointer-events-none fixed inset-x-0 top-0 h-[360px] opacity-25 blur-[110px]"
-        style={{
-          background:
-            os === 'windows'
-              ? 'radial-gradient(60% 80% at 50% 0%, #2563eb 0%, #22d3ee 45%, transparent 100%)'
-              : 'radial-gradient(60% 80% at 50% 0%, #34d399 0%, #22d3ee 45%, transparent 100%)',
-        }}
-      />
-
+    <div className="setup-screen deck-scroll fixed inset-0 overflow-y-auto bg-[#030407] text-[#f2f3f7] select-text">
       {/* Sticky Top Navigation */}
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-black/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-3">
           <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icons/icon-192.png"
-              alt="DevDeck logo"
-              className="h-8 w-8 rounded-lg border border-[#22d3ee]/40 object-cover shadow-[0_0_12px_rgba(34,211,238,0.35)]"
-            />
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="disp text-[18px] tracking-wide text-white">DevDeck</span>
-                <span className="rounded-full border border-[#22d3ee]/30 bg-[#22d3ee]/10 px-2 py-0.5 font-mono-tech text-[10px] font-bold text-[#22d3ee]">
-                  SETUP PORTAL
-                </span>
-              </div>
-              <div className="text-[11px] text-zinc-400">
-                Mac &amp; Windows Bridge Installer for iPhone
-              </div>
-            </div>
+            <Brand />
+            <span className="setup-label">Setup guide</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -260,9 +235,9 @@ npm run live`;
 
       <main className="relative z-10 mx-auto max-w-5xl space-y-10 px-5 py-8 pb-20">
         {/* Hero */}
-        <section className="rounded-3xl border border-white/[0.08] bg-gradient-to-b from-[#13151c] to-[#0b0d12] p-6 sm:p-8">
+        <section className="setup-hero">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="max-w-2xl space-y-2.5">
+            <div className="setup-intro max-w-2xl space-y-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-[#34d399]/30 bg-[#34d399]/10 px-2.5 py-1 text-[11px] font-bold text-[#34d399]">
                   <Sparkles className="h-3.5 w-3.5" />
@@ -276,7 +251,7 @@ npm run live`;
               </div>
 
               <h1 className="disp text-[34px] leading-[0.95] text-white sm:text-[44px]">
-                Install DevDeck Bridge in 60 Seconds
+                Set up DevDeck Bridge
               </h1>
               <p className="text-sm leading-relaxed text-zinc-300">
                 Run the lightweight local bridge on your <strong>Windows PC</strong> or{' '}
@@ -301,39 +276,9 @@ npm run live`;
           </div>
 
           {/* Direct Sublinks Bar */}
-          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-white/[0.07] pt-5">
-            <span className="mr-1 font-mono-tech text-[11px] font-bold tracking-wider text-zinc-400 uppercase">
-              Choose Computer OS:
-            </span>
-            <button
-              type="button"
-              onClick={() => switchOs('windows')}
-              className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-extrabold transition-all"
-              style={{
-                background: os === 'windows' ? '#2563eb' : 'rgba(255,255,255,0.04)',
-                borderColor: os === 'windows' ? '#60a5fa' : 'rgba(255,255,255,0.1)',
-                color: os === 'windows' ? '#ffffff' : '#9ca3af',
-                boxShadow: os === 'windows' ? '0 0 24px -6px #2563eb' : 'none',
-              }}
-            >
-              <Laptop className="h-4 w-4" />
-              Windows 10 / 11 Guide (#windows)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => switchOs('mac')}
-              className="flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-extrabold transition-all"
-              style={{
-                background: os === 'mac' ? '#34d399' : 'rgba(255,255,255,0.04)',
-                borderColor: os === 'mac' ? '#6ee7b7' : 'rgba(255,255,255,0.1)',
-                color: os === 'mac' ? '#04130c' : '#9ca3af',
-                boxShadow: os === 'mac' ? '0 0 24px -6px #34d399' : 'none',
-              }}
-            >
-              <Terminal className="h-4 w-4" />
-              macOS Guide (#mac)
-            </button>
+          <div className="setup-platforms" role="group" aria-label="Computer operating system">
+            <button type="button" aria-pressed={os === 'windows'} onClick={() => switchOs('windows')}><Laptop size={16} />Windows 10 / 11</button>
+            <button type="button" aria-pressed={os === 'mac'} onClick={() => switchOs('mac')}><Terminal size={16} />macOS</button>
           </div>
         </section>
 

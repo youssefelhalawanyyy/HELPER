@@ -56,7 +56,7 @@ export function MacInspectorView({
   const t = deck.macTelemetry;
 
   return (
-    <div className="grid h-full gap-2" style={{ gridTemplateColumns: '1fr 1.05fr 1.15fr' }}>
+    <div className="screen-grid layout-inspector">
       {/* Column 1: Power, Per-Core CPU, Bluetooth/AirPods & Displays */}
       <div className="tile flex min-h-0 flex-col gap-2 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#34d399]" />
@@ -78,16 +78,16 @@ export function MacInspectorView({
         {/* Deep Battery Card */}
         <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
           <div className="mb-1 flex items-center justify-between">
-            <span className="flex items-center gap-1 text-[10px] font-bold text-[#34d399]">
+            <span className="flex items-center gap-1 text-console-caption font-bold text-[#34d399]">
               <BatteryCharging className="h-3.5 w-3.5" />
               {deck.stats.batteryPct !== null ? `${deck.stats.batteryPct}%` : '--'} ·{' '}
               {t?.batteryTimeRemaining || '--'}
             </span>
             <span className="num sub">{t ? `Up ${formatUptime(t.uptimeSec)}` : '--'}</span>
           </div>
-          <div className="num grid grid-cols-3 gap-1 text-center text-[9.5px]">
+          <div className="num grid grid-cols-3 gap-1 text-center text-console-caption">
             <div className="rounded-lg bg-white/[0.04] py-1">
-              <div className="sub !text-[8px]">Health</div>
+              <div className="sub !text-console-micro">Health</div>
               <div className="font-bold text-white">
                 {t?.batteryHealthPct !== null && t?.batteryHealthPct !== undefined
                   ? `${t.batteryHealthPct}%`
@@ -95,11 +95,11 @@ export function MacInspectorView({
               </div>
             </div>
             <div className="rounded-lg bg-white/[0.04] py-1">
-              <div className="sub !text-[8px]">Cycles</div>
+              <div className="sub !text-console-micro">Cycles</div>
               <div className="font-bold text-white">{t?.batteryCycles ?? '--'}</div>
             </div>
             <div className="rounded-lg bg-white/[0.04] py-1">
-              <div className="sub !text-[8px]">Power</div>
+              <div className="sub !text-console-micro">Power</div>
               <div className="font-bold text-[#fbbf24]">
                 {t?.batteryWattage ? `${t.batteryWattage}W` : 'Batt'}
               </div>
@@ -110,8 +110,8 @@ export function MacInspectorView({
         {/* Per-Core CPU Bar Chart */}
         <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
           <div className="mb-1 flex items-center justify-between">
-            <span className="sub !text-[8.5px]">Per-Core CPU ({t?.cpuCores.length || 0})</span>
-            <span className="num text-[9.5px] font-bold text-[#22d3ee]">
+            <span className="sub !text-console-micro">Per-Core CPU ({t?.cpuCores.length || 0})</span>
+            <span className="num text-console-caption font-bold text-[#22d3ee]">
               {isConnected ? `${deck.stats.cpuPct}% avg` : '--'}
             </span>
           </div>
@@ -134,13 +134,13 @@ export function MacInspectorView({
         <div className="deck-scroll min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
           <div className="flex items-center gap-1">
             <Bluetooth className="h-3 w-3 text-[#60a5fa]" />
-            <span className="sub !text-[8.5px]">Bluetooth &amp; Peripherals</span>
+            <span className="sub !text-console-micro">Bluetooth &amp; Peripherals</span>
           </div>
           {t?.bluetoothDevices.length ? (
             t.bluetoothDevices.map((dev) => (
               <div
                 key={dev.name}
-                className="flex items-center justify-between rounded-lg bg-white/[0.04] px-2 py-1 text-[10px]"
+                className="flex items-center justify-between rounded-lg bg-white/[0.04] px-2 py-1 text-console-caption"
               >
                 <span className="truncate font-semibold text-zinc-200">{dev.name}</span>
                 <span className="num shrink-0 font-bold text-[#34d399]">
@@ -149,7 +149,7 @@ export function MacInspectorView({
               </div>
             ))
           ) : (
-            <div className="sub text-[9px]">
+            <div className="sub text-console-caption">
               {isConnected ? 'No Bluetooth peripherals connected' : 'Connect Mac to inspect'}
             </div>
           )}
@@ -162,7 +162,7 @@ export function MacInspectorView({
         <div className="disp text-[22px]">Control &amp; Dock</div>
 
         {/* Network + Speed Test Strip */}
-        <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+        <div className="grid grid-cols-2 gap-1.5 text-console-caption">
           <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
             <div className="flex items-center justify-between gap-1 font-bold text-[#22d3ee]">
               <span className="flex min-w-0 items-center gap-1">
@@ -176,7 +176,7 @@ export function MacInspectorView({
                   soundEngine.playClick();
                   deck.sendEvent({ type: 'speedtest:run', payload: { requestId: makeRequestId() } });
                 }}
-                className="flex shrink-0 items-center gap-0.5 rounded-full bg-[#22d3ee]/20 px-1.5 py-0.5 text-[8px] font-extrabold text-[#22d3ee]"
+                className="flex shrink-0 items-center gap-0.5 rounded-full bg-[#22d3ee]/20 px-1.5 py-0.5 text-console-micro font-extrabold text-[#22d3ee]"
               >
                 {deck.speedTest.running ? (
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -186,7 +186,7 @@ export function MacInspectorView({
                 TEST
               </button>
             </div>
-            <div className="num mt-0.5 text-[9px] text-[#8b90a0]">
+            <div className="num mt-0.5 text-console-caption text-[#8b90a0]">
               {deck.speedTest.downMbps !== null
                 ? `↓${deck.speedTest.downMbps} ↑${deck.speedTest.upMbps ?? 0} Mbps`
                 : t?.pingMs !== null && t?.pingMs !== undefined
@@ -200,7 +200,7 @@ export function MacInspectorView({
               <Speaker className="h-3 w-3 shrink-0" />
               <span className="truncate">{t?.audioOutputDevice || 'Speakers'}</span>
             </div>
-            <div className="mt-0.5 flex items-center gap-1 text-[9px]">
+            <div className="mt-0.5 flex items-center gap-1 text-console-caption">
               <Shield className="h-2.5 w-2.5" style={{ color: t?.vpnActive ? '#34d399' : '#6b7080' }} />
               <span style={{ color: t?.vpnActive ? '#34d399' : '#8b90a0' }}>
                 {t?.vpnActive ? 'VPN Active' : 'No VPN'}
@@ -219,7 +219,7 @@ export function MacInspectorView({
               soundEngine.playClick();
               deck.sendEvent({ type: 'system:toggleMic', payload: { requestId: makeRequestId() } });
             }}
-            className="flex items-center justify-center gap-1.5 rounded-xl border py-2 text-[10px] font-extrabold"
+            className="flex items-center justify-center gap-1.5 rounded-xl border py-2 text-console-caption font-extrabold"
             style={{
               background: t?.micMuted ? 'rgba(255,93,108,.16)' : 'rgba(52,211,153,.14)',
               borderColor: t?.micMuted ? 'rgba(255,93,108,.4)' : 'rgba(52,211,153,.35)',
@@ -241,7 +241,7 @@ export function MacInspectorView({
                 payload: { requestId: makeRequestId() },
               });
             }}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] py-2 text-[10px] font-extrabold text-[#fbbf24]"
+            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] py-2 text-console-caption font-extrabold text-[#fbbf24]"
           >
             {t?.darkMode ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
             {t?.darkMode ? 'DARK MODE' : 'LIGHT MODE'}
@@ -250,7 +250,7 @@ export function MacInspectorView({
 
         {/* One-Tap Mac App Dock / Switcher */}
         <div className="flex min-h-0 flex-1 flex-col">
-          <span className="sub mb-1 !text-[8.5px]">One-Tap Mac App Dock</span>
+          <span className="sub mb-1 !text-console-micro">One-Tap Mac App Dock</span>
           <div className="grid flex-1 grid-cols-2 gap-1.5">
             {FAVORITE_DOCK_APPS.map((app) => {
               const running = t?.runningApps.some(
@@ -268,7 +268,7 @@ export function MacInspectorView({
                       payload: { requestId: makeRequestId(), appName: app.name },
                     });
                   }}
-                  className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.04] px-2.5 py-1 text-[10.5px] font-bold text-zinc-200 hover:border-[#22d3ee]/45"
+                  className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.04] px-2.5 py-1 text-console-caption font-bold text-zinc-200 hover:border-[#22d3ee]/45"
                 >
                   <span className="truncate">{app.label}</span>
                   <i
@@ -289,7 +289,7 @@ export function MacInspectorView({
 
         {/* Active Window + Browser Tab -> Open on iPhone */}
         <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold text-white">
+          <div className="flex items-center gap-1.5 text-console-caption font-bold text-white">
             <AppWindow className="h-3 w-3 shrink-0 text-[#a78bfa]" />
             <span className="truncate">
               {t?.activeWindowTitle || deck.activeApp.appName || 'macOS'}
@@ -299,7 +299,7 @@ export function MacInspectorView({
             <div className="mt-1.5 flex items-center justify-between gap-1.5 rounded-lg bg-white/[0.04] px-2 py-1">
               <div className="flex min-w-0 items-center gap-1">
                 <Globe className="h-3 w-3 shrink-0 text-[#22d3ee]" />
-                <span className="truncate text-[9.5px] text-zinc-300">
+                <span className="truncate text-console-caption text-zinc-300">
                   {t.activeBrowserTitle || t.activeBrowserUrl}
                 </span>
               </div>
@@ -307,20 +307,20 @@ export function MacInspectorView({
                 href={t.activeBrowserUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-0.5 text-[8.5px] font-extrabold text-[#041317]"
+                className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-0.5 text-console-micro font-extrabold text-[#041317]"
               >
                 <ExternalLink className="h-2.5 w-2.5" />
                 Open
               </a>
             </div>
           ) : (
-            <div className="sub mt-1 !text-[8.5px]">No active browser tab detected</div>
+            <div className="sub mt-1 !text-console-micro">No active browser tab detected</div>
           )}
         </div>
 
         {/* Auto-Detected package.json Scripts */}
         <div>
-          <span className="sub mb-1 block !text-[8.5px]">
+          <span className="sub mb-1 block !text-console-micro">
             Auto-Detected package.json Scripts
           </span>
           <div className="flex flex-wrap gap-1">
@@ -336,31 +336,31 @@ export function MacInspectorView({
                   });
                   onNavigateToMonitor?.();
                 }}
-                className="flex items-center gap-1 rounded-full border border-[#34d399]/30 bg-[#34d399]/10 px-2 py-0.5 text-[9.5px] font-bold text-[#34d399] hover:bg-[#34d399]/20"
+                className="flex items-center gap-1 rounded-full border border-[#34d399]/30 bg-[#34d399]/10 px-2 py-0.5 text-console-caption font-bold text-[#34d399] hover:bg-[#34d399]/20"
               >
                 <Play className="h-2.5 w-2.5 fill-current" />
                 {sc.name}
               </button>
             ))}
             {!t?.projectScripts.length && (
-              <span className="sub !text-[8.5px]">No scripts loaded</span>
+              <span className="sub !text-console-micro">No scripts loaded</span>
             )}
           </div>
         </div>
 
         {/* Recent ~/Downloads & ~/Desktop Files */}
         <div className="deck-scroll min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
-          <span className="sub !text-[8.5px]">Recent Downloads &amp; Desktop</span>
+          <span className="sub !text-console-micro">Recent Downloads &amp; Desktop</span>
           {(t?.recentFiles || []).map((f) => (
             <div
               key={`${f.folder}-${f.name}`}
-              className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-2 py-1 text-[9.5px]"
+              className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-2 py-1 text-console-caption"
             >
               <div className="flex min-w-0 items-center gap-1.5">
                 <FileText className="h-3 w-3 shrink-0 text-[#fbbf24]" />
                 <span className="truncate font-medium text-zinc-200">{f.name}</span>
               </div>
-              <span className="num sub shrink-0 !text-[8px]">
+              <span className="num sub shrink-0 !text-console-micro">
                 {f.folder === 'Downloads' ? 'DL' : 'DT'} · {f.sizeKb}KB
               </span>
             </div>
