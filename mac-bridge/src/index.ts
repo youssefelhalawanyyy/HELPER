@@ -43,6 +43,7 @@ import { createApiRouter } from './routes/api.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
 import { NetworkCommandService } from './services/networkCommandService.js';
+import { PowerThermalService } from './services/powerThermalService.js';
 import { SystemDoctorService } from './services/systemDoctorService.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
@@ -165,6 +166,10 @@ const networkCommandService = new NetworkCommandService(
   (state) => broadcast({ type: 'network:state', payload: state }),
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
+const powerThermalService = new PowerThermalService(
+  (state) => broadcast({ type: 'power:state', payload: state }),
+  (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
+);
 
 // Live bidirectional Antigravity MCP state
 let activeQuestion: AgentQuestion | null = null;
@@ -188,6 +193,7 @@ statsService.start(2000);
 activeAppPoller.start(1500);
 antigravityService.start(1200);
 setTimeout(() => portService.start(4000), 300);
+powerThermalService.start(1600);
 setTimeout(() => gitService.start(5000), 500);
 setTimeout(() => clipboardTracker.start(1800), 700);
 setTimeout(() => processService.start(5000), 900);
@@ -772,6 +778,45 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'power:refresh': {
+      const { requestId } = msg.payload;
+      await powerThermalService.refresh();
+      reply(requestId, true, 'Power & thermal sensors refreshed');
+      return;
+    }
+
+    case 'power:action': {
+      const { requestId, action } = msg.payload;
+      try {
+        const message = await powerThermalService.runPowerAction(action);
+        reply(requestId, true, message);
+      } catch (err) {
+        reply(requestId, false, err instanceof Error ? err.message : 'Power action failed');
+      }
+      return;
+    }
+
+    case 'power:fanMode': {
+      const { requestId, mode } = msg.payload;
+      const message = await powerThermalService.setFanMode(mode);
+      reply(requestId, true, message);
+      return;
+    }
+
+    case 'power:profile': {
+      const { requestId, profile } = msg.payload;
+      const message = await powerThermalService.setPowerProfile(profile);
+      reply(requestId, true, message);
+      return;
+    }
+
+    case 'power:guardConfig': {
+      const { requestId, ...cfg } = msg.payload;
+      const message = powerThermalService.updateGuardConfig(cfg);
+      reply(requestId, true, message);
+      return;
+    }
+
     case 'speedtest:run': {
       if (latestSpeedTest.running) {
         reply(msg.payload.requestId, false, 'Speed test already running');
@@ -918,6 +963,7 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'antigravity:state', payload: antigravityService.getLatest() });
   sendTo(ws, { type: 'doctor:state', payload: systemDoctorService.getLatest() });
   sendTo(ws, { type: 'network:state', payload: networkCommandService.getLatest() });
+  sendTo(ws, { type: 'power:state', payload: powerThermalService.getLatest() });
   sendTo(ws, { type: 'agent:progress', payload: latestProgress });
   sendTo(ws, { type: 'speedtest:state', payload: latestSpeedTest });
   if (activeQuestion) {
@@ -1040,5 +1086,6 @@ process.on('SIGINT', () => {
   processService.stop();
   deepTelemetry.stop();
   antigravityService.stop();
+  powerThermalService.stop();
   server.close(() => process.exit(0));
 });

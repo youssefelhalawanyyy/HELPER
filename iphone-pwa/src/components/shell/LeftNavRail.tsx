@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Activity,
   ArrowUpRight,
+  BatteryCharging,
   BookOpen,
   Bot,
   Clock3,
@@ -33,6 +34,7 @@ export const PAGES = [
   { id: 'launch', label: 'Launch', title: 'Launch Control', icon: Rocket, accent: '#edbb9e' },
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#efb6c7' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#9cd5ca' },
+  { id: 'power', label: 'Power Guard', title: 'Power & Thermal', icon: BatteryCharging, accent: '#a8e6cf' },
 ] as const;
 
 export type DeckViewId = (typeof PAGES)[number]['id'];

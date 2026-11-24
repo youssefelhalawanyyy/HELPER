@@ -434,6 +434,54 @@ export interface NetworkCommandState {
   updatedAt: number;
 }
 
+export type PowerAction =
+  | 'low_power_toggle'
+  | 'display_sleep'
+  | 'lock'
+  | 'sleep'
+  | 'restart'
+  | 'shutdown';
+
+export type FanMode = 'auto' | 'quiet' | 'balanced' | 'max';
+export type PowerProfile = 'eco' | 'balanced' | 'performance';
+
+export interface PowerThermalState {
+  platform: 'mac' | 'windows' | 'linux';
+  hardwareModel: string;
+  cpuModel: string;
+  hasBattery: boolean;
+  batteryPct: number;
+  isCharging: boolean;
+  acConnected: boolean;
+  timeRemainingMin: number | null;
+  cycleCount: number | null;
+  healthPct: number | null;
+  designCapacityMah: number | null;
+  maxCapacityMah: number | null;
+  voltageV: number | null;
+  amperageMa: number | null;
+  powerDrawW: number | null;
+  cpuTempC: number | null;
+  gpuTempC: number | null;
+  batteryTempC: number | null;
+  thermalPressure: 'Nominal' | 'Moderate' | 'Heavy' | 'Critical';
+  fanless: boolean;
+  fanRpm: number[];
+  fanMaxRpm: number | null;
+  fanControlSupported: boolean;
+  fanMode: FanMode;
+  fanNote: string;
+  lowPowerMode: boolean;
+  powerProfile: PowerProfile;
+  chargeGuardEnabled: boolean;
+  chargeGuardPct: number;
+  overheatGuardEnabled: boolean;
+  overheatTempC: number;
+  lowBatteryGuardEnabled: boolean;
+  lastAlertMessage: string | null;
+  updatedAt: number;
+}
+
 export type ServerEvent =
   | { type: 'hello'; payload: BridgeHello }
   | { type: 'config:sync'; payload: DevDeckPublicConfig }
@@ -456,6 +504,7 @@ export type ServerEvent =
   | { type: 'antigravity:diff'; payload: AntigravityFileDiff }
   | { type: 'doctor:state'; payload: SystemDoctorReport }
   | { type: 'network:state'; payload: NetworkCommandState }
+  | { type: 'power:state'; payload: PowerThermalState }
   | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
@@ -517,4 +566,19 @@ export type ClientEvent =
   | { type: 'network:speedtest'; payload: { requestId: string } }
   | { type: 'network:fix'; payload: { requestId: string; action: NetworkFixAction } }
   | { type: 'network:wifiPassword'; payload: { requestId: string } }
+  | { type: 'power:refresh'; payload: { requestId: string } }
+  | { type: 'power:action'; payload: { requestId: string; action: PowerAction } }
+  | { type: 'power:fanMode'; payload: { requestId: string; mode: FanMode } }
+  | { type: 'power:profile'; payload: { requestId: string; profile: PowerProfile } }
+  | {
+      type: 'power:guardConfig';
+      payload: {
+        requestId: string;
+        chargeGuardEnabled?: boolean;
+        chargeGuardPct?: number;
+        overheatGuardEnabled?: boolean;
+        overheatTempC?: number;
+        lowBatteryGuardEnabled?: boolean;
+      };
+    }
   | { type: 'speedtest:run'; payload: { requestId: string } };

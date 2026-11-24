@@ -293,8 +293,9 @@
   grid-row: span 2;
 }
 .layout-doctor,
-.layout-network {
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 1.4fr);
+.layout-network,
+.layout-power {
+  grid-template-columns: minmax(250px, 1.02fr) minmax(0, 1.38fr);
 }
 .console-footer {
   min-width: 0;

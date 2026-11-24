@@ -72,6 +72,10 @@ const NetworkCommandView = dynamic(
   () => import('@/components/views/NetworkCommandView').then((m) => m.NetworkCommandView),
   { loading: ViewSkeleton },
 );
+const PowerThermalView = dynamic(
+  () => import('@/components/views/PowerThermalView').then((m) => m.PowerThermalView),
+  { loading: ViewSkeleton },
+);
 
 const PAGE_VARIANTS = {
   enter: (dir: number) => ({
@@ -141,6 +145,7 @@ export function DeckShell() {
       void import('@/components/views/HardwareToolsView');
       void import('@/components/views/SystemDoctorView');
       void import('@/components/views/NetworkCommandView');
+      void import('@/components/views/PowerThermalView');
       void import('@/components/views/LiveMonitorView');
       void import('@/components/views/MacInspectorView');
       void import('@/components/views/LaunchControlView');
@@ -521,6 +526,7 @@ export function DeckShell() {
                 {activeView === 'launch' && <LaunchControlView deck={deck} />}
                 {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
                 {activeView === 'network' && <NetworkCommandView deck={deck} />}
+                {activeView === 'power' && <PowerThermalView deck={deck} />}
               </motion.div>
             </AnimatePresence>
           </main>

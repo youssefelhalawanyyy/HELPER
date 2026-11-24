@@ -23,6 +23,7 @@ import type {
   MacDeepTelemetry,
   MediaState,
   NetworkCommandState,
+  PowerThermalState,
   ProfileId,
   ServerEvent,
   SpeedTestState,
@@ -282,6 +283,42 @@ export function useDevDeckSocket() {
     fixLog: [],
     updatedAt: 0,
   });
+  const [powerState, setPowerState] = useState<PowerThermalState>({
+    platform: 'mac',
+    hardwareModel: '',
+    cpuModel: '',
+    hasBattery: true,
+    batteryPct: 0,
+    isCharging: false,
+    acConnected: false,
+    timeRemainingMin: null,
+    cycleCount: null,
+    healthPct: null,
+    designCapacityMah: null,
+    maxCapacityMah: null,
+    voltageV: null,
+    amperageMa: null,
+    powerDrawW: null,
+    cpuTempC: null,
+    gpuTempC: null,
+    batteryTempC: null,
+    thermalPressure: 'Nominal',
+    fanless: false,
+    fanRpm: [],
+    fanMaxRpm: null,
+    fanControlSupported: false,
+    fanMode: 'auto',
+    fanNote: 'Connect computer bridge for live thermals, fan RPM & power control',
+    lowPowerMode: false,
+    powerProfile: 'balanced',
+    chargeGuardEnabled: true,
+    chargeGuardPct: 80,
+    overheatGuardEnabled: true,
+    overheatTempC: 85,
+    lowBatteryGuardEnabled: true,
+    lastAlertMessage: null,
+    updatedAt: 0,
+  });
   const [speedTest, setSpeedTest] = useState<SpeedTestState>({
     running: false,
     downMbps: null,
@@ -306,7 +343,7 @@ export function useDevDeckSocket() {
 
   const triggerFlash = useCallback((kind: AlertFlash['kind'], message: string) => {
     setAlertFlash({ id: makeRequestId(), kind, message });
-    if (kind === 'success') soundEngine.playSuccessChime();
+    if (kind === 'success' || kind === 'warning') soundEngine.playSuccessChime();
     else if (kind === 'error') soundEngine.playErrorThud();
 
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
@@ -429,6 +466,9 @@ export function useDevDeckSocket() {
               break;
             case 'network:state':
               setNetworkState(msg.payload);
+              break;
+            case 'power:state':
+              setPowerState(msg.payload);
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
@@ -590,6 +630,7 @@ export function useDevDeckSocket() {
     antigravityDiff,
     doctorReport,
     networkState,
+    powerState,
     speedTest,
     caffeineActive,
     processes,
