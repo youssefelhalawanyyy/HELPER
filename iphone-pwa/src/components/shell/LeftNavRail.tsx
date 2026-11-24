@@ -9,7 +9,6 @@ import {
   BookOpen,
   Bot,
   Clock3,
-  Code2,
   Command,
   FolderKanban,
   Globe,
@@ -21,7 +20,6 @@ import {
   Network,
   Radar,
   Rocket,
-  Send,
   Server,
 } from 'lucide-react';
 
@@ -42,8 +40,6 @@ export const PAGES = [
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#efb6c7' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#9cd5ca' },
   { id: 'power', label: 'Power Guard', title: 'Power & Thermal', icon: BatteryCharging, accent: '#a8e6cf' },
-  { id: 'api', label: 'API Tester', title: 'API Tester', icon: Send, accent: '#7dd3fc' },
-  { id: 'playground', label: 'Playground', title: 'Code Playground', icon: Code2, accent: '#d8b4fe' },
   { id: 'webtester', label: 'Web Tester', title: 'Responsive Tester', icon: Globe, accent: '#93c5fd' },
   { id: 'webmonitor', label: 'Web Monitor', title: 'Website Monitor', icon: Radar, accent: '#86efac' },
   { id: 'hosting', label: 'Hosting', title: 'Hosting Dashboard', icon: FolderKanban, accent: '#fcd34d' },
