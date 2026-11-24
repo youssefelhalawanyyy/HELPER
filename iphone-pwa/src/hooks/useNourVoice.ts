@@ -37,14 +37,10 @@ interface SpeechRecognitionLike {
 
 const ENV_GEMINI_KEY = (process.env.NEXT_PUBLIC_DEVDECK_DOCTOR_AI_KEY || '').trim();
 const STORAGE_NAME = 'devdeck.nour.name.v1';
-const STORAGE_VOICE = 'devdeck.nour.voice.v3';
+const LOCKED_VOICE = 'Aoede';
 
-export const NEURAL_FEMALE_VOICES = [
-  { id: 'Aoede', label: 'Aoede · 24yo Friend (Locked)' },
-  { id: 'Zephyr', label: 'Zephyr · Bright' },
-  { id: 'Leda', label: 'Leda · Youthful' },
-  { id: 'Autonoe', label: 'Autonoe · Energetic' },
-] as const;
+let clientTtsCursor = 0;
+const clientTtsCooldown = new Map<string, number>();
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -83,27 +79,42 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBuffer | null> {
+async function directGeminiTts(text: string): Promise<ArrayBuffer | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Speak briskly, naturally, and effortlessly at a slightly fast conversational pace (no slow dragging or long pauses), like a warm 24-year-old Egyptian close friend chatting in fluent everyday Cairene Arabic:\n${text}`;
-  for (const model of ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts']) {
+  const styled = `Speak briskly and naturally like a warm 24-year-old Egyptian close friend from Cairo:\n${text}`;
+  const models = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview'];
+  const start = clientTtsCursor % models.length;
+  clientTtsCursor += 1;
+  const now = Date.now();
+
+  for (let i = 0; i < models.length; i += 1) {
+    const model = models[(start + i) % models.length];
+    if ((clientTtsCooldown.get(model) || 0) > now) continue;
+    const ctrl = new AbortController();
+    const t = window.setTimeout(() => ctrl.abort(), 5000);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
         {
           method: 'POST',
+          signal: ctrl.signal,
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: styled }] }],
             generationConfig: {
               responseModalities: ['AUDIO'],
               speechConfig: {
-                voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: LOCKED_VOICE } },
               },
             },
           }),
         },
       );
+      window.clearTimeout(t);
+      if (res.status === 429) {
+        clientTtsCooldown.set(model, Date.now() + 45_000);
+        continue;
+      }
       if (!res.ok) continue;
       const json = (await res.json()) as {
         candidates?: Array<{
@@ -117,7 +128,7 @@ async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBu
       }
       return base64ToArrayBuffer(inline.data);
     } catch {
-      // Try next TTS model
+      window.clearTimeout(t);
     }
   }
   return null;
@@ -129,7 +140,6 @@ async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBu
  */
 export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) => void) {
   const [botName, setBotNameState] = useState('نور');
-  const [voiceName, setVoiceNameState] = useState<string>('Aoede');
   const [phase, setPhase] = useState<NourVoicePhase>('idle');
   const [liveCallOn, setLiveCallOn] = useState(false);
   const [wakeWordOn, setWakeWordOn] = useState(false);
@@ -146,7 +156,6 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const activeListeningRef = useRef(false);
   const turnsRef = useRef<NourChatTurn[]>([]);
   const botNameRef = useRef('نور');
-  const voiceNameRef = useRef('Aoede');
   const mutedRef = useRef(false);
   const abortReqRef = useRef<AbortController | null>(null);
   const restartTimerRef = useRef<number | null>(null);
@@ -165,15 +174,12 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   useEffect(() => { wakeWordRef.current = wakeWordOn; }, [wakeWordOn]);
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { botNameRef.current = botName; }, [botName]);
-  useEffect(() => { voiceNameRef.current = voiceName; }, [voiceName]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   useEffect(() => {
     try {
       const savedName = localStorage.getItem(STORAGE_NAME);
       if (savedName) setBotNameState(savedName);
-      const savedVoice = localStorage.getItem(STORAGE_VOICE);
-      if (savedVoice) setVoiceNameState(savedVoice);
     } catch {
       // Ignore
     }
@@ -183,15 +189,6 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     setBotNameState(v);
     try {
       localStorage.setItem(STORAGE_NAME, v);
-    } catch {
-      // Ignore
-    }
-  }, []);
-
-  const setVoiceName = useCallback((v: string) => {
-    setVoiceNameState(v);
-    try {
-      localStorage.setItem(STORAGE_VOICE, v);
     } catch {
       // Ignore
     }
@@ -351,7 +348,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
         source.start(0);
         orbRafRef.current = requestAnimationFrame(animateOrb);
-        void startBargeInVad();
+        // Only arm getUserMedia VAD on desktop (iOS Safari holds audio session & breaks turn-2 SpeechRecognition!)
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (!isIOS) {
+          void startBargeInVad();
+        }
       } catch {
         stopSpeaking();
         setPhase('idle');
@@ -437,9 +438,9 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             },
             body: JSON.stringify({
               message: clean,
-              history: nextHistory.slice(-8).map((t) => ({ role: t.role, text: t.text })),
+              history: nextHistory.slice(-14).map((t) => ({ role: t.role, text: t.text })),
               botName: botNameRef.current,
-              voiceName: voiceNameRef.current,
+              voiceName: LOCKED_VOICE,
               liveContext,
             }),
           });
@@ -483,7 +484,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
               .join(' ')
               .replace(/[*#_`~]/g, '')
               .trim() || 'معلش يا قمر مسمعتش كويس، قولها تاني كده؟';
-          wavBuffer = await directGeminiTts(replyText, voiceNameRef.current);
+          wavBuffer = await directGeminiTts(replyText);
         } else {
           replyText = 'وصلني بالكمبيوتر أو ضيف مفتاح جيميناي عشان أتكلم معاك بصوتي الحقيقي!';
         }
@@ -504,10 +505,19 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       executeNourAction(action);
 
       await playNeuralWav(wavBuffer, () => {
+        // Give iOS Safari 160ms to cleanly hand back the audio session before reopening mic for Turn 2+!
         if (liveCallRef.current) {
-          startRecognitionRef.current('active');
+          restartTimerRef.current = window.setTimeout(() => {
+            if (liveCallRef.current && phaseRef.current === 'idle') {
+              startRecognitionRef.current('active');
+            }
+          }, 160);
         } else if (wakeWordRef.current) {
-          startRecognitionRef.current('wake');
+          restartTimerRef.current = window.setTimeout(() => {
+            if (wakeWordRef.current && phaseRef.current === 'idle') {
+              startRecognitionRef.current('wake');
+            }
+          }, 180);
         }
       });
     },
@@ -733,11 +743,21 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     [askNour, ensureAudioCtx],
   );
 
+  // Multi-hour Live Call self-healing watchdog: if iOS ever silently drops SpeechRecognition
+  // while LIVE CALL or Wake Word is ON, auto-rearm it within 1.8s so you can talk for hours!
+  useEffect(() => {
+    if (!liveCallOn && !wakeWordOn) return;
+    const id = window.setInterval(() => {
+      if (phaseRef.current === 'idle' && !recRef.current) {
+        startRecognitionRef.current(liveCallRef.current ? 'active' : 'wake');
+      }
+    }, 1800);
+    return () => window.clearInterval(id);
+  }, [liveCallOn, wakeWordOn]);
+
   return {
     botName,
     setBotName,
-    voiceName,
-    setVoiceName,
     phase,
     liveCallOn,
     wakeWordOn,

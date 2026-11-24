@@ -12,17 +12,12 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import {
-  NEURAL_FEMALE_VOICES,
-  type NourVoiceController,
-} from '@/hooks/useNourVoice';
+import type { NourVoiceController } from '@/hooks/useNourVoice';
 
 export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
   const {
     botName,
     setBotName,
-    voiceName,
-    setVoiceName,
     phase,
     liveCallOn,
     wakeWordOn,
@@ -180,26 +175,21 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#f472b6]" />
 
         <div className="flex items-center justify-between gap-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <input
               value={botName}
               onChange={(e) => setBotName(e.target.value)}
               dir="rtl"
               aria-label="Wake word name"
-              className="h-7 w-16 rounded-lg border border-white/10 bg-[#080a10] px-2 text-center text-[10px] font-extrabold text-[#f472b6] outline-none"
+              className="h-7 w-20 rounded-lg border border-white/10 bg-[#080a10] px-2 text-center text-[10px] font-extrabold text-[#f472b6] outline-none"
             />
-            <select
-              value={voiceName}
-              onChange={(e) => setVoiceName(e.target.value)}
-              aria-label="Neural Female Voice"
-              className="h-7 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#080a10] px-2 text-[9px] font-bold text-zinc-200 outline-none"
-            >
-              {NEURAL_FEMALE_VOICES.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
+            <span className="truncate text-[9px] font-bold text-zinc-400">
+              {liveCallOn
+                ? 'Live Call Active · Ready for hours'
+                : wakeWordOn
+                  ? `Listening for «يا ${botName}»`
+                  : 'Egyptian Arabic Companion'}
+            </span>
           </div>
           <button
             type="button"

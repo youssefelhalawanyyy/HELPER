@@ -641,7 +641,8 @@ const NOUR_TTS_MODELS = [
   'gemini-3.1-flash-tts-preview',
 ];
 
-const ALLOWED_FEMALE_VOICES = new Set(['Aoede', 'Zephyr', 'Leda', 'Autonoe', 'Kore', 'Callirrhoe']);
+let nourTtsCursor = 0;
+const ttsCooldownUntil = new Map<string, number>();
 
 /**
  * Downsamples 24kHz 16-bit mono PCM -> 16kHz 16-bit mono WAV (33% smaller over Cloudflare,
@@ -689,15 +690,22 @@ function pcm24kToWav16kBase64(pcmBase64: string): string {
 
 async function synthesizeNourSpeech(
   text: string,
-  voiceName: string,
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
-  const safeVoice = ALLOWED_FEMALE_VOICES.has(voiceName) ? voiceName : 'Aoede';
-  const styledPrompt = `Speak briskly, naturally, and effortlessly at a slightly fast conversational pace (no slow dragging or long pauses), like a warm 24-year-old Egyptian close friend chatting in fluent everyday Cairene Arabic:\n${text}`;
+  const styledPrompt = `Speak briskly and naturally like a warm 24-year-old Egyptian close friend from Cairo:\n${text}`;
+  const now = Date.now();
 
-  for (const model of NOUR_TTS_MODELS) {
+  // Round-robin across all 3 Gemini TTS models (triples RPM quota for multi-hour chats)
+  // and immediately skip any model in 429 cooldown!
+  const startIdx = nourTtsCursor % NOUR_TTS_MODELS.length;
+  nourTtsCursor += 1;
+
+  for (let offset = 0; offset < NOUR_TTS_MODELS.length; offset += 1) {
+    const model = NOUR_TTS_MODELS[(startIdx + offset) % NOUR_TTS_MODELS.length];
+    if ((ttsCooldownUntil.get(model) || 0) > now) continue;
+
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7500);
+    const timer = setTimeout(() => ctrl.abort(), 5000);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -711,7 +719,7 @@ async function synthesizeNourSpeech(
               responseModalities: ['AUDIO'],
               speechConfig: {
                 voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: safeVoice },
+                  prebuiltVoiceConfig: { voiceName: 'Aoede' },
                 },
               },
             },
@@ -719,6 +727,11 @@ async function synthesizeNourSpeech(
         },
       );
       clearTimeout(timer);
+      if (res.status === 429) {
+        // Put rate-limited model on 45s cooldown so next turns skip it in 0ms!
+        ttsCooldownUntil.set(model, Date.now() + 45_000);
+        continue;
+      }
       if (!res.ok) continue;
 
       const json = (await res.json()) as {
@@ -758,8 +771,7 @@ export async function chatWithNour(opts: {
   }
 
   const name = (opts.botName || 'نور').trim() || 'نور';
-  const voiceName = opts.voiceName || 'Aoede';
-  const systemPrompt = `إنتي "${name}"، بنت مصرية عندك 24 سنة، صاحبته المقربة جداً، ذكية، طبيعية، رايقة، وموجودة معاه في أي وقت يتكلم فيه عن أي حاجة.
+  const systemPrompt = `إنتي "${name}"، بنت مصرية عندك 24 سنة، صاحبته المقربة جداً، ذكية، طبيعية، رايقة، وموجودة معاه بالساعات يتكلم معاكي في أي حاجة.
 
 أسلوبك في الكلام (مهم جداً):
 1. اتكلمي زي صاحبة حقيقية عندها 24 سنة من القاهرة — كلام عادي، صادق، دافي، سريع وطبيعي، مش مصطنع ولا فيه أوفر.
@@ -773,7 +785,7 @@ export async function chatWithNour(opts: {
 ${opts.liveContext || 'الجهاز شغال تمام.'}`;
 
   const contents = [
-    ...(opts.history || []).slice(-8).map((m) => ({
+    ...(opts.history || []).slice(-16).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.text }],
     })),
@@ -782,7 +794,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
 
   for (const model of NOUR_MODELS) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5500);
+    const timer = setTimeout(() => ctrl.abort(), 4500);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -795,7 +807,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
             contents,
             generationConfig: {
               temperature: 0.78,
-              maxOutputTokens: 95,
+              maxOutputTokens: 85,
               ...(model.includes('2.5') || model.includes('3')
                 ? { thinkingConfig: { thinkingBudget: 0 } }
                 : {}),
@@ -822,7 +834,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
         .replace(/\s+/g, ' ')
         .trim();
 
-      const audio = await synthesizeNourSpeech(cleanReply, voiceName, apiKey);
+      const audio = await synthesizeNourSpeech(cleanReply, apiKey);
 
       return {
         ok: true,
