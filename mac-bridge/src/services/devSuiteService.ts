@@ -641,7 +641,7 @@ const NOUR_TTS_MODELS = [
   'gemini-3.1-flash-tts-preview',
 ];
 
-const ALLOWED_FEMALE_VOICES = new Set(['Leda', 'Zephyr', 'Aoede', 'Autonoe', 'Kore', 'Callirrhoe']);
+const ALLOWED_FEMALE_VOICES = new Set(['Aoede', 'Zephyr', 'Leda', 'Autonoe', 'Kore', 'Callirrhoe']);
 
 /**
  * Downsamples 24kHz 16-bit mono PCM -> 16kHz 16-bit mono WAV (33% smaller over Cloudflare,
@@ -692,12 +692,12 @@ async function synthesizeNourSpeech(
   voiceName: string,
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
-  const safeVoice = ALLOWED_FEMALE_VOICES.has(voiceName) ? voiceName : 'Leda';
-  const styledPrompt = `Speak cheerfully like a cute, super friendly young Egyptian teen girl in fluent natural Cairene Egyptian Arabic:\n${text}`;
+  const safeVoice = ALLOWED_FEMALE_VOICES.has(voiceName) ? voiceName : 'Aoede';
+  const styledPrompt = `Speak briskly, naturally, and effortlessly at a slightly fast conversational pace (no slow dragging or long pauses), like a warm 24-year-old Egyptian close friend chatting in fluent everyday Cairene Arabic:\n${text}`;
 
   for (const model of NOUR_TTS_MODELS) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 9000);
+    const timer = setTimeout(() => ctrl.abort(), 7500);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -752,24 +752,25 @@ export async function chatWithNour(opts: {
   if (!apiKey) {
     return {
       ok: false,
-      reply: 'محتاجة مفتاح جيميناي عشان أقدر أرد عليك يا سيدي، ضيفه من صفحة بي سي دكتور.',
+      reply: 'محتاجة مفتاح جيميناي من صفحة بي سي دكتور عشان أرد عليك.',
       error: 'Missing Gemini API key',
     };
   }
 
   const name = (opts.botName || 'نور').trim() || 'نور';
-  const voiceName = opts.voiceName || 'Leda';
-  const systemPrompt = `إنتي "${name}"، بنوتة مصرية شابة كيوت ومرحة أوي ودمك خفيف وذكية جداً وعارفة كل حاجة في الدنيا — صاحبة المستخدم المقربة ومساعدته الصوتية الشخصية جوه مشروعه ديف ديك.
+  const voiceName = opts.voiceName || 'Aoede';
+  const systemPrompt = `إنتي "${name}"، بنت مصرية عندك 24 سنة، صاحبته المقربة جداً، ذكية، طبيعية، رايقة، وموجودة معاه في أي وقت يتكلم فيه عن أي حاجة.
 
-قواعد ذهبية لردودك (عشان المكالمة تكون سريعة وحلوة زي شات جي بي تي وجيميناي لايف):
-1. اتكلمي بلهجة مصرية قاهرية 100% طبيعية، دافية، حنونة، وشبابية (زي: "يا أهلاً يا قمر"، "بص يا سيدي"، "حاضر من عيوني"، "يا سلام عليك"، "ده كلام جامد أوي"، "ولا يهمك خالص"). ممنوع أي فصحى أو برود رسمي!
-2. خلي ردك سريع ومختصر ومركز (جملة أو جملتين حلوين بالكتير إلا لو طلب تشرحي موضوع طويل) عشان الصوت يطلع فوراً بدون أي تأخير.
-3. ممنوع أي رموز ماركداون أو نجوم أو إيموجي أو حروف إنجليزي معقدة — اكتبي أسماء التكنولوجيا بالعربي السهل (مثلاً "ديف ديك"، "فيرسل"، "بي سي دكتور"، "نيت أوبس"، "باور جارد") عشان النطق الصوتي يطلع مصري طبيعي 100%.
-4. إنتي موسوعة شاملة: بتعرفي تجاوبي على أي سؤال في العالم (برمجة، ذكاء اصطناعي، علوم، تاريخ، رياضة، أفلام، بزنس، دراسة، نصايح حياة، هزار) وبردو فاهمة كل تفصيلة في مشروع ديف ديك (ماك بريدج على الماك والويندوز، وتطبيق الآيفون على فيرسل، وكل الصفحات: سمارت ديك، انتيجرافيتي، لايف مونيتور، ماك ودوك، تراك باد وكنترولر، بي سي دكتور، نيت أوبس للنت، باور جارد للبطارية والحرارة، ويب تيستر، ويب مونيتور، هوستنج، و SSH سيرفرز).
-5. لو طلب أمر في الجهاز، حطي في آخر سطر: [ACTION:اسم_الأمر] (المتاح: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network).
+أسلوبك في الكلام (مهم جداً):
+1. اتكلمي زي صاحبة حقيقية عندها 24 سنة من القاهرة — كلام عادي، صادق، دافي، سريع وطبيعي، مش مصطنع ولا فيه أوفر.
+2. ممنوع نهائياً الكليشيهات أو الكلام الكرينج أو المبالغ فيه (ممنوع تقوليله "يا قمر" أو "يا سيدي" أو "يا بطل" أو "تحت أمرك" أو "أنا فل الفل" أو "ناوي نهبب إيه" أو فصحى رسمية). اتكلمي بعفوية حقيقية زي: "إيه الأخبار"، "بص"، "فاهماك"، "تمام"، "قولي كده"، "عادي ولا تشيل هم"، "حلو الكلام ده".
+3. خلي ردك قصير وسريع ومباشر (جملة أو جملتين بس إلا لو طلب شرح تفصيلي) عشان المكالمة تبقى سريعة وفورية زي مكالمة حقيقية.
+4. ممنوع أي رموز ماركداون أو نجوم أو إيموجي. اكتبي أسماء التكنولوجيا بالعربي السهل (ديف ديك، فيرسل، بي سي دكتور، نيت أوبس، باور جارد) عشان النطق يطلع طبيعي.
+5. إنتي صاحبته بجد وموسوعة ذكية: بتسمعيه لو عايز يفضفض أو يدردش، بتفكري معاه في شغله وحياته، بتجاوبي في أي موضوع (برمجة، تقنية، علوم، شغل، أفلام، نصايح)، وفاهمة كل تفاصيل مشروعه ديف ديك وحالة جهازه دلوقتي.
+6. لو طلب أمر في الجهاز، ضيفي في آخر سطر بس: [ACTION:اسم_الأمر] (المتاح: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network).
 
 حالة الجهاز دلوقتي:
-${opts.liveContext || 'الجهاز والمشروع شغالين زي الفل.'}`;
+${opts.liveContext || 'الجهاز شغال تمام.'}`;
 
   const contents = [
     ...(opts.history || []).slice(-8).map((m) => ({
@@ -781,7 +782,7 @@ ${opts.liveContext || 'الجهاز والمشروع شغالين زي الفل.
 
   for (const model of NOUR_MODELS) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7000);
+    const timer = setTimeout(() => ctrl.abort(), 5500);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -793,8 +794,8 @@ ${opts.liveContext || 'الجهاز والمشروع شغالين زي الفل.
             systemInstruction: { parts: [{ text: systemPrompt }] },
             contents,
             generationConfig: {
-              temperature: 0.9,
-              maxOutputTokens: 135,
+              temperature: 0.78,
+              maxOutputTokens: 95,
               ...(model.includes('2.5') || model.includes('3')
                 ? { thinkingConfig: { thinkingBudget: 0 } }
                 : {}),
@@ -837,7 +838,7 @@ ${opts.liveContext || 'الجهاز والمشروع شغالين زي الفل.
 
   return {
     ok: false,
-    reply: 'معلش يا قمر الشبكة هنجت ثانية، قول تاني وأنا سامعاك!',
+    reply: 'ثانية النت علق عندي، قول تاني كده؟',
     error: 'All Gemini models failed or rate-limited',
   };
 }

@@ -37,13 +37,13 @@ interface SpeechRecognitionLike {
 
 const ENV_GEMINI_KEY = (process.env.NEXT_PUBLIC_DEVDECK_DOCTOR_AI_KEY || '').trim();
 const STORAGE_NAME = 'devdeck.nour.name.v1';
-const STORAGE_VOICE = 'devdeck.nour.voice.v2';
+const STORAGE_VOICE = 'devdeck.nour.voice.v3';
 
 export const NEURAL_FEMALE_VOICES = [
-  { id: 'Leda', label: 'Leda · Cute Teen Girl (Default)' },
-  { id: 'Zephyr', label: 'Zephyr · Bright Cheerful Girl' },
-  { id: 'Aoede', label: 'Aoede · Warm Friendly Girl' },
-  { id: 'Autonoe', label: 'Autonoe · Playful Young Girl' },
+  { id: 'Aoede', label: 'Aoede · 24yo Friend (Locked)' },
+  { id: 'Zephyr', label: 'Zephyr · Bright' },
+  { id: 'Leda', label: 'Leda · Youthful' },
+  { id: 'Autonoe', label: 'Autonoe · Energetic' },
 ] as const;
 
 function escapeRegExp(s: string): string {
@@ -85,7 +85,7 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 
 async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBuffer | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Speak cheerfully like a cute, super friendly young Egyptian teen girl in fluent natural Cairene Egyptian Arabic:\n${text}`;
+  const styled = `Speak briskly, naturally, and effortlessly at a slightly fast conversational pace (no slow dragging or long pauses), like a warm 24-year-old Egyptian close friend chatting in fluent everyday Cairene Arabic:\n${text}`;
   for (const model of ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts']) {
     try {
       const res = await fetch(
@@ -129,7 +129,7 @@ async function directGeminiTts(text: string, voiceName: string): Promise<ArrayBu
  */
 export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) => void) {
   const [botName, setBotNameState] = useState('نور');
-  const [voiceName, setVoiceNameState] = useState<string>('Leda');
+  const [voiceName, setVoiceNameState] = useState<string>('Aoede');
   const [phase, setPhase] = useState<NourVoicePhase>('idle');
   const [liveCallOn, setLiveCallOn] = useState(false);
   const [wakeWordOn, setWakeWordOn] = useState(false);
@@ -146,7 +146,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const activeListeningRef = useRef(false);
   const turnsRef = useRef<NourChatTurn[]>([]);
   const botNameRef = useRef('نور');
-  const voiceNameRef = useRef('Leda');
+  const voiceNameRef = useRef('Aoede');
   const mutedRef = useRef(false);
   const abortReqRef = useRef<AbortController | null>(null);
   const restartTimerRef = useRef<number | null>(null);
@@ -323,6 +323,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         const decoded = await ctx.decodeAudioData(wavBuffer.slice(0));
         const source = ctx.createBufferSource();
         source.buffer = decoded;
+        source.playbackRate.value = 1.12;
 
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
@@ -452,7 +453,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
           action = data.action || null;
           if (data.audioBase64) wavBuffer = base64ToArrayBuffer(data.audioBase64);
         } else if (ENV_GEMINI_KEY.length >= 12) {
-          const sys = `إنتي "${botNameRef.current}"، بنوتة مصرية شابة كيوت وذكية ودمك خفيف وعارفة كل حاجة في الدنيا. اتكلمي بلهجة مصرية قاهرية 100% طبيعية وشبابية (جملة أو جملتين حلوين، بدون أي نجوم أو ماركداون أو إيموجي). حالة التطبيق:\n${liveContext}`;
+          const sys = `إنتي "${botNameRef.current}"، بنت مصرية عندك 24 سنة وصاحبته المقربة جداً. اتكلمي بلهجة قاهرية طبيعية وهادية ومباشرة من غير أي كليشيهات أو أوفر (ممنوع يا قمر/يا سيدي/يا بطل/فصحى). خلي ردك جملة أو جملتين بالكتير ومن غير نجوم أو إيموجي. حالة الجهاز:\n${liveContext}`;
           const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
             {
@@ -466,8 +467,8 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
                   parts: [{ text: t.text }],
                 })),
                 generationConfig: {
-                  temperature: 0.9,
-                  maxOutputTokens: 135,
+                  temperature: 0.78,
+                  maxOutputTokens: 95,
                   thinkingConfig: { thinkingBudget: 0 },
                 },
               }),
@@ -583,7 +584,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             if (activeListeningRef.current && latestTranscriptRef.current) {
               submitCaptured(latestTranscriptRef.current);
             }
-          }, 1050);
+          }, 550);
           return;
         }
 
@@ -603,7 +604,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             silenceTimerRef.current = window.setTimeout(() => {
               soundEngine.playSuccessChime();
               submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور');
-            }, 1050);
+            }, 550);
           }
         }
       };
@@ -628,7 +629,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             if (liveCallRef.current && phaseRef.current !== 'speaking' && phaseRef.current !== 'thinking') {
               startRecognitionRef.current('active');
             }
-          }, 200);
+          }, 90);
         } else if (wakeWordRef.current) {
           restartTimerRef.current = window.setTimeout(() => {
             if (wakeWordRef.current && phaseRef.current !== 'speaking' && phaseRef.current !== 'thinking') {
