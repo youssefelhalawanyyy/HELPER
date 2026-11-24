@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Coffee,
   Maximize2,
+  Mic,
   Minimize2,
   Volume2,
   VolumeX,
@@ -98,6 +99,10 @@ const HostingDashboardView = dynamic(
 );
 const SshManagerView = dynamic(
   () => import('@/components/views/SshManagerView').then((m) => m.SshManagerView),
+  { loading: ViewSkeleton },
+);
+const NourVoiceView = dynamic(
+  () => import('@/components/views/NourVoiceView').then((m) => m.NourVoiceView),
   { loading: ViewSkeleton },
 );
 
@@ -448,6 +453,27 @@ export function DeckShell() {
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.92 }}
+                aria-pressed={activeView === 'nour'}
+                title="Talk to Nour (Egyptian Arabic Voice AI)"
+                onClick={() => {
+                  soundEngine.playClick();
+                  goToView('nour');
+                }}
+                className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold whitespace-nowrap"
+                style={{
+                  background:
+                    activeView === 'nour' ? 'rgba(244,114,182,0.28)' : 'rgba(244,114,182,0.12)',
+                  color: '#f9a8d4',
+                  boxShadow: activeView === 'nour' ? '0 0 12px rgba(244,114,182,.45)' : 'none',
+                }}
+              >
+                <Mic className="h-[10px] w-[10px] shrink-0" />
+                نور
+              </motion.button>
+
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.92 }}
                 aria-pressed={activeView === 'antigravity'}
                 onClick={() => {
                   soundEngine.playClick();
@@ -557,6 +583,7 @@ export function DeckShell() {
                 {activeView === 'webmonitor' && <WebsiteMonitorView deck={deck} />}
                 {activeView === 'hosting' && <HostingDashboardView deck={deck} />}
                 {activeView === 'ssh' && <SshManagerView deck={deck} />}
+                {activeView === 'nour' && <NourVoiceView deck={deck} onNavigate={goToView} />}
               </motion.div>
             </AnimatePresence>
           </main>

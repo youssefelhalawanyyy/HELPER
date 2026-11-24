@@ -15,6 +15,7 @@ import {
   Globe,
   Grid2X2,
   HeartPulse,
+  Mic,
   Monitor,
   MousePointer2,
   Network,
@@ -47,6 +48,7 @@ export const PAGES = [
   { id: 'webmonitor', label: 'Web Monitor', title: 'Website Monitor', icon: Radar, accent: '#86efac' },
   { id: 'hosting', label: 'Hosting', title: 'Hosting Dashboard', icon: FolderKanban, accent: '#fcd34d' },
   { id: 'ssh', label: 'SSH & VPS', title: 'SSH Server Manager', icon: Server, accent: '#67e8f9' },
+  { id: 'nour', label: 'نور Voice', title: 'Nour Voice AI', icon: Mic, accent: '#f9a8d4' },
 ] as const;
 
 export type DeckViewId = (typeof PAGES)[number]['id'];

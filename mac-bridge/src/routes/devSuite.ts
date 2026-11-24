@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  chatWithNour,
   checkSiteMonitor,
   getHostingOverview,
   getSshStats,
@@ -8,6 +9,7 @@ import {
   runSshCommand,
   runSshServiceAction,
   type ApiProxyRequest,
+  type NourChatMessage,
   type SshConnectionInput,
 } from '../services/devSuiteService.js';
 
@@ -95,6 +97,26 @@ export function createDevSuiteRouter(opts: {
       return;
     }
     const result = await runSshServiceAction(conn, kind, target, action);
+    res.json(result);
+  });
+
+  router.post('/nour/chat', async (req, res) => {
+    const { message, history, botName, liveContext } = req.body as {
+      message?: string;
+      history?: NourChatMessage[];
+      botName?: string;
+      liveContext?: string;
+    };
+    if (!message?.trim()) {
+      res.status(400).json({ ok: false, error: 'Missing message' });
+      return;
+    }
+    const result = await chatWithNour({
+      message: message.trim(),
+      history,
+      botName,
+      liveContext,
+    });
     res.json(result);
   });
 

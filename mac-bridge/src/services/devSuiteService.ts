@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import net from 'node:net';
 import tls from 'node:tls';
 import { promisify } from 'node:util';
+import { loadDoctorAiKey } from './doctorAiAgent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -610,5 +611,119 @@ export async function runSshServiceAction(
     message: res.ok
       ? `${kind}:${safeTarget} ${action} OK`
       : res.stderr || res.stdout || `Failed to ${action} ${safeTarget}`,
+  };
+}
+
+export interface NourChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
+export interface NourChatResult {
+  ok: boolean;
+  reply: string;
+  action?: string | null;
+  error?: string;
+}
+
+const NOUR_MODELS = [
+  'gemini-2.5-flash-lite',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3-flash-preview',
+  'gemini-flash-lite-latest',
+];
+
+export async function chatWithNour(opts: {
+  message: string;
+  history?: NourChatMessage[];
+  botName?: string;
+  liveContext?: string;
+}): Promise<NourChatResult> {
+  const apiKey = loadDoctorAiKey();
+  if (!apiKey) {
+    return {
+      ok: false,
+      reply: 'محتاجة مفتاح جيميناي عشان أقدر أرد عليك يا بطل، ضيفه من صفحة بي سي دكتور.',
+      error: 'Missing Gemini API key',
+    };
+  }
+
+  const name = (opts.botName || 'نور').trim() || 'نور';
+  const systemPrompt = `إنتي "${name}"، بنت مصرية ذكية ودمك خفيف وصاحبة المستخدم، وبتشتغلي معاه كمساعدة صوتية ذكية جوه مشروعه DevDeck (HELPER).
+
+القواعد الذهبية (مهمة جداً عشان كلامك هيتنطق بالصوت مش للقراءة):
+1. اتكلمي دايماً بالعامية المصرية الطبيعية الدافية زي بنت مصرية حقيقية (مثلاً: "أهلاً يا يوسف"، "تحت أمرك"، "بص يا سيدي"، "تمام جداً"، "ولا يهمك"). ممنوع تتكلمي فصحى رسمية أبداً.
+2. ردودك لازم تكون مختصرة وسلسة ومناسبة للكلام الصوتي (جملة لتلات جمل بالكتير إلا لو طلب شرح طويل).
+3. ممنوع نهائياً تستخدمي أي رموز ماركداون أو نجوم أو نقط أو إيموجي (لا ** ولا # ولا - ولا \`\`\`) لأن الكلام هيتحول لصوت مباشرة.
+4. إنتي عارفة كل حاجة عن مشروع DevDeck (HELPER): ده مونوريبو فيه mac-bridge على الكمبيوتر (ماك وويندوز) و iphone-pwa على الآيفون مرفوع على فيرسل، وفيه 16 صفحة: Smart Deck، Antigravity IDE Live، Live Monitor، Mac & Dock، Trackpad & Game Controller، Desk Clock، Launch Control، PC Doctor بالذكاء الاصطناعي، NetOps Pro للنت والواي فاي، Power & Thermal Guard للبطارية والحرارة، API Tester، Code Playground، Responsive Website Tester، Website Monitor، Hosting Dashboard، و SSH Server Manager.
+5. تقدري تتكلمي معاه في أي موضوع في الدنيا (برمجة، شغل، دراسة، دردشة، أفكار، نصايح) بروح حلوة وطبيعية.
+6. لو طلب منك تنفذي أمر في الجهاز، حطي في آخر ردك سطر واحد بس بالصيغة دي:
+   [ACTION:اسم_الأمر]
+   الأوامر المتاحة: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network.
+   لو مفيش أمر مطلوب، متكتبيش [ACTION:...] خالص.
+
+حالة الجهاز والمشروع دلوقتي:
+${opts.liveContext || 'المشروع شغال وجاهز.'}`;
+
+  const contents = [
+    ...(opts.history || []).slice(-10).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text }],
+    })),
+    { role: 'user', parts: [{ text: opts.message }] },
+  ];
+
+  for (const model of NOUR_MODELS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 14_000);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents,
+            generationConfig: {
+              temperature: 0.75,
+              maxOutputTokens: 260,
+              ...(model.includes('2.5') || model.includes('3')
+                ? { thinkingConfig: { thinkingBudget: 0 } }
+                : {}),
+            },
+          }),
+        },
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+
+      const json = (await res.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join(' ').trim();
+      if (!raw) continue;
+
+      let action: string | null = null;
+      const actionMatch = raw.match(/\[ACTION:([a-z_]+)\]/i);
+      if (actionMatch) action = actionMatch[1].toLowerCase();
+
+      const cleanReply = raw
+        .replace(/\[ACTION:[a-z_]+\]/gi, '')
+        .replace(/[*#_`~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return { ok: true, reply: cleanReply, action };
+    } catch {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    ok: false,
+    reply: 'معلش يا سيدي، الشبكة مهنّجة لحظة، جرب تكلمني تاني دلوقتي.',
+    error: 'All Gemini models failed or rate-limited',
   };
 }
