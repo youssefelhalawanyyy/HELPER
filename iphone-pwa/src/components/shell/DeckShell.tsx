@@ -26,6 +26,7 @@ import { useDeskBreak } from '@/hooks/useDeskBreak';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
+import { useNourVoice } from '@/hooks/useNourVoice';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { formatTimer, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
@@ -158,6 +159,9 @@ export function DeckShell() {
     },
     [goToIndex],
   );
+
+  // Persistent Nour Voice AI session — stays alive while swiping across ALL pages!
+  const nour = useNourVoice(deck, goToView);
 
   // Idle-prefetch secondary view chunks after first paint so tab swipes feel instant
   useEffect(() => {
@@ -445,8 +449,14 @@ export function DeckShell() {
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.92 }}
-                aria-pressed={activeView === 'nour'}
-                title="Talk to Nour (Egyptian Arabic Voice AI)"
+                aria-pressed={activeView === 'nour' || nour.liveCallOn || nour.wakeWordOn}
+                title={
+                  nour.liveCallOn
+                    ? 'Nour Live Call Active — tap to open'
+                    : nour.wakeWordOn
+                      ? 'Nour Wake Word Active — say «يا نور»'
+                      : 'Talk to Nour (Egyptian Arabic Voice AI)'
+                }
                 onClick={() => {
                   soundEngine.playClick();
                   goToView('nour');
@@ -454,13 +464,33 @@ export function DeckShell() {
                 className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[9px] font-extrabold whitespace-nowrap"
                 style={{
                   background:
-                    activeView === 'nour' ? 'rgba(244,114,182,0.28)' : 'rgba(244,114,182,0.12)',
+                    nour.liveCallOn || nour.phase === 'speaking' || nour.phase === 'listening'
+                      ? 'rgba(244,114,182,0.34)'
+                      : activeView === 'nour'
+                        ? 'rgba(244,114,182,0.24)'
+                        : 'rgba(244,114,182,0.12)',
                   color: '#f9a8d4',
-                  boxShadow: activeView === 'nour' ? '0 0 12px rgba(244,114,182,.45)' : 'none',
+                  boxShadow:
+                    nour.liveCallOn || nour.phase === 'speaking' || nour.phase === 'listening'
+                      ? '0 0 14px rgba(244,114,182,.6)'
+                      : 'none',
                 }}
               >
+                {(nour.liveCallOn || nour.wakeWordOn || nour.phase !== 'idle') && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
+                    style={{
+                      background:
+                        nour.phase === 'listening'
+                          ? '#22d3ee'
+                          : nour.phase === 'speaking'
+                            ? '#f472b6'
+                            : '#34d399',
+                    }}
+                  />
+                )}
                 <Mic className="h-[10px] w-[10px] shrink-0" />
-                نور
+                {nour.liveCallOn ? `${nour.botName} LIVE` : nour.botName}
               </motion.button>
 
               <motion.button
@@ -573,7 +603,7 @@ export function DeckShell() {
                 {activeView === 'webmonitor' && <WebsiteMonitorView deck={deck} />}
                 {activeView === 'hosting' && <HostingDashboardView deck={deck} />}
                 {activeView === 'ssh' && <SshManagerView deck={deck} />}
-                {activeView === 'nour' && <NourVoiceView deck={deck} onNavigate={goToView} />}
+                {activeView === 'nour' && <NourVoiceView nour={nour} />}
               </motion.div>
             </AnimatePresence>
           </main>
