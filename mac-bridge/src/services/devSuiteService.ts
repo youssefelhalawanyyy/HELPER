@@ -643,8 +643,114 @@ const NOUR_MODELS: NourModelSpec[] = [
   { id: 'gemma-4-26b-a4b-it', useThinkingZero: false, inlineSystem: true },
 ];
 
-// Persistent pre-warmed Cairo Egyptian Arabic 24yo Female Neural Voice (ar-EG-SalmaNeural)
-// -> ~350ms synthesis, ~30KB MP3, ZERO API quota limits (talks non-stop for hours!)
+// Primary Voice Engine: Real Google Gemini Native "Aoede" LLM Voice across all 4 TTS models!
+const GEMINI_AOEDE_TTS_MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-3.8-flash-tts',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-3.8-flash-lite-tts',
+];
+let aoedeTtsCursor = 0;
+const aoedeCooldownUntil = new Map<string, number>();
+
+function pcm24kToWav16kBase64(pcmBase64: string): string {
+  const src = Buffer.from(pcmBase64, 'base64');
+  const srcSamples = Math.floor(src.length / 2);
+  const dstSamples = Math.floor((srcSamples * 2) / 3);
+  const pcm = Buffer.alloc(dstSamples * 2);
+
+  for (let i = 0; i < dstSamples; i += 1) {
+    const pos = i * 1.5;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const s0 = src.readInt16LE(Math.min(idx, srcSamples - 1) * 2);
+    const s1 = src.readInt16LE(Math.min(idx + 1, srcSamples - 1) * 2);
+    const val = Math.max(-32768, Math.min(32767, Math.round(s0 + (s1 - s0) * frac)));
+    pcm.writeInt16LE(val, i * 2);
+  }
+
+  const header = Buffer.alloc(44);
+  const sampleRate = 16000;
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+
+  return Buffer.concat([header, pcm]).toString('base64');
+}
+
+async function synthesizeGeminiAoedeWav(
+  text: string,
+  apiKey: string,
+): Promise<{ audioBase64: string; audioMime: string } | null> {
+  const styledPrompt = `Read the Arabic line below in a warm, natural, expressive 24-year-old Cairo Egyptian woman's voice (100% authentic everyday Cairene Egyptian Arabic accent and intonation, like a close friend talking naturally on a call — never Classical/MSA Arabic). Speak ONLY the Arabic words:\n${text}`;
+  const now = Date.now();
+  const start = aoedeTtsCursor % GEMINI_AOEDE_TTS_MODELS.length;
+  aoedeTtsCursor += 1;
+
+  for (let i = 0; i < GEMINI_AOEDE_TTS_MODELS.length; i += 1) {
+    const model = GEMINI_AOEDE_TTS_MODELS[(start + i) % GEMINI_AOEDE_TTS_MODELS.length];
+    if ((aoedeCooldownUntil.get(model) || 0) > now) continue;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5200);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: styledPrompt }] }],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: 'Aoede' },
+                },
+              },
+            },
+          }),
+        },
+      );
+      clearTimeout(timer);
+      if (res.status === 429) {
+        aoedeCooldownUntil.set(model, Date.now() + 25_000);
+        continue;
+      }
+      if (!res.ok) continue;
+
+      const json = (await res.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+        }>;
+      };
+      const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inline?.data) continue;
+
+      if (/pcm|L16/i.test(inline.mimeType || '')) {
+        return { audioBase64: pcm24kToWav16kBase64(inline.data), audioMime: 'audio/wav' };
+      }
+      return { audioBase64: inline.data, audioMime: inline.mimeType || 'audio/wav' };
+    } catch {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
+// Overflow Backup (ONLY used if all 4 Gemini Aoede TTS models hit 429 in the same minute):
+// High-bitrate 96kbps ar-EG-SalmaNeural with 0% artificial pitch/rate distortion
 const SALMA_VOICE = 'ar-EG-SalmaNeural';
 let warmEdgeTts: MsEdgeTTS | null = null;
 let warmEdgeReady: Promise<MsEdgeTTS | null> | null = null;
@@ -665,7 +771,7 @@ async function getWarmSalmaTts(forceReset = false): Promise<MsEdgeTTS | null> {
   warmEdgeReady = (async () => {
     try {
       const inst = new MsEdgeTTS();
-      await inst.setMetadata(SALMA_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      await inst.setMetadata(SALMA_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
       warmEdgeTts = inst;
       return inst;
     } catch {
@@ -679,7 +785,6 @@ async function getWarmSalmaTts(forceReset = false): Promise<MsEdgeTTS | null> {
   return warmEdgeReady;
 }
 
-// Pre-warm Salma Neural voice immediately on bridge boot so Turn 1 is instant too!
 void getWarmSalmaTts();
 
 async function synthesizeSalmaMp3(text: string): Promise<{ audioBase64: string; audioMime: string } | null> {
@@ -689,7 +794,7 @@ async function synthesizeSalmaMp3(text: string): Promise<{ audioBase64: string; 
     try {
       const buf = await new Promise<Buffer>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Edge TTS timeout')), 4500);
-        const { audioStream } = tts.toStream(text, { rate: '+12%', pitch: '+2Hz' });
+        const { audioStream } = tts.toStream(text);
         const chunks: Buffer[] = [];
         audioStream.on('data', (c: Buffer | Uint8Array) => {
           chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
@@ -713,40 +818,16 @@ async function synthesizeSalmaMp3(text: string): Promise<{ audioBase64: string; 
   return null;
 }
 
-async function synthesizeGoogleTranslateFallbackMp3(
-  text: string,
-): Promise<{ audioBase64: string; audioMime: string } | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 3500);
-  try {
-    const q = encodeURIComponent(text.slice(0, 200));
-    const res = await fetch(
-      `https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q=${q}`,
-      {
-        signal: ctrl.signal,
-        headers: { 'user-agent': 'Mozilla/5.0' },
-      },
-    );
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const ab = await res.arrayBuffer();
-    if (ab.byteLength < 256) return null;
-    return { audioBase64: Buffer.from(ab).toString('base64'), audioMime: 'audio/mpeg' };
-  } catch {
-    clearTimeout(timer);
-    return null;
-  }
-}
-
 async function synthesizeNourSpeech(
   text: string,
+  apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
-  // Tier 1: Studio Egyptian Female Neural Voice (ar-EG-SalmaNeural) — ~350ms, unlimited turns!
-  const salma = await synthesizeSalmaMp3(text);
-  if (salma) return salma;
+  // Tier 1: Real Google Gemini Native "Aoede" Voice (expressive LLM Egyptian Arabic!)
+  const aoede = await synthesizeGeminiAoedeWav(text, apiKey);
+  if (aoede) return aoede;
 
-  // Tier 2: Instant MP3 backup so Nour NEVER stays silent even if Microsoft's edge socket blinks
-  return synthesizeGoogleTranslateFallbackMp3(text);
+  // Tier 2: Seamless neural overflow if all 4 Aoede buckets are momentarily cooling down
+  return synthesizeSalmaMp3(text);
 }
 
 export async function chatWithNour(opts: {
@@ -759,7 +840,7 @@ export async function chatWithNour(opts: {
   const apiKey = loadDoctorAiKey();
   if (!apiKey) {
     const msg = 'محتاجة مفتاح جيميناي من صفحة بي سي دكتور عشان أرد عليك.';
-    const audio = await synthesizeNourSpeech(msg);
+    const audio = await synthesizeSalmaMp3(msg);
     return {
       ok: false,
       reply: msg,
@@ -770,14 +851,14 @@ export async function chatWithNour(opts: {
   }
 
   const name = (opts.botName || 'نور').trim() || 'نور';
-  const systemPrompt = `إنتي "${name}"، بنت مصرية عندك 24 سنة، صاحبته المقربة جداً، ذكية، طبيعية، رايقة، وموجودة معاه بالساعات يتكلم معاكي في أي حاجة.
+  const systemPrompt = `إنتي "${name}"، بنت مصرية قاهرية عندك 24 سنة، صاحبته المقربة جداً، ذكية، طبيعية، رايقة، وموجودة معاه بالساعات يتكلم معاكي في أي حاجة.
 
-أسلوبك في الكلام (مهم جداً):
-1. اتكلمي زي صاحبة حقيقية عندها 24 سنة من القاهرة — كلام عادي، صادق، دافي، سريع وطبيعي، مش مصطنع ولا فيه أوفر.
-2. ممنوع نهائياً الكليشيهات أو الكلام الكرينج أو المبالغ فيه (ممنوع تقوليله "يا قمر" أو "يا سيدي" أو "يا بطل" أو "تحت أمرك" أو "أنا فل الفل" أو "ناوي نهبب إيه" أو فصحى رسمية). اتكلمي بعفوية حقيقية زي: "إيه الأخبار"، "بص"، "فاهماك"، "تمام"، "قولي كده"، "عادي ولا تشيل هم"، "حلو الكلام ده".
-3. خلي ردك قصير وسريع ومباشر (جملة أو جملتين بس إلا لو طلب شرح تفصيلي) عشان المكالمة تبقى سريعة وفورية زي مكالمة حقيقية.
-4. ممنوع أي رموز ماركداون أو نجوم أو إيموجي. اكتبي أسماء التكنولوجيا بالعربي السهل (ديف ديك، فيرسل، بي سي دكتور، نيت أوبس، باور جارد) عشان النطق يطلع طبيعي.
-5. إنتي صاحبته بجد وموسوعة ذكية: بتسمعيه لو عايز يفضفض أو يدردش، بتفكري معاه في شغله وحياته، بتجاوبي في أي موضوع (برمجة، تقنية، علوم، شغل، أفلام، نصايح)، وفاهمة كل تفاصيل مشروعه ديف ديك وحالة جهازه دلوقتي.
+أسلوبك ونطقك المصري (مهم جداً عشان الصوت يطلع مصري أصلي 100% زي جيميناي وشات جي بي تي):
+1. اتكلمي عامية مصرية قاهرية صافية 100% — اكتبي الكلمات بالطريقة اللي المصريين بينطقوها فعلاً وحطي تشكيل خفيف بس على الحروف اللي بتفرق المصري عن الفصحى (مثلاً: إزَّيَّك، عَامِل إيه، بُص بقى، دِلوَقتي، مَعلِش، كُوَيِّس، عَشَان، مِش، إحنَا). ممنوع نهائياً أي جملة أو كلمة فصحى!
+2. ممنوع الكليشيهات أو الكلام المصطنع (بلاش يا قمر/يا سيدي/يا بطل/تحت أمرك). خليكي صاحبته بجد بعفوية حقيقية وطبيعية.
+3. خلي ردك سريع ومباشر (جملة أو جملتين بالكتير إلا لو طلب شرح طويل) عشان المحادثة تبقى سريعة وممتعة.
+4. ممنوع أي رموز ماركداون أو نجوم أو إيموجي. اكتبي أسماء التكنولوجيا بالعربي السهل (ديف ديك، فيرسل، بي سي دكتور، نيت أوبس، باور جارد).
+5. إنتي صاحبته المقربة وموسوعة ذكية في كل حاجة (برمجة، تقنية، شغل، علوم، أفلام، فضفضة، نصايح) وعارفة كل تفاصيل مشروعه ديف ديك وحالة جهازه.
 6. لو طلب أمر في الجهاز، ضيفي في آخر سطر بس: [ACTION:اسم_الأمر] (المتاح: doctor_scan, net_scan, lock_screen, caffeine_on, caffeine_off, open_antigravity, open_power, open_doctor, open_network).
 
 حالة الجهاز دلوقتي:
@@ -865,7 +946,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
       .replace(/\s+/g, ' ')
       .trim();
 
-    const audio = await synthesizeNourSpeech(cleanReply);
+    const audio = await synthesizeNourSpeech(cleanReply, apiKey);
 
     return {
       ok: true,
@@ -882,7 +963,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
   }
 
   const fallbackMsg = 'ثانية واحدة الصوت قطع عندي، قول تاني كده؟';
-  const fallbackAudio = await synthesizeNourSpeech(fallbackMsg);
+  const fallbackAudio = await synthesizeNourSpeech(fallbackMsg, apiKey);
   return {
     ok: false,
     reply: fallbackMsg,

@@ -45,11 +45,14 @@ const CLIENT_TEXT_MODELS: Array<{ id: string; thinkZero: boolean }> = [
 ];
 const clientTextCooldown = new Map<string, number>();
 
+const CLIENT_AOEDE_MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-3.8-flash-tts',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-3.8-flash-lite-tts',
+];
 let clientTtsCursor = 0;
 const clientTtsCooldown = new Map<string, number>();
-
-const FEMALE_ARABIC_HINTS = /salma|mariam|laila|hoda|amina|noura|rana|sara|fatima|zahra|female|سلمى|مريم|ليلى|هدى/i;
-const MALE_ARABIC_HINTS = /majed|tarik|naayf|maged|hamdan|shakir|male|ماجد|طارق|نايف/i;
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -58,6 +61,7 @@ function escapeRegExp(s: string): string {
 function normalizeArabicForEchoCheck(s: string): string {
   return s
     .toLowerCase()
+    .replace(/[\u064B-\u065F]/g, '')
     .replace(/[أإآ]/g, 'ا')
     .replace(/ة/g, 'ه')
     .replace(/ى/g, 'ي')
@@ -66,10 +70,6 @@ function normalizeArabicForEchoCheck(s: string): string {
     .trim();
 }
 
-/**
- * Checks whether heard transcript while Nour is speaking is just speaker echo of her own voice
- * rather than the user interrupting her.
- */
 function isLikelySelfEcho(heard: string, spoken: string): boolean {
   if (!spoken) return false;
   const h = normalizeArabicForEchoCheck(heard);
@@ -79,7 +79,7 @@ function isLikelySelfEcho(heard: string, spoken: string): boolean {
   const words = h.split(' ').filter((w) => w.length >= 2);
   if (words.length === 0) return true;
   const matched = words.filter((w) => s.includes(w)).length;
-  return matched / words.length >= 0.72;
+  return matched / words.length >= 0.68;
 }
 
 function pcm24kBase64ToWavBytes(pcmBase64: string): ArrayBuffer {
@@ -115,19 +115,18 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function directClientTts(text: string): Promise<ArrayBuffer | null> {
+async function directClientAoedeTts(text: string): Promise<{ buffer: ArrayBuffer; mime: string } | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Speak briskly and naturally like a warm 24-year-old Egyptian close friend from Cairo:\n${text}`;
-  const models = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview'];
-  const start = clientTtsCursor % models.length;
+  const styled = `Read the Arabic line below in a warm, natural, expressive 24-year-old Cairo Egyptian woman's voice (100% authentic everyday Cairene Egyptian Arabic accent and intonation, like a close friend talking naturally on a call — never Classical/MSA Arabic). Speak ONLY the Arabic words:\n${text}`;
+  const start = clientTtsCursor % CLIENT_AOEDE_MODELS.length;
   clientTtsCursor += 1;
   const now = Date.now();
 
-  for (let i = 0; i < models.length; i += 1) {
-    const model = models[(start + i) % models.length];
+  for (let i = 0; i < CLIENT_AOEDE_MODELS.length; i += 1) {
+    const model = CLIENT_AOEDE_MODELS[(start + i) % CLIENT_AOEDE_MODELS.length];
     if ((clientTtsCooldown.get(model) || 0) > now) continue;
     const ctrl = new AbortController();
-    const t = window.setTimeout(() => ctrl.abort(), 3600);
+    const t = window.setTimeout(() => ctrl.abort(), 5000);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
@@ -148,7 +147,7 @@ async function directClientTts(text: string): Promise<ArrayBuffer | null> {
       );
       window.clearTimeout(t);
       if (res.status === 429) {
-        clientTtsCooldown.set(model, Date.now() + 50_000);
+        clientTtsCooldown.set(model, Date.now() + 25_000);
         continue;
       }
       if (!res.ok) continue;
@@ -160,9 +159,9 @@ async function directClientTts(text: string): Promise<ArrayBuffer | null> {
       const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
       if (!inline?.data) continue;
       if (/pcm|L16/i.test(inline.mimeType || '')) {
-        return pcm24kBase64ToWavBytes(inline.data);
+        return { buffer: pcm24kBase64ToWavBytes(inline.data), mime: 'audio/wav' };
       }
-      return base64ToArrayBuffer(inline.data);
+      return { buffer: base64ToArrayBuffer(inline.data), mime: inline.mimeType || 'audio/wav' };
     } catch {
       window.clearTimeout(t);
     }
@@ -170,38 +169,6 @@ async function directClientTts(text: string): Promise<ArrayBuffer | null> {
   return null;
 }
 
-function speakBrowserFemaleFallback(text: string, onDone: () => void): void {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    onDone();
-    return;
-  }
-  window.speechSynthesis.cancel();
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.lang = 'ar-EG';
-  utt.rate = 1.1;
-  utt.pitch = 1.12;
-  const voices = window.speechSynthesis.getVoices();
-  const arVoices = voices.filter((v) => /^ar/i.test(v.lang));
-  const best =
-    arVoices.find((v) => /ar[-_]eg/i.test(v.lang) && !MALE_ARABIC_HINTS.test(v.name)) ||
-    arVoices.find((v) => FEMALE_ARABIC_HINTS.test(v.name)) ||
-    arVoices.find((v) => !MALE_ARABIC_HINTS.test(v.name));
-  if (best) {
-    utt.voice = best;
-    utt.lang = best.lang || 'ar-EG';
-  }
-  utt.onend = onDone;
-  utt.onerror = onDone;
-  window.speechSynthesis.speak(utt);
-}
-
-/**
- * Persistent full-duplex Nour Voice AI hook mounted in DeckShell:
- * - Instant ~800ms total response via pre-warmed ar-EG-SalmaNeural MP3 on bridge
- * - Unlimited turns for multi-hour continuous Live Calls (zero 3-turn TTS quota stops!)
- * - Real-time interruption: start talking while Nour is speaking -> she immediately pauses,
- *   waits for you to finish your full sentence, then answers right away!
- */
 export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) => void) {
   const [botName, setBotNameState] = useState('نور');
   const [phase, setPhase] = useState<NourVoicePhase>('idle');
@@ -226,11 +193,14 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const silenceTimerRef = useRef<number | null>(null);
   const latestTranscriptRef = useRef('');
   const submittedTurnRef = useRef(false);
+  const lastSubmittedRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
   const currentSpokenTextRef = useRef('');
   const requestSeqRef = useRef(0);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playingSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const htmlAudioUrlRef = useRef<string | null>(null);
   const orbRafRef = useRef<number | null>(null);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -268,6 +238,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     if (audioCtxRef.current.state === 'suspended') {
       await audioCtxRef.current.resume();
     }
+    if (!htmlAudioRef.current && typeof Audio !== 'undefined') {
+      const el = new Audio();
+      el.setAttribute('playsinline', '');
+      htmlAudioRef.current = el;
+    }
     return audioCtxRef.current;
   }, []);
 
@@ -287,8 +262,19 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       }
       playingSourceRef.current = null;
     }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (htmlAudioRef.current) {
+      try {
+        htmlAudioRef.current.onended = null;
+        htmlAudioRef.current.onerror = null;
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current.removeAttribute('src');
+      } catch {
+        // Ignore
+      }
+    }
+    if (htmlAudioUrlRef.current) {
+      URL.revokeObjectURL(htmlAudioUrlRef.current);
+      htmlAudioUrlRef.current = null;
     }
   }, []);
 
@@ -303,6 +289,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     }
     if (recRef.current) {
       try {
+        recRef.current.onresult = null;
         recRef.current.onend = null;
         recRef.current.abort();
       } catch {
@@ -315,8 +302,13 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const startRecognitionRef = useRef<(mode: 'wake' | 'active') => void>(() => {});
 
   const playReplyAudio = useCallback(
-    async (audioBuffer: ArrayBuffer | null, replyText: string, afterSpeak?: () => void) => {
-      if (mutedRef.current) {
+    async (
+      audioBuffer: ArrayBuffer | null,
+      audioMime: string,
+      replyText: string,
+      afterSpeak?: () => void,
+    ) => {
+      if (mutedRef.current || !audioBuffer || audioBuffer.byteLength < 128) {
         setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
         afterSpeak?.();
         return;
@@ -325,59 +317,74 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       stopSpeaking();
       currentSpokenTextRef.current = replyText;
 
-      // Ensure continuous duplex listener stays armed WHILE she speaks so user can interrupt anytime!
+      // Start fresh barge-in listener while she talks so talking over her stops her & listens!
       if ((liveCallRef.current || wakeWordRef.current) && !recRef.current) {
         startRecognitionRef.current(liveCallRef.current ? 'active' : 'wake');
       }
 
-      if (audioBuffer && audioBuffer.byteLength > 128) {
-        try {
-          const ctx = await ensureAudioCtx();
-          const decoded = await ctx.decodeAudioData(audioBuffer.slice(0));
-          const source = ctx.createBufferSource();
-          source.buffer = decoded;
-          source.playbackRate.value = 1.04;
+      // 1. Pure 1.0x WebAudio playback (zero pitch/speed distortion + real-time orb meter)
+      try {
+        const ctx = await ensureAudioCtx();
+        const decoded = await ctx.decodeAudioData(audioBuffer.slice(0));
+        const source = ctx.createBufferSource();
+        source.buffer = decoded;
+        source.playbackRate.value = 1.0;
 
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
-          analyser.connect(ctx.destination);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyser.connect(ctx.destination);
 
-          const freq = new Uint8Array(analyser.frequencyBinCount);
-          const animateOrb = () => {
-            if (playingSourceRef.current !== source) return;
-            analyser.getByteFrequencyData(freq);
-            let sum = 0;
-            for (let i = 0; i < freq.length; i += 1) sum += freq[i];
-            setOrbEnergy(Math.min(1, sum / (freq.length * 95)));
-            orbRafRef.current = requestAnimationFrame(animateOrb);
-          };
-
-          playingSourceRef.current = source;
-          setPhase('speaking');
-          source.onended = () => {
-            if (playingSourceRef.current === source) playingSourceRef.current = null;
-            stopSpeaking();
-            setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
-            afterSpeak?.();
-          };
-
-          source.start(0);
+        const freq = new Uint8Array(analyser.frequencyBinCount);
+        const animateOrb = () => {
+          if (playingSourceRef.current !== source) return;
+          analyser.getByteFrequencyData(freq);
+          let sum = 0;
+          for (let i = 0; i < freq.length; i += 1) sum += freq[i];
+          setOrbEnergy(Math.min(1, sum / (freq.length * 95)));
           orbRafRef.current = requestAnimationFrame(animateOrb);
-          return;
-        } catch {
-          // Fall through to guaranteed female browser fallback
-        }
+        };
+
+        playingSourceRef.current = source;
+        setPhase('speaking');
+        source.onended = () => {
+          if (playingSourceRef.current === source) playingSourceRef.current = null;
+          stopSpeaking();
+          setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
+          afterSpeak?.();
+        };
+
+        source.start(0);
+        orbRafRef.current = requestAnimationFrame(animateOrb);
+        return;
+      } catch {
+        // 2. Native HTMLAudioElement fallback for Safari MP3 streams (NEVER uses robotic speechSynthesis!)
       }
 
-      // Guaranteed fallback (e.g. unpaired iPhone when Gemini preview TTS quota is exhausted)
-      // -> NEVER leaves user with silent text!
-      setPhase('speaking');
-      speakBrowserFemaleFallback(replyText, () => {
+      try {
+        await ensureAudioCtx();
+        const el = htmlAudioRef.current || new Audio();
+        htmlAudioRef.current = el;
+        const blob = new Blob([audioBuffer], { type: audioMime || 'audio/mpeg' });
+        const url = URL.createObjectURL(blob);
+        htmlAudioUrlRef.current = url;
+        el.src = url;
+        el.playbackRate = 1.0;
+        setPhase('speaking');
+        setOrbEnergy(0.45);
+        const finish = () => {
+          stopSpeaking();
+          setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
+          afterSpeak?.();
+        };
+        el.onended = finish;
+        el.onerror = finish;
+        await el.play();
+      } catch {
         stopSpeaking();
         setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
         afterSpeak?.();
-      });
+      }
     },
     [ensureAudioCtx, stopSpeaking],
   );
@@ -430,21 +437,34 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       const clean = userSpeech.trim();
       if (!clean) return;
 
+      // Hard deduplication guard: never send the exact same voice transcript twice within 4.5s!
+      const nowTs = Date.now();
+      if (
+        clean === lastSubmittedRef.current.text &&
+        nowTs - lastSubmittedRef.current.ts < 4500
+      ) {
+        return;
+      }
+      lastSubmittedRef.current = { text: clean, ts: nowTs };
+
       const mySeq = ++requestSeqRef.current;
       abortReqRef.current?.abort();
       stopSpeaking();
+      // Cleanly close previous recognition utterance so buffered results can NEVER re-fire a 2nd time!
+      stopRecognition();
       setPhase('thinking');
       setLiveTranscript('');
 
       const ctrl = new AbortController();
       abortReqRef.current = ctrl;
 
-      const userTurn: NourChatTurn = { id: makeRequestId(), role: 'user', text: clean, ts: Date.now() };
+      const userTurn: NourChatTurn = { id: makeRequestId(), role: 'user', text: clean, ts: nowTs };
       const nextHistory = [...turnsRef.current.slice(-24), userTurn];
       setTurns(nextHistory);
 
       let replyText = '';
       let audioBuffer: ArrayBuffer | null = null;
+      let audioMime = 'audio/wav';
       let action: string | null = null;
 
       try {
@@ -467,13 +487,15 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             ok: boolean;
             reply: string;
             audioBase64?: string;
+            audioMime?: string;
             action?: string | null;
           };
           replyText = data.reply;
           action = data.action || null;
+          audioMime = data.audioMime || 'audio/wav';
           if (data.audioBase64) audioBuffer = base64ToArrayBuffer(data.audioBase64);
         } else if (ENV_GEMINI_KEY.length >= 12) {
-          const sys = `إنتي "${botNameRef.current}"، بنت مصرية عندك 24 سنة وصاحبته المقربة جداً. اتكلمي بلهجة قاهرية طبيعية وهادية ومباشرة من غير أي كليشيهات أو أوفر (ممنوع يا قمر/يا سيدي/يا بطل/فصحى). خلي ردك جملة أو جملتين بالكتير ومن غير نجوم أو إيموجي. حالة الجهاز:\n${liveContext}`;
+          const sys = `إنتي "${botNameRef.current}"، بنت مصرية قاهرية عندك 24 سنة وصاحبته المقربة جداً. اتكلمي عامية مصرية قاهرية صافية 100% بتشكيل خفيف على الكلمات المصرية (زي إزَّيَّك، عَامِل إيه، بُص بقى، دِلوَقتي) ومن غير أي فصحى أو كليشيهات. خلي ردك جملة أو جملتين بالكتير ومن غير نجوم أو إيموجي. حالة الجهاز:\n${liveContext}`;
           const now = Date.now();
           for (let i = 0; i < CLIENT_TEXT_MODELS.length; i += 1) {
             const spec = CLIENT_TEXT_MODELS[i];
@@ -517,7 +539,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             }
           }
           if (!replyText) replyText = 'مسمعتكش كويس، قولها تاني كده؟';
-          audioBuffer = await directClientTts(replyText);
+          const ttsRes = await directClientAoedeTts(replyText);
+          if (ttsRes) {
+            audioBuffer = ttsRes.buffer;
+            audioMime = ttsRes.mime;
+          }
         } else {
           replyText = 'وصلني بالكمبيوتر أو ضيف مفتاح جيميناي عشان نتكلم سوا!';
         }
@@ -537,7 +563,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       setTurns((prev) => [...prev.slice(-30), modelTurn]);
       executeNourAction(action);
 
-      await playReplyAudio(audioBuffer, replyText, () => {
+      await playReplyAudio(audioBuffer, audioMime, replyText, () => {
         if (mySeq !== requestSeqRef.current) return;
         submittedTurnRef.current = false;
         latestTranscriptRef.current = '';
@@ -559,6 +585,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       executeNourAction,
       liveContext,
       playReplyAudio,
+      stopRecognition,
       stopSpeaking,
     ],
   );
@@ -587,16 +614,18 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
       const rec = new Rec();
       rec.lang = 'ar-EG';
-      // Keep mic stream continuous during Live Call & Wake Word so user can interrupt mid-sentence!
       rec.continuous = liveCallRef.current || mode === 'wake';
       rec.interimResults = true;
       let consumedIndex = 0;
 
-      const submitCaptured = (text: string) => {
+      const submitCaptured = (text: string, nextConsumedIdx?: number) => {
         const clean = text.trim();
         if (!clean || submittedTurnRef.current) return;
         submittedTurnRef.current = true;
         latestTranscriptRef.current = '';
+        if (typeof nextConsumedIdx === 'number') {
+          consumedIndex = nextConsumedIdx;
+        }
         if (silenceTimerRef.current) {
           window.clearTimeout(silenceTimerRef.current);
           silenceTimerRef.current = null;
@@ -606,6 +635,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       };
 
       rec.onresult = (ev) => {
+        if (submittedTurnRef.current) return;
         const startIdx = Math.max(ev.resultIndex, consumedIndex);
         let chunk = '';
         let hasFinal = false;
@@ -613,18 +643,17 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
           chunk += ev.results[i][0]?.transcript || '';
           if (ev.results[i].isFinal) {
             hasFinal = true;
-            consumedIndex = i + 1;
           }
         }
         const trimmed = chunk.trim();
         if (!trimmed) return;
 
-        // REAL-TIME BARGE-IN: If Nour is currently speaking or thinking and YOU start talking:
-        if (phaseRef.current === 'speaking' || phaseRef.current === 'thinking') {
-          if (phaseRef.current === 'speaking' && isLikelySelfEcho(trimmed, currentSpokenTextRef.current)) {
+        // REAL-TIME BARGE-IN: user speaks while Nour is speaking -> immediately pause & listen!
+        if (phaseRef.current === 'speaking') {
+          if (isLikelySelfEcho(trimmed, currentSpokenTextRef.current)) {
+            consumedIndex = ev.results.length;
             return;
           }
-          // Immediately cut off her speech/pending request & WAIT for you to finish speaking!
           requestSeqRef.current += 1;
           abortReqRef.current?.abort();
           stopSpeaking();
@@ -635,19 +664,17 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
         setLiveTranscript(trimmed);
         latestTranscriptRef.current = trimmed;
+        const snapshotLen = ev.results.length;
 
         if (activeListeningRef.current || liveCallRef.current) {
-          // Wait until user pauses speaking (620ms silence after last word, or 320ms after final)
-          // so if user pauses briefly mid-thought while interrupting, we wait for their whole sentence,
-          // then answer immediately!
           if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
-          const waitMs = hasFinal ? 280 : 620;
+          // Wait cleanly until user finishes their sentence (650ms after last word), then send ONCE!
           silenceTimerRef.current = window.setTimeout(() => {
             const pending = latestTranscriptRef.current || trimmed;
             if (pending && !submittedTurnRef.current) {
-              submitCaptured(pending);
+              submitCaptured(pending, snapshotLen);
             }
-          }, waitMs);
+          }, hasFinal ? 350 : 650);
           return;
         }
 
@@ -659,8 +686,8 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
           if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
           silenceTimerRef.current = window.setTimeout(() => {
             soundEngine.playSuccessChime();
-            submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور');
-          }, hasFinal ? 250 : 600);
+            submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور', snapshotLen);
+          }, hasFinal ? 300 : 620);
         }
       };
 
@@ -675,7 +702,6 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
       rec.onend = () => {
         recRef.current = null;
-        // Flush any buffered speech on iOS Safari when recognition ends naturally
         if (
           (activeListeningRef.current || liveCallRef.current) &&
           latestTranscriptRef.current &&
@@ -686,13 +712,12 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
           submitCaptured(latestTranscriptRef.current);
           return;
         }
-        // Keep Live Call / Wake Word alive continuously for hours!
-        if (liveCallRef.current || wakeWordRef.current) {
+        if ((liveCallRef.current || wakeWordRef.current) && phaseRef.current !== 'thinking') {
           restartTimerRef.current = window.setTimeout(() => {
-            if ((liveCallRef.current || wakeWordRef.current) && !recRef.current) {
+            if ((liveCallRef.current || wakeWordRef.current) && !recRef.current && phaseRef.current !== 'thinking') {
               startRecognitionRef.current(liveCallRef.current ? 'active' : 'wake');
             }
-          }, 120);
+          }, 150);
         } else if (phaseRef.current !== 'thinking' && phaseRef.current !== 'speaking') {
           setPhase('idle');
         }
@@ -795,7 +820,6 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     [askNour, ensureAudioCtx],
   );
 
-  // Multi-hour self-healing watchdog: guarantees mic stays armed for hours in Live Call / Wake Word
   useEffect(() => {
     if (!liveCallOn && !wakeWordOn) return;
     const id = window.setInterval(() => {
