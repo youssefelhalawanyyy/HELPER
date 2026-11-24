@@ -40,6 +40,7 @@ import { isKnownShortcut, runShortcut } from './macos/shortcuts.js';
 import { sendToActiveMacTerminal } from './macos/terminal.js';
 import { snapFrontmostWindow } from './macos/windowSnap.js';
 import { createApiRouter } from './routes/api.js';
+import { createDevSuiteRouter } from './routes/devSuite.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
 import { NetworkCommandService } from './services/networkCommandService.js';
@@ -262,6 +263,13 @@ app.use(
 );
 
 app.use('/hook', createWebhookRouter(webhookStore));
+app.use(
+  '/api/devsuite',
+  createDevSuiteRouter({
+    expectedToken: auth.token,
+    getProjectDir: () => configStore.getAll().projectDir,
+  }),
+);
 
 // --- Client Event Dispatcher ---
 async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void> {
