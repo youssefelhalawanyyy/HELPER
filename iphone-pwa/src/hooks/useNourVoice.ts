@@ -52,7 +52,6 @@ const CLIENT_AOEDE_MODELS = [
   'gemini-3.8-flash-lite-tts',
 ];
 let clientTtsCursor = 0;
-const clientTtsCooldown = new Map<string, number>();
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -117,53 +116,58 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 
 async function directClientAoedeTts(text: string): Promise<{ buffer: ArrayBuffer; mime: string } | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Read the Arabic line below in a warm, natural, expressive 24-year-old Cairo Egyptian woman's voice (100% authentic everyday Cairene Egyptian Arabic accent and intonation, like a close friend talking naturally on a call — never Classical/MSA Arabic). Speak ONLY the Arabic words:\n${text}`;
-  const start = clientTtsCursor % CLIENT_AOEDE_MODELS.length;
-  clientTtsCursor += 1;
-  const now = Date.now();
+  const styled = `Say naturally in Cairene Egyptian Arabic: ${text}`;
 
-  for (let i = 0; i < CLIENT_AOEDE_MODELS.length; i += 1) {
-    const model = CLIENT_AOEDE_MODELS[(start + i) % CLIENT_AOEDE_MODELS.length];
-    if ((clientTtsCooldown.get(model) || 0) > now) continue;
-    const ctrl = new AbortController();
-    const t = window.setTimeout(() => ctrl.abort(), 5000);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
-        {
-          method: 'POST',
-          signal: ctrl.signal,
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: styled }] }],
-            generationConfig: {
-              responseModalities: ['AUDIO'],
-              speechConfig: {
-                voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } },
+  for (let pass = 0; pass < 3; pass += 1) {
+    const models =
+      pass === 0
+        ? CLIENT_AOEDE_MODELS
+        : ['gemini-3.1-flash-tts-preview', 'gemini-3.8-flash-tts'];
+    const start = clientTtsCursor % models.length;
+    clientTtsCursor += 1;
+
+    for (let i = 0; i < models.length; i += 1) {
+      const model = models[(start + i) % models.length];
+      const ctrl = new AbortController();
+      const t = window.setTimeout(() => ctrl.abort(), 4500);
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
+          {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: styled }] }],
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } },
+                },
               },
-            },
-          }),
-        },
-      );
-      window.clearTimeout(t);
-      if (res.status === 429) {
-        clientTtsCooldown.set(model, Date.now() + 25_000);
-        continue;
+            }),
+          },
+        );
+        window.clearTimeout(t);
+        if (!res.ok) continue;
+        const json = (await res.json()) as {
+          candidates?: Array<{
+            content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+          }>;
+        };
+        const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+        if (!inline?.data) continue;
+        if (/pcm|L16/i.test(inline.mimeType || '')) {
+          return { buffer: pcm24kBase64ToWavBytes(inline.data), mime: 'audio/wav' };
+        }
+        return { buffer: base64ToArrayBuffer(inline.data), mime: inline.mimeType || 'audio/wav' };
+      } catch {
+        window.clearTimeout(t);
       }
-      if (!res.ok) continue;
-      const json = (await res.json()) as {
-        candidates?: Array<{
-          content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
-        }>;
-      };
-      const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-      if (!inline?.data) continue;
-      if (/pcm|L16/i.test(inline.mimeType || '')) {
-        return { buffer: pcm24kBase64ToWavBytes(inline.data), mime: 'audio/wav' };
-      }
-      return { buffer: base64ToArrayBuffer(inline.data), mime: inline.mimeType || 'audio/wav' };
-    } catch {
-      window.clearTimeout(t);
+    }
+
+    if (pass < 2) {
+      await new Promise((r) => window.setTimeout(r, 850));
     }
   }
   return null;
@@ -437,15 +441,17 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       const clean = userSpeech.trim();
       if (!clean) return;
 
-      // Hard deduplication guard: never send the exact same voice transcript twice within 4.5s!
+      // Normalized Arabic deduplication guard: prevents any duplicate or split re-send within 5s!
+      const normClean = normalizeArabicForEchoCheck(clean);
       const nowTs = Date.now();
       if (
-        clean === lastSubmittedRef.current.text &&
-        nowTs - lastSubmittedRef.current.ts < 4500
+        normClean &&
+        normClean === lastSubmittedRef.current.text &&
+        nowTs - lastSubmittedRef.current.ts < 5000
       ) {
         return;
       }
-      lastSubmittedRef.current = { text: clean, ts: nowTs };
+      lastSubmittedRef.current = { text: normClean, ts: nowTs };
 
       const mySeq = ++requestSeqRef.current;
       abortReqRef.current?.abort();
@@ -614,18 +620,18 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
       const rec = new Rec();
       rec.lang = 'ar-EG';
-      rec.continuous = liveCallRef.current || mode === 'wake';
+      // Single-utterance mode when actively listening -> WebKit waits for your FULL sentence
+      // and fires once cleanly instead of splitting mid-breath into 2 prompts!
+      rec.continuous = mode === 'wake' && !activeListeningRef.current;
       rec.interimResults = true;
-      let consumedIndex = 0;
+      let sessionCommitted = false;
 
-      const submitCaptured = (text: string, nextConsumedIdx?: number) => {
+      const submitCaptured = (text: string) => {
         const clean = text.trim();
-        if (!clean || submittedTurnRef.current) return;
+        if (!clean || sessionCommitted || submittedTurnRef.current) return;
+        sessionCommitted = true;
         submittedTurnRef.current = true;
         latestTranscriptRef.current = '';
-        if (typeof nextConsumedIdx === 'number') {
-          consumedIndex = nextConsumedIdx;
-        }
         if (silenceTimerRef.current) {
           window.clearTimeout(silenceTimerRef.current);
           silenceTimerRef.current = null;
@@ -635,23 +641,17 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       };
 
       rec.onresult = (ev) => {
-        if (submittedTurnRef.current) return;
-        const startIdx = Math.max(ev.resultIndex, consumedIndex);
-        let chunk = '';
-        let hasFinal = false;
-        for (let i = startIdx; i < ev.results.length; i += 1) {
-          chunk += ev.results[i][0]?.transcript || '';
-          if (ev.results[i].isFinal) {
-            hasFinal = true;
-          }
+        if (sessionCommitted || submittedTurnRef.current) return;
+        let full = '';
+        for (let i = 0; i < ev.results.length; i += 1) {
+          full += ev.results[i][0]?.transcript || '';
         }
-        const trimmed = chunk.trim();
+        const trimmed = full.trim();
         if (!trimmed) return;
 
         // REAL-TIME BARGE-IN: user speaks while Nour is speaking -> immediately pause & listen!
         if (phaseRef.current === 'speaking') {
           if (isLikelySelfEcho(trimmed, currentSpokenTextRef.current)) {
-            consumedIndex = ev.results.length;
             return;
           }
           requestSeqRef.current += 1;
@@ -664,17 +664,16 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
 
         setLiveTranscript(trimmed);
         latestTranscriptRef.current = trimmed;
-        const snapshotLen = ev.results.length;
 
         if (activeListeningRef.current || liveCallRef.current) {
+          // Comfortable 900ms pause window after your last word so mid-sentence breaths NEVER split into 2 sends!
           if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
-          // Wait cleanly until user finishes their sentence (650ms after last word), then send ONCE!
           silenceTimerRef.current = window.setTimeout(() => {
-            const pending = latestTranscriptRef.current || trimmed;
-            if (pending && !submittedTurnRef.current) {
-              submitCaptured(pending, snapshotLen);
+            const pending = latestTranscriptRef.current;
+            if (pending && !sessionCommitted && !submittedTurnRef.current) {
+              submitCaptured(pending);
             }
-          }, hasFinal ? 350 : 650);
+          }, 900);
           return;
         }
 
@@ -686,8 +685,8 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
           if (silenceTimerRef.current) window.clearTimeout(silenceTimerRef.current);
           silenceTimerRef.current = window.setTimeout(() => {
             soundEngine.playSuccessChime();
-            submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور', snapshotLen);
-          }, hasFinal ? 300 : 620);
+            submitCaptured(afterWake.length >= 2 ? afterWake : 'يا نور');
+          }, 850);
         }
       };
 
@@ -703,9 +702,10 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       rec.onend = () => {
         recRef.current = null;
         if (
+          !sessionCommitted &&
+          !submittedTurnRef.current &&
           (activeListeningRef.current || liveCallRef.current) &&
           latestTranscriptRef.current &&
-          !submittedTurnRef.current &&
           phaseRef.current !== 'thinking' &&
           phaseRef.current !== 'speaking'
         ) {
@@ -717,7 +717,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             if ((liveCallRef.current || wakeWordRef.current) && !recRef.current && phaseRef.current !== 'thinking') {
               startRecognitionRef.current(liveCallRef.current ? 'active' : 'wake');
             }
-          }, 150);
+          }, 180);
         } else if (phaseRef.current !== 'thinking' && phaseRef.current !== 'speaking') {
           setPhase('idle');
         }

@@ -1,6 +1,5 @@
-const CACHE_NAME = 'devdeck-shell-v3';
+const CACHE_NAME = 'devdeck-shell-v6';
 const PRECACHE_URLS = [
-  '/',
   '/manifest.json',
   '/keepawake.mp4',
   '/icons/icon-192.png',
@@ -30,7 +29,22 @@ self.addEventListener('fetch', (event) => {
   // Never intercept cross-origin bridge/tunnel API or WebSocket calls
   if (url.origin !== self.location.origin) return;
 
-  // Stale-while-revalidate: serve instantly from iPhone cache, refresh silently in background
+  // Network-first for HTML page navigations so deployments apply immediately on refresh!
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.status === 200) {
+            caches.open(CACHE_NAME).then((c) => c.put(req, res.clone())).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(req)),
+    );
+    return;
+  }
+
+  // Stale-while-revalidate for static assets (icons, hashed JS/CSS chunks)
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
       const cached = await cache.match(req);
