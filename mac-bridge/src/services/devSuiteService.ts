@@ -632,14 +632,15 @@ export interface NourChatResult {
 interface NourModelSpec {
   id: string;
   useThinkingZero: boolean;
+  inlineSystem?: boolean;
 }
 
-// Verified live active sub-second models (Nov 2026):
-// gemini-3.5-flash-lite (~1.0s, no thinkingConfig) + gemini-3.5-flash (~1.2s, thinkingBudget: 0)
+// Verified live active fast models (Nov 2026):
+// gemini-3.5-flash-lite (~1.0s) + gemini-3.5-flash (~1.2s) + gemma-4-26b-a4b-it (~1.9s, huge 30 RPM quota!)
 const NOUR_MODELS: NourModelSpec[] = [
   { id: 'gemini-3.5-flash-lite', useThinkingZero: false },
   { id: 'gemini-3.5-flash', useThinkingZero: true },
-  { id: 'gemini-flash-lite-latest', useThinkingZero: false },
+  { id: 'gemma-4-26b-a4b-it', useThinkingZero: false, inlineSystem: true },
 ];
 
 // Persistent pre-warmed Cairo Egyptian Arabic 24yo Female Neural Voice (ar-EG-SalmaNeural)
@@ -791,13 +792,17 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
   ];
 
   const callOneModel = async (spec: NourModelSpec, signal: AbortSignal): Promise<string> => {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${spec.id}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        signal,
-        body: JSON.stringify({
+    const reqBody = spec.inlineSystem
+      ? {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `${systemPrompt}\n\nردي بجملة مصرية واحدة أو جملتين بس بدون شرح أو نجوم على رسالة صاحبك دي:\n${opts.message}` }],
+            },
+          ],
+          generationConfig: { temperature: 0.75, maxOutputTokens: 80 },
+        }
+      : {
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents,
           generationConfig: {
@@ -805,7 +810,15 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
             maxOutputTokens: 80,
             ...(spec.useThinkingZero ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
           },
-        }),
+        };
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${spec.id}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal,
+        body: JSON.stringify(reqBody),
       },
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -833,7 +846,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
     const p2 = new Promise<string>((resolve, reject) => {
       hedgeTimer2 = setTimeout(() => {
         callOneModel(NOUR_MODELS[2], controllers[2].signal).then(resolve, reject);
-      }, 2400);
+      }, 1700);
     });
 
     const raw = await Promise.any([p0, p1, p2]);
