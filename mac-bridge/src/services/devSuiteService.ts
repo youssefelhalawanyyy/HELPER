@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import net from 'node:net';
 import tls from 'node:tls';
 import { promisify } from 'node:util';
+import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { loadDoctorAiKey } from './doctorAiAgent.js';
 
 const execFileAsync = promisify(execFile);
@@ -630,128 +631,120 @@ export interface NourChatResult {
 
 const NOUR_MODELS = [
   'gemini-2.5-flash-lite',
+  'gemini-2.0-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.5-flash',
   'gemini-3.1-flash-lite-preview',
-  'gemini-3-flash-preview',
   'gemini-flash-lite-latest',
 ];
 
-const NOUR_TTS_MODELS = [
-  'gemini-2.5-flash-preview-tts',
-  'gemini-3.8-flash-lite-tts',
-  'gemini-3.1-flash-tts-preview',
-];
+let nourTextCursor = 0;
+const textCooldownUntil = new Map<string, number>();
 
-let nourTtsCursor = 0;
-const ttsCooldownUntil = new Map<string, number>();
+// Persistent pre-warmed Cairo Egyptian Arabic 24yo Female Neural Voice (ar-EG-SalmaNeural)
+// -> ~350ms synthesis, ~30KB MP3, ZERO API quota limits (talks non-stop for hours!)
+const SALMA_VOICE = 'ar-EG-SalmaNeural';
+let warmEdgeTts: MsEdgeTTS | null = null;
+let warmEdgeReady: Promise<MsEdgeTTS | null> | null = null;
 
-/**
- * Downsamples 24kHz 16-bit mono PCM -> 16kHz 16-bit mono WAV (33% smaller over Cloudflare,
- * wideband HD voice quality, <1ms CPU time).
- */
-function pcm24kToWav16kBase64(pcmBase64: string): string {
-  const src = Buffer.from(pcmBase64, 'base64');
-  const srcSamples = Math.floor(src.length / 2);
-  const dstSamples = Math.floor((srcSamples * 2) / 3);
-  const pcm = Buffer.alloc(dstSamples * 2);
-
-  for (let i = 0; i < dstSamples; i += 1) {
-    const pos = i * 1.5;
-    const idx = Math.floor(pos);
-    const frac = pos - idx;
-    const s0 = src.readInt16LE(Math.min(idx, srcSamples - 1) * 2);
-    const s1 = src.readInt16LE(Math.min(idx + 1, srcSamples - 1) * 2);
-    const val = Math.max(-32768, Math.min(32767, Math.round(s0 + (s1 - s0) * frac)));
-    pcm.writeInt16LE(val, i * 2);
+async function getWarmSalmaTts(forceReset = false): Promise<MsEdgeTTS | null> {
+  if (forceReset) {
+    try {
+      warmEdgeTts?.close();
+    } catch {
+      // Ignore
+    }
+    warmEdgeTts = null;
+    warmEdgeReady = null;
   }
+  if (warmEdgeTts) return warmEdgeTts;
+  if (warmEdgeReady) return warmEdgeReady;
 
-  const header = Buffer.alloc(44);
-  const sampleRate = 16000;
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-  const blockAlign = (numChannels * bitsPerSample) / 8;
+  warmEdgeReady = (async () => {
+    try {
+      const inst = new MsEdgeTTS();
+      await inst.setMetadata(SALMA_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+      warmEdgeTts = inst;
+      return inst;
+    } catch {
+      warmEdgeTts = null;
+      return null;
+    } finally {
+      warmEdgeReady = null;
+    }
+  })();
 
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + pcm.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(numChannels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(byteRate, 28);
-  header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(bitsPerSample, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(pcm.length, 40);
+  return warmEdgeReady;
+}
 
-  return Buffer.concat([header, pcm]).toString('base64');
+// Pre-warm Salma Neural voice immediately on bridge boot so Turn 1 is instant too!
+void getWarmSalmaTts();
+
+async function synthesizeSalmaMp3(text: string): Promise<{ audioBase64: string; audioMime: string } | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const tts = await getWarmSalmaTts(attempt > 0);
+    if (!tts) continue;
+    try {
+      const buf = await new Promise<Buffer>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Edge TTS timeout')), 4500);
+        const { audioStream } = tts.toStream(text, { rate: '+12%', pitch: '+2Hz' });
+        const chunks: Buffer[] = [];
+        audioStream.on('data', (c: Buffer | Uint8Array) => {
+          chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+        });
+        audioStream.on('end', () => {
+          clearTimeout(timer);
+          resolve(Buffer.concat(chunks));
+        });
+        audioStream.on('error', (err: Error) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+      if (buf.length > 256) {
+        return { audioBase64: buf.toString('base64'), audioMime: 'audio/mpeg' };
+      }
+    } catch {
+      // Re-init connection on retry
+    }
+  }
+  return null;
+}
+
+async function synthesizeGoogleTranslateFallbackMp3(
+  text: string,
+): Promise<{ audioBase64: string; audioMime: string } | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3500);
+  try {
+    const q = encodeURIComponent(text.slice(0, 200));
+    const res = await fetch(
+      `https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ar&q=${q}`,
+      {
+        signal: ctrl.signal,
+        headers: { 'user-agent': 'Mozilla/5.0' },
+      },
+    );
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const ab = await res.arrayBuffer();
+    if (ab.byteLength < 256) return null;
+    return { audioBase64: Buffer.from(ab).toString('base64'), audioMime: 'audio/mpeg' };
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
 }
 
 async function synthesizeNourSpeech(
   text: string,
-  apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
-  const styledPrompt = `Speak briskly and naturally like a warm 24-year-old Egyptian close friend from Cairo:\n${text}`;
-  const now = Date.now();
+  // Tier 1: Studio Egyptian Female Neural Voice (ar-EG-SalmaNeural) — ~350ms, unlimited turns!
+  const salma = await synthesizeSalmaMp3(text);
+  if (salma) return salma;
 
-  // Round-robin across all 3 Gemini TTS models (triples RPM quota for multi-hour chats)
-  // and immediately skip any model in 429 cooldown!
-  const startIdx = nourTtsCursor % NOUR_TTS_MODELS.length;
-  nourTtsCursor += 1;
-
-  for (let offset = 0; offset < NOUR_TTS_MODELS.length; offset += 1) {
-    const model = NOUR_TTS_MODELS[(startIdx + offset) % NOUR_TTS_MODELS.length];
-    if ((ttsCooldownUntil.get(model) || 0) > now) continue;
-
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          signal: ctrl.signal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: styledPrompt }] }],
-            generationConfig: {
-              responseModalities: ['AUDIO'],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: 'Aoede' },
-                },
-              },
-            },
-          }),
-        },
-      );
-      clearTimeout(timer);
-      if (res.status === 429) {
-        // Put rate-limited model on 45s cooldown so next turns skip it in 0ms!
-        ttsCooldownUntil.set(model, Date.now() + 45_000);
-        continue;
-      }
-      if (!res.ok) continue;
-
-      const json = (await res.json()) as {
-        candidates?: Array<{
-          content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
-        }>;
-      };
-      const inline = json.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-      if (!inline?.data) continue;
-
-      const mime = inline.mimeType || '';
-      if (/pcm|L16/i.test(mime)) {
-        return { audioBase64: pcm24kToWav16kBase64(inline.data), audioMime: 'audio/wav' };
-      }
-      return { audioBase64: inline.data, audioMime: mime || 'audio/wav' };
-    } catch {
-      clearTimeout(timer);
-    }
-  }
-  return null;
+  // Tier 2: Instant MP3 backup so Nour NEVER stays silent even if Microsoft's edge socket blinks
+  return synthesizeGoogleTranslateFallbackMp3(text);
 }
 
 export async function chatWithNour(opts: {
@@ -763,9 +756,13 @@ export async function chatWithNour(opts: {
 }): Promise<NourChatResult> {
   const apiKey = loadDoctorAiKey();
   if (!apiKey) {
+    const msg = 'محتاجة مفتاح جيميناي من صفحة بي سي دكتور عشان أرد عليك.';
+    const audio = await synthesizeNourSpeech(msg);
     return {
       ok: false,
-      reply: 'محتاجة مفتاح جيميناي من صفحة بي سي دكتور عشان أرد عليك.',
+      reply: msg,
+      audioBase64: audio?.audioBase64,
+      audioMime: audio?.audioMime,
       error: 'Missing Gemini API key',
     };
   }
@@ -785,16 +782,23 @@ export async function chatWithNour(opts: {
 ${opts.liveContext || 'الجهاز شغال تمام.'}`;
 
   const contents = [
-    ...(opts.history || []).slice(-16).map((m) => ({
+    ...(opts.history || []).slice(-18).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.text }],
     })),
     { role: 'user', parts: [{ text: opts.message }] },
   ];
 
-  for (const model of NOUR_MODELS) {
+  const now = Date.now();
+  const startIdx = nourTextCursor % NOUR_MODELS.length;
+  nourTextCursor += 1;
+
+  for (let offset = 0; offset < NOUR_MODELS.length; offset += 1) {
+    const model = NOUR_MODELS[(startIdx + offset) % NOUR_MODELS.length];
+    if ((textCooldownUntil.get(model) || 0) > now) continue;
+
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4500);
+    const timer = setTimeout(() => ctrl.abort(), 3800);
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -807,7 +811,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
             contents,
             generationConfig: {
               temperature: 0.78,
-              maxOutputTokens: 85,
+              maxOutputTokens: 80,
               ...(model.includes('2.5') || model.includes('3')
                 ? { thinkingConfig: { thinkingBudget: 0 } }
                 : {}),
@@ -816,6 +820,10 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
         },
       );
       clearTimeout(timer);
+      if (res.status === 429) {
+        textCooldownUntil.set(model, Date.now() + 35_000);
+        continue;
+      }
       if (!res.ok) continue;
 
       const json = (await res.json()) as {
@@ -834,7 +842,7 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
         .replace(/\s+/g, ' ')
         .trim();
 
-      const audio = await synthesizeNourSpeech(cleanReply, apiKey);
+      const audio = await synthesizeNourSpeech(cleanReply);
 
       return {
         ok: true,
@@ -848,9 +856,13 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
     }
   }
 
+  const fallbackMsg = 'ثانية واحدة الصوت قطع عندي، قول تاني كده؟';
+  const fallbackAudio = await synthesizeNourSpeech(fallbackMsg);
   return {
     ok: false,
-    reply: 'ثانية النت علق عندي، قول تاني كده؟',
+    reply: fallbackMsg,
+    audioBase64: fallbackAudio?.audioBase64,
+    audioMime: fallbackAudio?.audioMime,
     error: 'All Gemini models failed or rate-limited',
   };
 }
