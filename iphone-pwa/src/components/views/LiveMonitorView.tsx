@@ -79,9 +79,9 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   return (
     <div className="screen-grid layout-monitor">
       {/* Column 1: Real Mac Telemetry Rings */}
-      <div className="tile flex flex-col justify-between p-3.5">
+      <div className="tile flex min-h-0 flex-col justify-between gap-1.5 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
-        <div className="disp text-[26px]">Telemetry</div>
+        <div className="disp text-[clamp(16px,2.2cqw,24px)]">Telemetry</div>
         <div className="telemetry-gauges flex items-center justify-around">
           <GlowRing value={isConnected ? deck.stats.cpuPct : 0} color="#22d3ee" label="CPU %" />
           <GlowRing value={isConnected ? deck.stats.ramPct : 0} color="#f472b6" label="RAM %" />
