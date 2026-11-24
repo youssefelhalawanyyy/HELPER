@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
-import { makeRequestId } from '@/lib/formatters';
+import { formatUptime, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 const FAVORITE_DOCK_APPS = [
@@ -37,13 +37,6 @@ const FAVORITE_DOCK_APPS = [
   { name: 'Notes', label: 'Notes' },
   { name: 'Calendar', label: 'Calendar' },
 ];
-
-function formatUptime(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-  return `${h}h ${m}m`;
-}
 
 export function MacInspectorView({
   deck,

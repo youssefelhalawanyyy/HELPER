@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
+import { useDeskBreak } from '@/hooks/useDeskBreak';
+import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
 import { useDevDeckSocket } from '@/hooks/useDevDeckSocket';
 import { useWakeLock } from '@/hooks/useWakeLock';
@@ -58,10 +60,6 @@ const HardwareToolsView = dynamic(
   () => import('@/components/views/HardwareToolsView').then((m) => m.HardwareToolsView),
   { loading: ViewSkeleton },
 );
-const PreviewAmbientView = dynamic(
-  () => import('@/components/views/PreviewAmbientView').then((m) => m.PreviewAmbientView),
-  { loading: ViewSkeleton },
-);
 const LaunchControlView = dynamic(
   () => import('@/components/views/LaunchControlView').then((m) => m.LaunchControlView),
   { loading: ViewSkeleton },
@@ -95,6 +93,12 @@ const PAGE_VARIANTS = {
 
 export function DeckShell() {
   const deck = useDevDeckSocket();
+  const { triggerFlash, showToast } = deck;
+  const onBreakComplete = useCallback(() => {
+    triggerFlash('success', 'Break timer complete');
+    showToast(true, 'Break timer complete');
+  }, [triggerFlash, showToast]);
+  const deskBreak = useDeskBreak(onBreakComplete);
   const wakeLock = useWakeLock();
   const [pageIdx, setPageIdx] = useState(0);
   const [direction, setDirection] = useState(1);
@@ -139,7 +143,6 @@ export function DeckShell() {
       void import('@/components/views/NetworkCommandView');
       void import('@/components/views/LiveMonitorView');
       void import('@/components/views/MacInspectorView');
-      void import('@/components/views/PreviewAmbientView');
       void import('@/components/views/LaunchControlView');
     };
     const w = window as unknown as {
@@ -487,7 +490,7 @@ export function DeckShell() {
                 className="console-view"
                 data-screen={activeView}
               >
-                {activeView !== 'deck' && (
+                {activeView !== 'deck' && activeView !== 'preview' && (
                   <header className="screen-masthead">
                     <div className="masthead-copy">
                       <activePage.icon size={22} aria-hidden="true" />
@@ -514,7 +517,7 @@ export function DeckShell() {
                   <MacInspectorView deck={deck} onNavigateToMonitor={() => goToView('monitor')} />
                 )}
                 {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
-                {activeView === 'preview' && <PreviewAmbientView deck={deck} />}
+                {activeView === 'preview' && <PreviewAmbientView deck={deck} deskBreak={deskBreak} onPair={() => setPairingModalOpen(true)} />}
                 {activeView === 'launch' && <LaunchControlView deck={deck} />}
                 {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
                 {activeView === 'network' && <NetworkCommandView deck={deck} />}

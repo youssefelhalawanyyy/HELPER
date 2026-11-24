@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 export const PAGES = [
+  { id: 'preview', label: 'Desk Clock', title: 'Desk Clock', icon: Clock3, accent: '#aecaf4' },
   { id: 'deck', label: 'Deck', title: 'Smart Deck', icon: Grid2X2, accent: '#ccbaff' },
   { id: 'antigravity', label: 'Antigravity', title: 'Antigravity', icon: Bot, accent: '#96d9ea' },
   { id: 'monitor', label: 'Monitor', title: 'Live Monitor', icon: Activity, accent: '#a5dfbe' },
@@ -29,7 +30,6 @@ export const PAGES = [
     icon: MousePointer2,
     accent: '#f0cc9b',
   },
-  { id: 'preview', label: 'Desk Clock', title: 'Desk Clock', icon: Clock3, accent: '#aecaf4' },
   { id: 'launch', label: 'Launch', title: 'Launch Control', icon: Rocket, accent: '#edbb9e' },
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#efb6c7' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#9cd5ca' },

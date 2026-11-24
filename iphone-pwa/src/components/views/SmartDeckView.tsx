@@ -6,26 +6,39 @@ import styles from './SmartDeckView.module.css';
 import {
   Activity,
   AppWindow,
-  ArrowUpRight,
   ArrowRight,
-  Layers3,
-  SlidersHorizontal,
-  Network,
+  ArrowUpRight,
   Bot,
+  Calendar,
   Camera,
   CheckCircle2,
+  Circle,
   ClipboardPaste,
+  Clock,
+  Cloud,
+  CloudLightning,
   Code2,
   Command,
   Copy,
   Cpu,
   Edit3,
   Eraser,
+  ExternalLink,
+  Eye,
+  EyeOff,
   GitBranch,
   GitPullRequest,
+  Globe,
+  Heart,
+  Layers3,
   Link2,
+  Loader2,
   Lock,
   Mic,
+  Moon,
+  MoonStar,
+  MoreHorizontal,
+  Network,
   OctagonX,
   PanelLeft,
   Play,
@@ -36,10 +49,19 @@ import {
   Save,
   Search,
   Send,
+  Settings,
+  Settings2,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
+  Star,
+  Sun,
+  Sunrise,
+  Sunset,
   Terminal,
   TerminalSquare,
+  TextCursor,
+  Thermometer,
   Trash2,
   VolumeX,
   Wand2,
@@ -54,8 +76,25 @@ import { soundEngine } from '@/lib/soundEngine';
 import type { MacroActionType, MacroButton, ProfileId } from '@/types/protocol';
 
 /* -------------------------------------------------------------------------- */
-/*  Tokens                                                                    */
+/*  Theme Tokens - Descklock Aesthetic                                        */
 /* -------------------------------------------------------------------------- */
+
+const THEME = {
+  // Deep night sky background with subtle gradient
+  background: '#0a0a12',
+  surface: '#120a1f',
+  surface2: '#1a122a',
+  accent: '#c6b4ff',      // Soft lilac/primary
+  accentGlow: 'rgba(198, 180, 255, 0.4)',
+  muted: '#6b5b80',
+  mutedSoft: '#4a3f6a',
+  text: '#e8e4f0',
+  textSubtle: '#a8a0c0',
+  border: '#3a3050',
+  success: '#4ade80',
+  warning: '#fbbf24',
+  error: '#f87171',
+};
 
 const ICON_MAP: Record<string, typeof Zap> = {
   Bot,
@@ -147,7 +186,7 @@ const ACTION_META: Record<
   {
     label: string;
     name: string;
-    icon: typeof Zap;
+    icon: typeof Clock;
     color: MacroButton['color'];
     hint: string;
     example: string;
@@ -155,7 +194,7 @@ const ACTION_META: Record<
 > = {
   shortcut: {
     label: 'Shortcut',
-    icon: Command,
+    icon: Clock,
     hint: 'Send a key combination to the active app.',
     name: 'Keyboard shortcut',
     color: 'violet',
@@ -163,7 +202,7 @@ const ACTION_META: Record<
   },
   shell: {
     label: 'Shell',
-    icon: Terminal,
+    icon: Clock,
     hint: 'Run a command in the background.',
     name: 'Shell command',
     color: 'emerald',
@@ -171,7 +210,7 @@ const ACTION_META: Record<
   },
   terminal: {
     label: 'Terminal',
-    icon: TerminalSquare,
+    icon: Clock,
     hint: 'Send a command to your terminal.',
     name: 'Terminal command',
     color: 'amber',
@@ -179,7 +218,7 @@ const ACTION_META: Record<
   },
   stream: {
     label: 'Stream',
-    icon: Activity,
+    icon: Clock,
     hint: 'Follow live output from a log preset.',
     name: 'Log stream',
     color: 'cyan',
@@ -187,7 +226,7 @@ const ACTION_META: Record<
   },
   voice: {
     label: 'Voice',
-    icon: Mic,
+    icon: Clock,
     hint: 'Speak a prompt and send it to your Mac.',
     name: 'Voice dictation',
     color: 'crimson',
@@ -195,7 +234,7 @@ const ACTION_META: Record<
   },
   snippet: {
     label: 'Snippet',
-    icon: ClipboardPaste,
+    icon: Clock,
     hint: 'Paste saved text at your cursor.',
     name: 'Text snippet',
     color: 'slate',
@@ -238,7 +277,7 @@ function KeycapFace({
 }: {
   label: string;
   sublabel: string;
-  Icon: typeof Zap;
+  Icon: typeof Clock;
   detail?: string;
   voice?: boolean;
 }) {
@@ -251,10 +290,134 @@ function KeycapFace({
         {detail && <span className={styles.keyDetail}>{detail}</span>}
       </span>
       <span className={styles.keyCopy}>
-        <strong>{voice ? 'Listening…' : label || 'Untitled macro'}</strong>
+        <strong>{voice ? 'Listening…' : label || 'Untitled'}</strong>
         <small>{sublabel}</small>
       </span>
     </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Analog Clock Dial Component                                                 */
+/* -------------------------------------------------------------------------- */
+
+function AnalogClock({
+  time,
+}: {
+  time: Date;
+}) {
+  const hour = time.getHours() % 12 || 12;
+  const minute = time.getMinutes();
+  const second = time.getSeconds();
+  const millisec = time.getMilliseconds();
+  
+  const hourAngle = (hour * 30) + (minute * 0.5) + (second * 0.008) + (millisec * 0.00008);
+  const minuteAngle = (minute * 6) + (second * 0.1) + (millisec * 0.01);
+  const secondAngle = (second * 6) + (millisec * 0.06);
+  
+  const hourLength = 50;
+  const minuteLength = 65;
+  const secondLength = 75;
+
+  return (
+    <svg className="relative w-24 h-24 mx-auto" viewBox="0 0 100 100">
+      <circle
+        cx="50"
+        cy="50"
+        r="45"
+        stroke="var(--accent)"
+        strokeWidth={2}
+        fill="none"
+      />
+      <circle
+        cx="50"
+        cy="50"
+        r="38"
+        stroke="var(--surface)"
+        strokeWidth={1}
+        fill="none"
+      />
+      
+      {/* Hour marks */}
+      {Array.from({ length: 12 }, (_, i) => {
+        const angle = (i * Math.PI / 6) - (Math.PI / 2);
+        const x1 = 50 + 35 * Math.cos(angle);
+        const y1 = 50 + 35 * Math.sin(angle);
+        const x2 = 50 + 42 * Math.cos(angle);
+        const y2 = 50 + 42 * Math.sin(angle);
+        return (
+          <line
+            key={i}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke="var(--muted)"
+            strokeWidth={1}
+          />
+        );
+      })}
+      
+      {/* Center dot */}
+      <circle cx="50" cy="50" r="3" fill="var(--accent)" />
+      
+      {/* Hand components */}
+      <line
+        x1="50"
+        y1="50"
+        x2={50 + hourLength * Math.cos(hourAngle * Math.PI / 180)}
+        y2={50 + hourLength * Math.sin(hourAngle * Math.PI / 180)}
+        stroke="var(--accent)"
+        strokeWidth={4}
+        strokeLinecap="round"
+      />
+      <line
+        x1="50"
+        y1="50"
+        x2={50 + minuteLength * Math.cos(minuteAngle * Math.PI / 180)}
+        y2={50 + minuteLength * Math.sin(minuteAngle * Math.PI / 180)}
+        stroke="var(--textSubtle)"
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+      <line
+        x1="50"
+        y1="50"
+        x2={50 + secondLength * Math.cos(secondAngle * Math.PI / 180)}
+        y2={50 + secondLength * Math.sin(secondAngle * Math.PI / 180)}
+        stroke="#ff5f57"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      
+      {/* Decorative center */}
+      <circle cx="50" cy="50" r="8" fill="var(--accentGlow)" />
+      <circle cx="50" cy="50" r="4" fill="none" stroke="var(--accent)" strokeWidth={1} />
+    </svg>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Digital Clock Display                                                       */
+/* -------------------------------------------------------------------------- */
+
+function DigitalClock({
+  time,
+}: {
+  time: Date;
+}) {
+  const hours = time.getHours().toString().padStart(2, '0');
+  const minutes = time.getMinutes().toString().padStart(2, '0');
+  const seconds = time.getSeconds().toString().padStart(2, '0');
+  const ampm = time.getHours() >= 12 ? 'PM' : 'AM';
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-3xl font-extrabold tracking-tight">{hours}</span>
+      <span className="text-3xl font-extrabold tracking-tight">{minutes}</span>
+      <span className="text-3xl font-extrabold tracking-tight">{seconds}</span>
+      <span className="text-sm text-[var(--muted)]">ampm</span>
+    </div>
   );
 }
 
@@ -504,7 +667,12 @@ export function SmartDeckView({
   return (
     <div className={styles.deck}>
       <div className={styles.workspace}>
+        {/* ============ HEADER WITH CLOCK ============ */}
         <header className={styles.hero}>
+          <div className={styles.heroClock}>
+            <AnalogClock time={new Date()} />
+            <DigitalClock time={new Date()} />
+          </div>
           <div className={styles.heroCopy}>
             <span className={styles.connection} role="status" data-live={isConnected}>
               <i />
@@ -528,11 +696,32 @@ export function SmartDeckView({
           </div>
         </header>
 
+        {/* ============ CLOCK INFO SECTION ============ */}
+        <div className={styles.clockInfo}>
+          <div className={styles.clockDetails}>
+            <div className={styles.timeZone}>
+              <Clock size={16} /> {new Date().toLocaleTimeString(undefined, { hour12: false })}
+            </div>
+            <div className={styles.dateDisplay}>
+              <Calendar size={14} /> {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+            </div>
+          </div>
+          <div className={styles.quickActions}>
+            <button type="button" className={styles.quickBtn} onClick={() => setAutoSwitch(!autoSwitch)}>
+              {autoSwitch ? <MoonStar size={14} /> : <Sun size={14} />}
+              {autoSwitch ? 'Auto-switch' : 'Manual mode'}
+            </button>
+            <button type="button" className={styles.quickBtn} onClick={onNavigateToMonitor}>
+              <Activity size={14} /> Live Monitor
+            </button>
+          </div>
+        </div>
+
         <div className={styles.panels}>
           <section className={styles.library} aria-labelledby="deck-library-title">
             <div className={styles.heading}>
               <div className={styles.titleGroup}>
-                <Layers3 size={19} />
+                <MoonStar size={19} />
                 <h2 id="deck-library-title">{isConnected ? 'Macro library' : 'Action library'}</h2>
               </div>
               <label className={styles.search}>
@@ -658,7 +847,7 @@ export function SmartDeckView({
                             ? liveTranscript || 'Tap to finish'
                             : macro.sublabel || ACTION_META[macro.actionType].label
                         }
-                        Icon={ICON_MAP[macro.icon] || Zap}
+                        Icon={ICON_MAP[macro.icon] || Clock}
                         detail={editMode ? 'Edit' : ACTION_META[macro.actionType].label}
                         voice={listening}
                       />
@@ -822,7 +1011,7 @@ export function SmartDeckView({
                   sublabel={
                     editingMacro.sublabel || ACTION_META[editingMacro.actionType]?.label || ''
                   }
-                  Icon={ICON_MAP[editingMacro.icon] || Zap}
+                  Icon={ICON_MAP[editingMacro.icon] || Clock}
                 />
               </div>
               <p className="text-[10px] leading-snug text-[#7c8190]">

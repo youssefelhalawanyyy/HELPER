@@ -18,3 +18,10 @@ export function formatTimeShort(ts: number): string {
 export function makeRequestId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
+
+export function formatUptime(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+  return `${h}h ${m}m`;
+}

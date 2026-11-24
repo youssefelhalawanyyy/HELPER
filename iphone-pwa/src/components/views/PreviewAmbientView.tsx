@@ -38,7 +38,18 @@ function formatWorldClock(date: Date, timeZone: string): string {
   }
 }
 
-export function PreviewAmbientView({ deck }: { deck: DevDeckState }) {
+export interface DeskBreakController {
+  deadline: number | null;
+  changeDeadline: (value: number | null) => void;
+}
+
+export function PreviewAmbientView({
+  deck,
+}: {
+  deck: DevDeckState;
+  deskBreak?: DeskBreakController;
+  onPair?: () => void;
+}) {
   const [mode, setMode] = useState<'ambient' | 'preview'>('ambient');
   const [urlInput, setUrlInput] = useState(deck.previewUrl);
   const [now, setNow] = useState(() => new Date());
