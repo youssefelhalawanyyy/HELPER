@@ -645,10 +645,11 @@ const NOUR_MODELS: NourModelSpec[] = [
 // 100% Pure Google Gemini Native "Aoede" Voice (NEVER switches to robotic fallback!)
 // Active highest-success models first, with smart sub-second token-bucket retry on transient 429s
 const GEMINI_AOEDE_TTS_MODELS = [
+  'gemini-3.8-flash-lite-tts',
   'gemini-3.1-flash-tts-preview',
   'gemini-3.8-flash-tts',
   'gemini-2.5-flash-preview-tts',
-  'gemini-3.8-flash-lite-tts',
+  'gemini-2.5-pro-preview-tts',
 ];
 let aoedeTtsCursor = 0;
 
@@ -693,7 +694,7 @@ async function callSingleAoedeModel(
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | 'rate_limited' | null> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4500);
+  const timer = setTimeout(() => ctrl.abort(), 7000);
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -740,25 +741,19 @@ async function synthesizeNourSpeech(
   text: string,
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {
-  // Compact Egyptian style cue -> 35% faster Aoede synthesis (~2.1s) with 100% pure Aoede voice!
-  const styledPrompt = `Say naturally in Cairene Egyptian Arabic: ${text}`;
-
-  // Up to 3 rapid passes across Aoede models (with short 850ms bucket refill wait ONLY if all hit 429)
-  // so Turn 4, Turn 10, Turn 100 ALWAYS stay 100% Aoede and NEVER turn robotic!
+  // Check ALL 5 Gemini Aoede TTS models across passes (429 fails fast in ~190ms)
   for (let pass = 0; pass < 3; pass += 1) {
-    const primaryPair = ['gemini-3.1-flash-tts-preview', 'gemini-3.8-flash-tts'];
-    const models = pass === 0 ? GEMINI_AOEDE_TTS_MODELS : primaryPair;
-    const start = aoedeTtsCursor % models.length;
+    const start = aoedeTtsCursor % GEMINI_AOEDE_TTS_MODELS.length;
     aoedeTtsCursor += 1;
 
-    for (let i = 0; i < models.length; i += 1) {
-      const model = models[(start + i) % models.length];
-      const out = await callSingleAoedeModel(model, styledPrompt, apiKey);
+    for (let i = 0; i < GEMINI_AOEDE_TTS_MODELS.length; i += 1) {
+      const model = GEMINI_AOEDE_TTS_MODELS[(start + i) % GEMINI_AOEDE_TTS_MODELS.length];
+      const out = await callSingleAoedeModel(model, text, apiKey);
       if (out && out !== 'rate_limited') return out;
     }
 
     if (pass < 2) {
-      await new Promise((r) => setTimeout(r, 850));
+      await new Promise((r) => setTimeout(r, 1100));
     }
   }
   return null;

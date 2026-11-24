@@ -46,10 +46,11 @@ const CLIENT_TEXT_MODELS: Array<{ id: string; thinkZero: boolean }> = [
 const clientTextCooldown = new Map<string, number>();
 
 const CLIENT_AOEDE_MODELS = [
+  'gemini-3.8-flash-lite-tts',
   'gemini-3.1-flash-tts-preview',
   'gemini-3.8-flash-tts',
   'gemini-2.5-flash-preview-tts',
-  'gemini-3.8-flash-lite-tts',
+  'gemini-2.5-pro-preview-tts',
 ];
 let clientTtsCursor = 0;
 
@@ -116,20 +117,15 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 
 async function directClientAoedeTts(text: string): Promise<{ buffer: ArrayBuffer; mime: string } | null> {
   if (ENV_GEMINI_KEY.length < 12) return null;
-  const styled = `Say naturally in Cairene Egyptian Arabic: ${text}`;
 
   for (let pass = 0; pass < 3; pass += 1) {
-    const models =
-      pass === 0
-        ? CLIENT_AOEDE_MODELS
-        : ['gemini-3.1-flash-tts-preview', 'gemini-3.8-flash-tts'];
-    const start = clientTtsCursor % models.length;
+    const start = clientTtsCursor % CLIENT_AOEDE_MODELS.length;
     clientTtsCursor += 1;
 
-    for (let i = 0; i < models.length; i += 1) {
-      const model = models[(start + i) % models.length];
+    for (let i = 0; i < CLIENT_AOEDE_MODELS.length; i += 1) {
+      const model = CLIENT_AOEDE_MODELS[(start + i) % CLIENT_AOEDE_MODELS.length];
       const ctrl = new AbortController();
-      const t = window.setTimeout(() => ctrl.abort(), 4500);
+      const t = window.setTimeout(() => ctrl.abort(), 7000);
       try {
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(ENV_GEMINI_KEY)}`,
@@ -138,7 +134,7 @@ async function directClientAoedeTts(text: string): Promise<{ buffer: ArrayBuffer
             signal: ctrl.signal,
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: styled }] }],
+              contents: [{ parts: [{ text }] }],
               generationConfig: {
                 responseModalities: ['AUDIO'],
                 speechConfig: {
