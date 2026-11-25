@@ -50,14 +50,11 @@ const PAIRING_STORAGE_KEY = 'devdeck.pairing.v2';
 // 7) Builds mac-bridge and launches live Cloudflare HTTP/2 tunnel + QR code
 const WIN_SELF_HEALING_ONELINER = `Set-ExecutionPolicy Bypass -Scope Process -Force; $ErrorActionPreference='Continue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $pNode="$env:LOCALAPPDATA\\DevDeck\\node\\node-v22.14.0-win-x64"; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User') + ";C:\\Program Files\\nodejs;$env:LOCALAPPDATA\\Programs\\nodejs;$pNode;C:\\Program Files\\Git\\cmd"; if (!(Get-Command node -ErrorAction SilentlyContinue)) { Write-Host '[AUTOPILOT] Installing Node.js LTS...' -ForegroundColor Cyan; if (Get-Command winget -ErrorAction SilentlyContinue) { winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements }; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User') + ";C:\\Program Files\\nodejs;$pNode" }; if (!(Get-Command node -ErrorAction SilentlyContinue)) { Write-Host '[AUTOPILOT] Downloading portable Node.js v22 LTS (no admin needed)...' -ForegroundColor Cyan; $z="$env:TEMP\\node22.zip"; New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\\DevDeck\\node" | Out-Null; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath "$env:LOCALAPPDATA\\DevDeck\\node" -Force; $env:Path="$pNode;$env:Path" }; Get-NetTCPConnection -LocalPort 4747 -ErrorAction SilentlyContinue | ForEach-Object { if ($_.OwningProcess -gt 4) { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; $d="$env:USERPROFILE\\HELPER"; if (!(Test-Path "$d\\package.json")) { if (Get-Command git -ErrorAction SilentlyContinue) { git clone ${REPO_GIT} "$d" } else { Write-Host '[AUTOPILOT] Downloading HELPER ZIP (no Git needed)...' -ForegroundColor Cyan; Invoke-WebRequest -Uri '${REPO_ZIP}' -OutFile "$env:TEMP\\helper.zip"; Expand-Archive -Path "$env:TEMP\\helper.zip" -DestinationPath "$env:TEMP\\helper_ext" -Force; New-Item -ItemType Directory -Force -Path "$d" | Out-Null; Copy-Item -Path "$env:TEMP\\helper_ext\\HELPER-main\\*" -Destination "$d" -Recurse -Force } }; Set-Location "$d"; if (Test-Path .git) { git pull --ff-only 2>$null }; & npm.cmd install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { & npm.cmd cache clean --force 2>$null; & npm.cmd install --no-audit --no-fund --legacy-peer-deps }; & npm.cmd run build -w mac-bridge 2>$null; & npm.cmd run live`;
 
-// 100% Autonomous Self-Healing 1-Line macOS Terminal Agent:
-// 1) Configures Homebrew, /usr/local/bin, and ~/.devdeck/node/bin on PATH
-// 2) Auto-installs Node.js via Homebrew OR downloads official standalone darwin-arm64/x64 Node v22 LTS tarball (zero sudo required!)
-// 3) Clears unresponsive process on port 4747
-// 4) Clones via Git OR downloads & extracts main.tar.gz via curl + tar
-// 5) Runs npm install with automatic cache-clean + --legacy-peer-deps self-healing fallback
-// 6) Builds mac-bridge and launches live Cloudflare HTTPS tunnel + QR code
-const MAC_SELF_HEALING_ONELINER = `export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.devdeck/node/bin:$PATH"; if ! command -v node >/dev/null 2>&1; then if command -v brew >/dev/null 2>&1; then brew install node || true; fi; fi; if ! command -v node >/dev/null 2>&1; then echo "[AUTOPILOT] Downloading standalone Node.js v22 LTS (no sudo needed)..."; ARCH_RAW="$(uname -m)"; if [ "$ARCH_RAW" = "arm64" ]; then NARCH="arm64"; else NARCH="x64"; fi; mkdir -p "$HOME/.devdeck/node" && curl -fsSL "https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-\${NARCH}.tar.gz" | tar -xz -C "$HOME/.devdeck/node" --strip-components=1 && export PATH="$HOME/.devdeck/node/bin:$PATH"; fi; if [ ! -f "$HOME/HELPER/package.json" ]; then if command -v git >/dev/null 2>&1; then git clone ${REPO_GIT} "$HOME/HELPER"; else curl -fsSL "${REPO_TAR}" | tar -xz -C /tmp && rm -rf "$HOME/HELPER" && mv /tmp/HELPER-main "$HOME/HELPER"; fi; fi; cd "$HOME/HELPER" && (git pull --ff-only 2>/dev/null || true) && (npm install --no-audit --no-fund || (npm cache clean --force >/dev/null 2>&1; npm install --no-audit --no-fund --legacy-peer-deps)) && (npm run build -w mac-bridge >/dev/null 2>&1 || true) && npm run live`;
+// 100% Autonomous Gatekeeper-Free 1-Line macOS Terminal Agent:
+// Runs directly via zsh with ZERO macOS Sequoia Gatekeeper / quarantine popup!
+// Automatically installs Node.js v22 LTS (no sudo), downloads HELPER (no Git needed),
+// clears port 4747, repairs npm cache, builds mac-bridge, and starts the live HTTPS tunnel + QR code.
+const MAC_SELF_HEALING_ONELINER = `curl -fsSL https://raw.githubusercontent.com/youssefelhalawanyyy/HELPER/main/start-mac.command | zsh`;
 
 function buildWindowsAutoBatchFile(): string {
   return [
@@ -524,10 +521,10 @@ export default function SetupGuidePage() {
     [applyPairingBundle, bridgeToken],
   );
 
-  // Probe local bridge (127.0.0.1:4747) & configured bridgeUrl continuously (every 1.4s during Auto-Pilot wait, 3.5s otherwise)
+  // Probe local bridge (localhost:4747 + 127.0.0.1:4747) & configured bridgeUrl continuously
   const probeBridge = useCallback(async () => {
     const candidates = Array.from(
-      new Set(['http://127.0.0.1:4747', bridgeUrl.replace(/\/+$/, '')]),
+      new Set(['http://localhost:4747', 'http://127.0.0.1:4747', bridgeUrl.replace(/\/+$/, '')]),
     );
     for (const base of candidates) {
       if (!base) continue;
@@ -579,7 +576,7 @@ export default function SetupGuidePage() {
     (targetOs: OsKind = os) => {
       const isWin = targetOs === 'windows';
       const content = isWin ? buildWindowsAutoBatchFile() : buildMacAutoCommandFile();
-      const filename = isWin ? 'DevDeck-Windows-AutoSetup.bat' : 'DevDeck-Mac-AutoSetup.command';
+      const filename = isWin ? 'DevDeck-Windows-AutoSetup.bat' : 'DevDeck-Mac-AutoSetup.sh';
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -597,11 +594,13 @@ export default function SetupGuidePage() {
   const handleStartAutonomousAutopilot = async () => {
     setAutopilotRunning(true);
     try {
-      // 1. Check if local bridge is already reachable
-      const claimed = await claimLocalAutopilot('http://127.0.0.1:4747', true);
+      // 1. Check if local bridge is already reachable on localhost:4747 or 127.0.0.1:4747
+      let claimed = await claimLocalAutopilot('http://localhost:4747', true);
+      if (!claimed) {
+        claimed = await claimLocalAutopilot('http://127.0.0.1:4747', true);
+      }
       if (claimed) {
-        // Also run a live self-healing verification pass inside the host shell so user sees real terminal verification output
-        const base = 'http://127.0.0.1:4747';
+        const base = bridgeUrl.replace(/\/+$/, '') || 'http://localhost:4747';
         const token = liveBundle?.token || bridgeToken;
         if (token) {
           const verifyCmd =
@@ -648,39 +647,45 @@ export default function SetupGuidePage() {
         return;
       }
 
-      // 2. Bridge is not running yet on this machine -> Launch autonomous bootstrapper & watch 127.0.0.1:4747 every 1.4s!
+      // 2. Bridge is not running yet on this machine -> Copy Gatekeeper-free 1-liner (and download .bat on Windows) & watch port 4747 every 1.4s!
       const oneLiner = os === 'windows' ? WIN_SELF_HEALING_ONELINER : MAC_SELF_HEALING_ONELINER;
       void navigator.clipboard?.writeText(oneLiner);
       setShellCommand(oneLiner);
-      handleDownloadAutoInstaller(os);
+      // On Windows, auto-download the 1-click .bat launcher; on macOS, avoid quarantined .command downloads (which trigger Apple Gatekeeper) and use the 1-line Terminal command!
+      if (os === 'windows') {
+        handleDownloadAutoInstaller('windows');
+      }
       setAutopilotWaitingForBootstrap(true);
       setAutopilotSteps([
         {
           id: 'bootstrap',
           title:
             os === 'windows'
-              ? '1. Autonomous Windows PowerShell Self-Healing Agent Prepared'
-              : '1. Autonomous macOS Terminal Self-Healing Agent Prepared',
+              ? '1. Windows PowerShell Auto-Pilot Copied & Downloaded (.bat)'
+              : '1. Gatekeeper-Free macOS Terminal Command Copied!',
           status: 'done',
           detail:
             os === 'windows'
-              ? 'Downloaded DevDeck-Windows-AutoSetup.bat & copied 1-line PowerShell agent to clipboard'
-              : 'Downloaded DevDeck-Mac-AutoSetup.command & copied 1-line Terminal agent to clipboard',
+              ? 'Downloaded DevDeck-Windows-AutoSetup.bat & copied PowerShell 1-liner to clipboard'
+              : 'Copied: curl -fsSL https://raw.githubusercontent.com/youssefelhalawanyyy/HELPER/main/start-mac.command | zsh (Zero Apple Gatekeeper warning!)',
         },
         {
           id: 'heal',
-          title: '2. Waiting for Terminal / PowerShell Launch (Auto-Solving All Errors)…',
+          title:
+            os === 'windows'
+              ? '2. Open .bat or Paste in PowerShell (Auto-Solving All Errors)…'
+              : '2. Press ⌘+Space → "Terminal" → ⌘+V → Enter (Auto-Solving All Errors)…',
           status: 'running',
           detail:
             os === 'windows'
-              ? 'Open the downloaded DevDeck-Windows-AutoSetup.bat (or press Right-Click + Enter in PowerShell). It automatically fixes ExecutionPolicy, installs Node.js, frees port 4747, installs packages, and connects back here!'
-              : 'Open the downloaded DevDeck-Mac-AutoSetup.command (or press Cmd+V + Enter in Terminal). It automatically installs Node.js, frees port 4747, installs packages, and connects back here!',
+              ? 'Double-click DevDeck-Windows-AutoSetup.bat or Right-Click → Enter in PowerShell. This page will automatically show your QR Code & PIN!'
+              : 'Paste into macOS Terminal with ⌘+V + Enter. No Gatekeeper popup! It installs Node.js if needed, fixes all errors, and pops up your QR Code & PIN here automatically.',
         },
       ]);
       setAiExplanation(
         os === 'windows'
-          ? 'Auto-Pilot started! Double-click the downloaded DevDeck-Windows-AutoSetup.bat (or paste into PowerShell with Right-Click → Enter). It solves all errors alone and this page will automatically display your QR code & 6-digit PIN the instant it finishes!'
-          : 'Auto-Pilot started! Open the downloaded DevDeck-Mac-AutoSetup.command (or paste into Terminal with Cmd+V → Enter). It solves all errors alone and this page will automatically display your QR code & 6-digit PIN the instant it finishes!',
+          ? 'Auto-Pilot started! Double-click DevDeck-Windows-AutoSetup.bat (or paste into PowerShell). It solves all errors alone and this page will automatically show your QR code & 6-digit PIN!'
+          : 'Copied Gatekeeper-free macOS command to your clipboard! Press ⌘+Space → type Terminal → press Enter → press ⌘+V → press Enter. No Apple malware popup — it fixes everything alone and pops up your QR Code & PIN here automatically!',
       );
     } finally {
       setAutopilotRunning(false);
@@ -967,7 +972,7 @@ export default function SetupGuidePage() {
                 <Download aria-hidden="true" className="h-3.5 w-3.5 text-[#88f1d1]" />
                 {os === 'windows'
                   ? 'Download Self-Healing Windows (.bat)'
-                  : 'Download Self-Healing macOS (.command)'}
+                  : 'Download macOS Script (.sh — run with zsh)'}
               </button>
             </div>
           </div>

@@ -77,10 +77,8 @@ const auth = new AuthManager(configStore.getToken());
 const lanIp = getLocalLanIp();
 
 const app = express();
-app.use((req, res, next) => {
-  if (req.headers['access-control-request-private-network']) {
-    res.setHeader('Access-Control-Allow-Private-Network', 'true');
-  }
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   next();
 });
 app.use(cors({ origin: true, credentials: true }));
