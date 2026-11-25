@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import si from 'systeminformation';
-import { lockMacScreen } from '../macos/hardware.js';
+import { lockMacScreen, wakeMacDisplay } from '../macos/hardware.js';
 import { IS_WIN, runPowerShell } from '../platform/win32.js';
 import type {
   FanMode,
@@ -875,6 +875,11 @@ if ($fanList.Count -gt 0) { Write-Output ("FANS=" + ($fanList -join ',')) }
   }
 
   async runPowerAction(action: PowerAction): Promise<string> {
+    if (action === 'wake') {
+      await wakeMacDisplay();
+      return IS_WIN ? 'Windows PC screen woken from sleep' : 'Mac woken from sleep';
+    }
+
     if (action === 'low_power_toggle') {
       return this.setPowerProfile(this.state.lowPowerMode ? 'balanced' : 'eco');
     }
@@ -887,26 +892,28 @@ if ($fanList.Count -gt 0) { Write-Output ("FANS=" + ($fanList -join ',')) }
     if (action === 'display_sleep') {
       if (IS_WIN) {
         const ps = `
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Disp { [DllImport("user32.dll")] public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam); }'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Disp { [DllImport("user32.dll")] public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam); }' -ErrorAction SilentlyContinue
 [Disp]::SendMessage(-1, 0x0112, 0xF170, 2) | Out-Null
 `;
         await runPowerShell(ps, 3000);
-        return 'Display turned off (PC stays awake)';
+        return 'Display turned off (tap WAKE UP anytime to turn back on)';
       }
       await execFileAsync('pmset', ['displaysleepnow'], { timeout: 2500 });
-      return 'Mac display asleep (background tasks keep running)';
+      return 'Mac display asleep (tap WAKE UP anytime to turn back on)';
     }
 
     if (action === 'sleep') {
+      // Keep network bridge reachable in low-power dark-screen standby so iPhone can always WAKE UP remotely!
       if (IS_WIN) {
-        await runPowerShell(
-          'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState("Suspend", $false, $false)',
-          3000,
-        );
-        return 'Putting Windows PC to sleep…';
+        const ps = `
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Disp { [DllImport("user32.dll")] public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam); }' -ErrorAction SilentlyContinue
+[Disp]::SendMessage(-1, 0x0112, 0xF170, 2) | Out-Null
+`;
+        await runPowerShell(ps, 3000);
+        return 'PC in Low-Power Standby (tap WAKE UP on iPhone to wake)';
       }
-      await execFileAsync('pmset', ['sleepnow'], { timeout: 2500 });
-      return 'Putting Mac to sleep…';
+      await execFileAsync('pmset', ['displaysleepnow'], { timeout: 2500 });
+      return 'Mac in Standby Sleep (tap WAKE UP on iPhone to wake)';
     }
 
     if (action === 'restart') {

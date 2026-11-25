@@ -498,6 +498,7 @@ export interface NetworkCommandState {
 }
 
 export type PowerAction =
+  | 'wake'
   | 'low_power_toggle'
   | 'display_sleep'
   | 'lock'

@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCw,
   ShieldAlert,
+  Sun,
   Zap,
 } from 'lucide-react';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
@@ -68,6 +69,9 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
         return;
       }
       setConfirmDanger(null);
+    }
+    if (action === 'wake') {
+      deck.sendEvent({ type: 'hardware:wake', payload: { requestId: makeRequestId() } });
     }
     deck.sendEvent({ type: 'power:action', payload: { requestId: makeRequestId(), action } });
   };
@@ -244,7 +248,17 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
         </div>
 
         {/* Bottom 1-Tap Quick Controls (h-8 aligned with right panel) */}
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-5 gap-1">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.94 }}
+            transition={DECK_SPRING}
+            onClick={() => sendPowerAction('wake')}
+            className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#88f1d1]/45 bg-[#88f1d1]/16 text-[8.5px] font-extrabold whitespace-nowrap text-[#88f1d1]"
+          >
+            <Sun aria-hidden="true" className="h-3 w-3 shrink-0" />
+            WAKE UP
+          </motion.button>
           <motion.button
             type="button"
             whileTap={{ scale: 0.94 }}
@@ -257,7 +271,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               color: p.lowPowerMode ? '#34d399' : '#e4e4e7',
             }}
           >
-            <Zap className="h-3 w-3 shrink-0" />
+            <Zap aria-hidden="true" className="h-3 w-3 shrink-0" />
             LOW PWR
           </motion.button>
           <motion.button
@@ -278,7 +292,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               color: deck.caffeineActive ? '#fbbf24' : '#e4e4e7',
             }}
           >
-            <Coffee className="h-3 w-3 shrink-0" />
+            <Coffee aria-hidden="true" className="h-3 w-3 shrink-0" />
             AWAKE
           </motion.button>
           <motion.button
@@ -288,8 +302,8 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
             onClick={() => sendPowerAction('display_sleep')}
             className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#22d3ee]/30 bg-[#22d3ee]/10 text-[8.5px] font-extrabold whitespace-nowrap text-[#22d3ee]"
           >
-            <MonitorOff className="h-3 w-3 shrink-0" />
-            DISP OFF
+            <MonitorOff aria-hidden="true" className="h-3 w-3 shrink-0" />
+            SLEEP
           </motion.button>
           <motion.button
             type="button"
@@ -298,7 +312,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
             onClick={() => sendPowerAction('lock')}
             className="flex h-8 items-center justify-center gap-1 rounded-xl border border-[#a78bfa]/35 bg-[#a78bfa]/15 text-[8.5px] font-extrabold whitespace-nowrap text-[#c4b5fd]"
           >
-            <Lock className="h-3 w-3 shrink-0" />
+            <Lock aria-hidden="true" className="h-3 w-3 shrink-0" />
             LOCK
           </motion.button>
         </div>
@@ -528,18 +542,35 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
 
-        {/* TAB 3: 1-TAP POWER ACTIONS (Safe 2-tap confirm on Restart/Shutdown) */}
+        {/* TAB 3: 1-TAP POWER ACTIONS (Wake Up + Sleep + Safe 2-tap confirm on Restart/Shutdown) */}
         {rightTab === 'power' && (
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.96 }}
+              onClick={() => sendPowerAction('wake')}
+              className="col-span-2 flex items-center justify-center gap-2.5 rounded-xl border border-[#88f1d1]/50 bg-[#88f1d1]/16 py-2 text-[#88f1d1]"
+            >
+              <Sun aria-hidden="true" className="h-5 w-5 shrink-0" />
+              <div className="text-left">
+                <div className="text-[11px] font-extrabold uppercase">
+                  WAKE UP / OPEN FROM SLEEP
+                </div>
+                <div className="text-[8.5px] text-[#b8d0d6]">
+                  Turns display back on &amp; wakes computer from standby
+                </div>
+              </div>
+            </motion.button>
+
             <motion.button
               type="button"
               whileTap={{ scale: 0.95 }}
               onClick={() => sendPowerAction('sleep')}
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-[#22d3ee]/30 bg-[#22d3ee]/10 text-[#22d3ee]"
             >
-              <Moon className="h-5 w-5" />
+              <Moon aria-hidden="true" className="h-5 w-5" />
               <span className="text-[10px] font-extrabold">SLEEP COMPUTER</span>
-              <span className="text-[8px] text-zinc-400">Instant standby</span>
+              <span className="text-[8px] text-zinc-400">Standby (wakeable)</span>
             </motion.button>
 
             <motion.button
@@ -548,7 +579,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               onClick={() => sendPowerAction('display_sleep')}
               className="flex flex-col items-center justify-center gap-1 rounded-xl border border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399]"
             >
-              <MonitorOff className="h-5 w-5" />
+              <MonitorOff aria-hidden="true" className="h-5 w-5" />
               <span className="text-[10px] font-extrabold">DISPLAY OFF</span>
               <span className="text-[8px] text-zinc-400">Builds keep running</span>
             </motion.button>

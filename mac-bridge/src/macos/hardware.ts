@@ -153,12 +153,22 @@ export async function lockMacScreen(): Promise<void> {
 export async function wakeMacDisplay(): Promise<void> {
   if (IS_WIN) {
     await runPowerShell(
-      `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class W { [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f); [DllImport("user32.dll")] public static extern void mouse_event(uint f,int x,int y,int d,UIntPtr e); }'; [W]::SetThreadExecutionState(0x00000002) | Out-Null; [W]::mouse_event(1,1,0,0,[UIntPtr]::Zero); [W]::mouse_event(1,-1,0,0,[UIntPtr]::Zero)`,
-      2500,
+      `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class W { [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f); [DllImport("user32.dll")] public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam); [DllImport("user32.dll")] public static extern void mouse_event(uint f,int x,int y,int d,UIntPtr e); [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo); }' -ErrorAction SilentlyContinue; [W]::SetThreadExecutionState(0x80000003) | Out-Null; [W]::SendMessage(-1, 0x0112, 0xF170, -1) | Out-Null; [W]::mouse_event(1,2,0,0,[UIntPtr]::Zero); [W]::mouse_event(1,-2,0,0,[UIntPtr]::Zero); [W]::keybd_event(0x10,0,0,[UIntPtr]::Zero); [W]::keybd_event(0x10,0,2,[UIntPtr]::Zero)`,
+      3000,
     );
     return;
   }
-  await execFileAsync('caffeinate', ['-u', '-t', '2'], { timeout: 2500 });
+  // macOS: assert user activity via caffeinate -u + nudge HID event tap so display lights up immediately
+  const child = spawn('caffeinate', ['-u', '-t', '5'], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  await execFileAsync(
+    'osascript',
+    ['-e', 'tell application "System Events" to key code 63'],
+    { timeout: 1500 },
+  ).catch(() => {});
 }
 
 export function captureSelectionToClipboard(): void {
