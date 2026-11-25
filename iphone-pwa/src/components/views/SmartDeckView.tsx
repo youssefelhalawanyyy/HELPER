@@ -9,35 +9,22 @@ import {
   ArrowRight,
   ArrowUpRight,
   Bot,
-  Calendar,
   Camera,
   CheckCircle2,
-  Circle,
   ClipboardPaste,
   Clock,
-  Cloud,
-  CloudLightning,
   Code2,
   Command,
   Copy,
   Cpu,
   Edit3,
   Eraser,
-  ExternalLink,
-  Eye,
-  EyeOff,
   GitBranch,
   GitPullRequest,
-  Globe,
-  Heart,
   Layers3,
   Link2,
-  Loader2,
   Lock,
   Mic,
-  Moon,
-  MoonStar,
-  MoreHorizontal,
   Network,
   OctagonX,
   PanelLeft,
@@ -49,19 +36,11 @@ import {
   Save,
   Search,
   Send,
-  Settings,
-  Settings2,
   SlidersHorizontal,
   Smartphone,
   Sparkles,
-  Star,
-  Sun,
-  Sunrise,
-  Sunset,
   Terminal,
   TerminalSquare,
-  TextCursor,
-  Thermometer,
   Trash2,
   VolumeX,
   Wand2,
@@ -74,27 +53,6 @@ import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 import type { MacroActionType, MacroButton, ProfileId } from '@/types/protocol';
-
-/* -------------------------------------------------------------------------- */
-/*  Theme Tokens - Descklock Aesthetic                                        */
-/* -------------------------------------------------------------------------- */
-
-const THEME = {
-  // Deep night sky background with subtle gradient
-  background: '#0a0a12',
-  surface: '#120a1f',
-  surface2: '#1a122a',
-  accent: '#c6b4ff',      // Soft lilac/primary
-  accentGlow: 'rgba(198, 180, 255, 0.4)',
-  muted: '#6b5b80',
-  mutedSoft: '#4a3f6a',
-  text: '#e8e4f0',
-  textSubtle: '#a8a0c0',
-  border: '#3a3050',
-  success: '#4ade80',
-  warning: '#fbbf24',
-  error: '#f87171',
-};
 
 const ICON_MAP: Record<string, typeof Zap> = {
   Bot,
@@ -138,7 +96,7 @@ const ACCENT_HEX: Record<MacroButton['color'], string> = {
   amber: '#fbbf24',
   cyan: '#22d3ee',
   violet: '#a78bfa',
-  slate: '#9ca3af',
+  slate: '#9cb4bb',
 };
 
 const COLOR_ORDER: MacroButton['color'][] = [
@@ -205,7 +163,7 @@ const ACTION_META: Record<
   },
   shortcut: {
     label: 'Shortcut',
-    icon: Clock,
+    icon: Command,
     hint: 'Send a key combination to the active app.',
     name: 'Keyboard shortcut',
     color: 'violet',
@@ -213,7 +171,7 @@ const ACTION_META: Record<
   },
   shell: {
     label: 'Shell',
-    icon: Clock,
+    icon: Terminal,
     hint: 'Run a command in the background.',
     name: 'Shell command',
     color: 'emerald',
@@ -221,7 +179,7 @@ const ACTION_META: Record<
   },
   terminal: {
     label: 'Terminal',
-    icon: Clock,
+    icon: TerminalSquare,
     hint: 'Send a command to your terminal.',
     name: 'Terminal command',
     color: 'amber',
@@ -229,7 +187,7 @@ const ACTION_META: Record<
   },
   stream: {
     label: 'Stream',
-    icon: Clock,
+    icon: Activity,
     hint: 'Follow live output from a log preset.',
     name: 'Log stream',
     color: 'cyan',
@@ -237,15 +195,15 @@ const ACTION_META: Record<
   },
   voice: {
     label: 'Voice',
-    icon: Clock,
-    hint: 'Speak a prompt and send it to your Mac.',
+    icon: Mic,
+    hint: 'Speak a prompt and send it to your computer.',
     name: 'Voice dictation',
     color: 'crimson',
     example: 'Dictate a prompt, then copy it or paste it into the active app.',
   },
   snippet: {
     label: 'Snippet',
-    icon: Clock,
+    icon: ClipboardPaste,
     hint: 'Paste saved text at your cursor.',
     name: 'Text snippet',
     color: 'slate',
@@ -260,9 +218,9 @@ function accentStyle(color: string) {
 }
 
 const FIELD =
-  'rounded-xl border border-white/10 bg-black/70 px-3 py-2 text-xs text-white outline-none transition-colors focus:border-[#c6b4ff]';
+  'rounded-xl border border-[#98c8ce2e] bg-[#0a151c] px-3 py-2 text-xs text-[#effaf7] outline-none transition-colors focus:border-[#88f1d1]';
 
-const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-[#c6b4ff]/70';
+const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-[#88f1d1]/75';
 
 interface SpeechRecLike {
   continuous: boolean;
@@ -305,130 +263,6 @@ function KeycapFace({
         <small>{sublabel}</small>
       </span>
     </>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Analog Clock Dial Component                                                 */
-/* -------------------------------------------------------------------------- */
-
-function AnalogClock({
-  time,
-}: {
-  time: Date;
-}) {
-  const hour = time.getHours() % 12 || 12;
-  const minute = time.getMinutes();
-  const second = time.getSeconds();
-  const millisec = time.getMilliseconds();
-  
-  const hourAngle = (hour * 30) + (minute * 0.5) + (second * 0.008) + (millisec * 0.00008);
-  const minuteAngle = (minute * 6) + (second * 0.1) + (millisec * 0.01);
-  const secondAngle = (second * 6) + (millisec * 0.06);
-  
-  const hourLength = 50;
-  const minuteLength = 65;
-  const secondLength = 75;
-
-  return (
-    <svg className="relative w-24 h-24 mx-auto" viewBox="0 0 100 100">
-      <circle
-        cx="50"
-        cy="50"
-        r="45"
-        stroke="var(--accent)"
-        strokeWidth={2}
-        fill="none"
-      />
-      <circle
-        cx="50"
-        cy="50"
-        r="38"
-        stroke="var(--surface)"
-        strokeWidth={1}
-        fill="none"
-      />
-      
-      {/* Hour marks */}
-      {Array.from({ length: 12 }, (_, i) => {
-        const angle = (i * Math.PI / 6) - (Math.PI / 2);
-        const x1 = 50 + 35 * Math.cos(angle);
-        const y1 = 50 + 35 * Math.sin(angle);
-        const x2 = 50 + 42 * Math.cos(angle);
-        const y2 = 50 + 42 * Math.sin(angle);
-        return (
-          <line
-            key={i}
-            x1={x1}
-            y1={y1}
-            x2={x2}
-            y2={y2}
-            stroke="var(--muted)"
-            strokeWidth={1}
-          />
-        );
-      })}
-      
-      {/* Center dot */}
-      <circle cx="50" cy="50" r="3" fill="var(--accent)" />
-      
-      {/* Hand components */}
-      <line
-        x1="50"
-        y1="50"
-        x2={50 + hourLength * Math.cos(hourAngle * Math.PI / 180)}
-        y2={50 + hourLength * Math.sin(hourAngle * Math.PI / 180)}
-        stroke="var(--accent)"
-        strokeWidth={4}
-        strokeLinecap="round"
-      />
-      <line
-        x1="50"
-        y1="50"
-        x2={50 + minuteLength * Math.cos(minuteAngle * Math.PI / 180)}
-        y2={50 + minuteLength * Math.sin(minuteAngle * Math.PI / 180)}
-        stroke="var(--textSubtle)"
-        strokeWidth={3}
-        strokeLinecap="round"
-      />
-      <line
-        x1="50"
-        y1="50"
-        x2={50 + secondLength * Math.cos(secondAngle * Math.PI / 180)}
-        y2={50 + secondLength * Math.sin(secondAngle * Math.PI / 180)}
-        stroke="#ff5f57"
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
-      
-      {/* Decorative center */}
-      <circle cx="50" cy="50" r="8" fill="var(--accentGlow)" />
-      <circle cx="50" cy="50" r="4" fill="none" stroke="var(--accent)" strokeWidth={1} />
-    </svg>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Digital Clock Display                                                       */
-/* -------------------------------------------------------------------------- */
-
-function DigitalClock({
-  time,
-}: {
-  time: Date;
-}) {
-  const hours = time.getHours().toString().padStart(2, '0');
-  const minutes = time.getMinutes().toString().padStart(2, '0');
-  const seconds = time.getSeconds().toString().padStart(2, '0');
-  const ampm = time.getHours() >= 12 ? 'PM' : 'AM';
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-3xl font-extrabold tracking-tight">{hours}</span>
-      <span className="text-3xl font-extrabold tracking-tight">{minutes}</span>
-      <span className="text-3xl font-extrabold tracking-tight">{seconds}</span>
-      <span className="text-sm text-[var(--muted)]">ampm</span>
-    </div>
   );
 }
 
@@ -478,7 +312,7 @@ export function SmartDeckView({
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
   const profileAccent =
-    ACCENT_HEX[(activeProfile?.accent ?? 'cyan') as MacroButton['color']] ?? '#22d3ee';
+    ACCENT_HEX[(activeProfile?.accent ?? 'cyan') as MacroButton['color']] ?? '#88f1d1';
 
   const profileMacros = (deck.config?.macros ?? []).filter((m) => m.profileId === activeProfileId);
   const searchTerm = query.trim().toLowerCase();
@@ -583,7 +417,7 @@ export function SmartDeckView({
   const handlePressMacro = (macro: MacroButton) => {
     soundEngine.playClick();
     if (!isConnected) {
-      deck.showToast(false, 'Pair your Mac first to execute macros');
+      deck.showToast(false, 'Pair your computer first to execute macros');
       onOpenPairing?.();
       return;
     }
@@ -681,74 +515,65 @@ export function SmartDeckView({
   return (
     <div className={styles.deck}>
       <div className={styles.workspace}>
-        {/* ============ HEADER WITH CLOCK ============ */}
+        {/* ============ STREAMLINED COMMAND BANNER ============ */}
         <header className={styles.hero}>
-          <div className={styles.heroClock}>
-            <AnalogClock time={new Date()} />
-            <DigitalClock time={new Date()} />
-          </div>
           <div className={styles.heroCopy}>
-            <span className={styles.connection} role="status" data-live={isConnected}>
-              <i />
-              {connectionLabel}
-              {isConnected && deck.hello?.hostname && ` · ${deck.hello.hostname}`}
-            </span>
-            <h1>Smart Deck</h1>
-            <p>
-              {isConnected
-                ? `${activeProfile?.name ?? activeProfileId} profile · ${profileMacros.length} ${profileMacros.length === 1 ? 'macro' : 'macros'}`
-                : 'Pair your Mac to run shortcuts, commands, and workflows.'}
-            </p>
-            <button
-              type="button"
-              className={styles.heroButton}
-              onClick={isConnected ? openNewMacro : onOpenPairing}
-            >
-              {isConnected ? <Plus size={15} /> : <Link2 size={15} />}
-              {isConnected ? 'New macro' : 'Pair Mac'} <ArrowRight size={14} />
-            </button>
+            <div className={styles.heroTitleGroup}>
+              <span className={styles.connection} role="status" data-live={isConnected}>
+                <i />
+                {connectionLabel}
+                {isConnected && deck.hello?.hostname && ` · ${deck.hello.hostname}`}
+              </span>
+              <div className={styles.heroHeadlineRow}>
+                <h1>Smart Deck</h1>
+                <p>
+                  {isConnected
+                    ? `${activeProfile?.name ?? activeProfileId} profile · ${profileMacros.length} ${profileMacros.length === 1 ? 'macro' : 'macros'}`
+                    : 'Pair your computer to run shortcuts, commands, and workflows.'}
+                </p>
+              </div>
+            </div>
+
+            <div className={styles.heroActions}>
+              <button
+                type="button"
+                className={styles.heroButton}
+                onClick={isConnected ? openNewMacro : onOpenPairing}
+              >
+                {isConnected ? (
+                  <Plus size={15} aria-hidden="true" />
+                ) : (
+                  <Link2 size={15} aria-hidden="true" />
+                )}
+                <span>{isConnected ? 'New macro' : 'Pair computer'}</span>
+                <ArrowRight size={14} aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </header>
 
-        {/* ============ CLOCK INFO SECTION ============ */}
-        <div className={styles.clockInfo}>
-          <div className={styles.clockDetails}>
-            <div className={styles.timeZone}>
-              <Clock size={16} /> {new Date().toLocaleTimeString(undefined, { hour12: false })}
-            </div>
-            <div className={styles.dateDisplay}>
-              <Calendar size={14} />{' '}
-              {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-            </div>
-          </div>
-          <div className={styles.quickActions}>
-            <button type="button" className={styles.quickBtn} onClick={() => setAutoSwitch(!autoSwitch)}>
-              {autoSwitch ? <MoonStar size={14} /> : <Sun size={14} />}
-              {autoSwitch ? 'Auto-switch' : 'Manual mode'}
-            </button>
-            <button type="button" className={styles.quickBtn} onClick={onNavigateToMonitor}>
-              <Activity size={14} /> Live Monitor
-            </button>
-          </div>
-        </div>
-
+        {/* ============ MAIN 2-COLUMN WORKSPACE ============ */}
         <div className={styles.panels}>
           <section className={styles.library} aria-labelledby="deck-library-title">
             <div className={styles.heading}>
               <div className={styles.titleGroup}>
-                <MoonStar size={19} />
-                <h2 id="deck-library-title">{isConnected ? 'Macro library' : 'Action library'}</h2>
+                <Command size={18} aria-hidden="true" />
+                <h2 id="deck-library-title">
+                  {isConnected ? 'Macro library' : 'Action library'}
+                </h2>
               </div>
+
               <label className={styles.search}>
-                <Search size={14} />
+                <Search size={14} aria-hidden="true" />
                 <input
                   type="search"
                   aria-label="Search library"
-                  placeholder="Search library"
+                  placeholder="Search macros…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </label>
+
               {isConnected && (
                 <button
                   type="button"
@@ -756,11 +581,12 @@ export function SmartDeckView({
                   aria-pressed={editMode}
                   onClick={() => setEditMode(!editMode)}
                 >
-                  <Edit3 size={14} />
+                  <Edit3 size={14} aria-hidden="true" />
                   {editMode ? 'Done' : 'Edit'}
                 </button>
               )}
             </div>
+
             {isConnected && (
               <div className={styles.profileBar}>
                 <div
@@ -776,6 +602,7 @@ export function SmartDeckView({
                       disabled={antigravityPinned && profile.id !== activeProfileId}
                       aria-pressed={profile.id === activeProfileId}
                       onClick={() => {
+                        soundEngine.playClick();
                         setAutoSwitch(false);
                         setManualProfile(profile.id);
                         setQuery('');
@@ -790,27 +617,41 @@ export function SmartDeckView({
                   className={styles.follow}
                   disabled={antigravityPinned}
                   aria-pressed={autoSwitch && !antigravityPinned}
-                  title="Follow the active Mac app"
+                  title="Automatically switch profile to match the active desktop app"
                   onClick={() => {
+                    soundEngine.playClick();
                     setManualProfile(activeProfileId);
                     setAutoSwitch(!autoSwitch);
                   }}
                 >
-                  {antigravityPinned ? <Lock size={13} /> : <Radio size={13} />}
+                  {antigravityPinned ? (
+                    <Lock size={13} aria-hidden="true" />
+                  ) : (
+                    <Radio size={13} aria-hidden="true" />
+                  )}
                   {antigravityPinned ? 'Pinned' : autoSwitch ? 'Following app' : 'Manual'}
                 </button>
               </div>
             )}
+
             {isConnected && voiceActiveId && (
-              <button className={styles.dictation} type="button" onClick={() => voiceRecRef.current?.stop()}>
-                <Mic size={14} />
+              <button
+                className={styles.dictation}
+                type="button"
+                onClick={() => voiceRecRef.current?.stop()}
+              >
+                <Mic size={15} aria-hidden="true" />
                 <span>{liveTranscript || 'Listening…'}</span>
                 <strong>Finish dictation</strong>
               </button>
             )}
+
             {editMode && isConnected && (
-              <p className={styles.editHint}>Select a macro to edit its action, appearance, or profile.</p>
+              <p className={styles.editHint}>
+                Tap any macro key below to edit its command, icon, color, or profile.
+              </p>
             )}
+
             <div className={`${styles.keys} deck-scroll`} data-preview={!isConnected}>
               {!isConnected &&
                 visibleTypes.map((type) => {
@@ -825,9 +666,9 @@ export function SmartDeckView({
                     >
                       <span className={styles.keyTop}>
                         <span className={styles.keyIcon}>
-                          <Icon size={18} />
+                          <Icon size={18} aria-hidden="true" />
                         </span>
-                        <ArrowUpRight size={14} aria-hidden="true" className={styles.cardArrow} />
+                        <ArrowUpRight size={15} aria-hidden="true" className={styles.cardArrow} />
                       </span>
                       <span className={styles.keyCopy}>
                         <strong>{ACTION_META[type].name}</strong>
@@ -836,6 +677,7 @@ export function SmartDeckView({
                     </button>
                   );
                 })}
+
               {isConnected &&
                 visibleMacros.map((macro) => {
                   const listening = voiceActiveId === macro.id;
@@ -863,10 +705,13 @@ export function SmartDeckView({
                     </button>
                   );
                 })}
+
               {(isConnected ? !visibleMacros.length : !visibleTypes.length) && (
                 <div className={styles.empty}>
-                  {searchTerm ? <Search /> : <Layers3 />}
-                  <strong>{searchTerm ? 'No matching actions' : 'This profile has no macros yet'}</strong>
+                  {searchTerm ? <Search aria-hidden="true" /> : <Layers3 aria-hidden="true" />}
+                  <strong>
+                    {searchTerm ? 'No matching actions' : 'This profile has no macros yet'}
+                  </strong>
                   <button
                     className={styles.tool}
                     type="button"
@@ -879,42 +724,47 @@ export function SmartDeckView({
             </div>
           </section>
 
-          <aside className={styles.sidebar} aria-label="Mac workspace">
+          <aside className={styles.sidebar} aria-label="Computer workspace and ports">
             <section className={styles.context}>
               <div className={styles.titleGroup}>
-                <SlidersHorizontal size={16} />
+                <SlidersHorizontal size={16} aria-hidden="true" />
                 <h2>Workspace</h2>
               </div>
               <dl>
                 <div>
                   <dt>
-                    <AppWindow size={14} />
+                    <AppWindow size={14} aria-hidden="true" />
                     Active app
                   </dt>
                   <dd>{isConnected ? deck.activeApp.appName : 'Offline'}</dd>
                 </div>
                 <div>
                   <dt>
-                    <GitBranch size={14} />
+                    <GitBranch size={14} aria-hidden="true" />
                     Git branch
                   </dt>
                   <dd>
-                    {isConnected ? (deck.gitStatus.isGitRepo ? deck.gitStatus.branch : 'No repository') : '—'}
+                    {isConnected
+                      ? deck.gitStatus.isGitRepo
+                        ? deck.gitStatus.branch
+                        : 'No repository'
+                      : '—'}
                   </dd>
                 </div>
               </dl>
               {onNavigateToMonitor && (
                 <button type="button" className={styles.monitor} onClick={onNavigateToMonitor}>
-                  <Activity size={14} />
-                  Live Monitor
-                  <ArrowUpRight size={14} />
+                  <Activity size={14} aria-hidden="true" />
+                  <span>Live Monitor</span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
                 </button>
               )}
             </section>
+
             <section className={styles.ports}>
               <div className={styles.heading}>
                 <div className={styles.titleGroup}>
-                  <Network size={16} />
+                  <Network size={16} aria-hidden="true" />
                   <h2>Dev ports</h2>
                 </div>
                 {isConnected && <span className={styles.count}>{deck.ports.length}</span>}
@@ -930,14 +780,14 @@ export function SmartDeckView({
                     })
                   }
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw size={14} aria-hidden="true" />
                 </button>
               </div>
               {isConnected && deck.ports.length > 0 ? (
-                <ul className={`${styles.portList} deck-scroll`}>
+                <ul role="list" className={`${styles.portList} deck-scroll`}>
                   {deck.ports.map((port) => (
                     <li key={`${port.port}-${port.pid}`}>
-                      <i />
+                      <i aria-hidden="true" />
                       <div>
                         <strong>:{port.port}</strong>
                         <small>{port.process}</small>
@@ -955,9 +805,11 @@ export function SmartDeckView({
                 </ul>
               ) : (
                 <div className={styles.portEmpty}>
-                  <Radio size={20} />
+                  <Radio size={20} aria-hidden="true" />
                   <span>
-                    {isConnected ? 'No servers listening' : 'Pair your Mac to see listening ports.'}
+                    {isConnected
+                      ? 'No dev servers listening'
+                      : 'Pair your computer to view listening ports.'}
                   </span>
                 </div>
               )}
@@ -987,12 +839,13 @@ export function SmartDeckView({
                 else onOpenPairing?.();
               }}
             >
-              {isConnected ? 'New macro' : 'Pair Mac'}
-              <ArrowRight size={14} />
+              {isConnected ? 'New macro' : 'Pair computer'}
+              <ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
         )}
       </HardwareDialog>
+
       {/* ============================ Macro editor =========================== */}
       <HardwareDialog
         open={Boolean(editingMacro)}
@@ -1011,11 +864,13 @@ export function SmartDeckView({
               <div className={styles.key} style={accentStyle(ACCENT_HEX[editingMacro.color])}>
                 <KeycapFace
                   label={editingMacro.label}
-                  sublabel={editingMacro.sublabel || ACTION_META[editingMacro.actionType]?.label || ''}
+                  sublabel={
+                    editingMacro.sublabel || ACTION_META[editingMacro.actionType]?.label || ''
+                  }
                   Icon={ICON_MAP[editingMacro.icon] || Clock}
                 />
               </div>
-              <p className="text-[10px] leading-snug text-[#7c8190]">
+              <p className="text-[10px] leading-snug text-[#9cb4bb]">
                 {ACTION_META[editingMacro.actionType]?.hint}
               </p>
             </div>
@@ -1061,7 +916,7 @@ export function SmartDeckView({
                         onClick={() => changeActionType(type)}
                         className={styles.actionChoice}
                       >
-                        <Ico className="h-3.5 w-3.5" />
+                        <Ico className="h-3.5 w-3.5" aria-hidden="true" />
                         {meta.label}
                       </button>
                     );
@@ -1088,7 +943,7 @@ export function SmartDeckView({
                   <select
                     value={editingMacro.payload}
                     onChange={(e) => setEditingMacro({ ...editingMacro, payload: e.target.value })}
-                    className={`font-mono-tech ${FIELD} text-[#d1bfff]`}
+                    className={`font-mono-tech ${FIELD} text-[#88f1d1]`}
                   >
                     {SHORTCUT_OPTIONS.map((sc) => (
                       <option key={sc} value={sc}>
@@ -1100,7 +955,7 @@ export function SmartDeckView({
                   <select
                     value={editingMacro.payload}
                     onChange={(e) => setEditingMacro({ ...editingMacro, payload: e.target.value })}
-                    className={`font-mono-tech ${FIELD} text-[#d1bfff]`}
+                    className={`font-mono-tech ${FIELD} text-[#88f1d1]`}
                   >
                     {logPresets.length === 0 && <option value="">No presets configured</option>}
                     {logPresets.map((pr) => (
@@ -1134,9 +989,11 @@ export function SmartDeckView({
                     value={editingMacro.payload}
                     onChange={(e) => setEditingMacro({ ...editingMacro, payload: e.target.value })}
                     placeholder={
-                      editingMacro.actionType === 'chain' ? 'wake, chrome, caffeine' : 'npm run dev'
+                      editingMacro.actionType === 'chain'
+                        ? 'wake, chrome, caffeine'
+                        : 'npm run dev'
                     }
-                    className={`font-mono-tech ${FIELD} text-[#d1bfff]`}
+                    className={`font-mono-tech ${FIELD} text-[#88f1d1]`}
                   />
                 )}
               </label>
@@ -1158,7 +1015,9 @@ export function SmartDeckView({
                         style={{
                           background: ACCENT_HEX[c],
                           transform: on ? 'scale(1.15)' : 'scale(1)',
-                          boxShadow: on ? `0 0 0 2px #0b0c10, 0 0 0 3.5px ${ACCENT_HEX[c]}` : 'none',
+                          boxShadow: on
+                            ? `0 0 0 2px #091319, 0 0 0 3.5px ${ACCENT_HEX[c]}`
+                            : 'none',
                         }}
                       />
                     );
@@ -1187,7 +1046,7 @@ export function SmartDeckView({
               {/* Icon picker */}
               <div className="col-span-6 flex flex-col gap-1">
                 <span className="sub">Icon</span>
-                <div className="deck-scroll grid max-h-[78px] grid-cols-[repeat(auto-fill,minmax(24px,1fr))] gap-1 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/40 p-1.5">
+                <div className="deck-scroll grid max-h-[78px] grid-cols-[repeat(auto-fill,minmax(24px,1fr))] gap-1 overflow-y-auto rounded-xl border border-[#98c8ce24] bg-[#0a151c] p-1.5">
                   {Object.keys(ICON_MAP).map((name) => {
                     const Ico = ICON_MAP[name];
                     const on = editingMacro.icon === name;
@@ -1202,11 +1061,13 @@ export function SmartDeckView({
                         className={`grid h-6 w-6 place-items-center rounded-lg transition-colors ${FOCUS}`}
                         style={{
                           background: on ? `${ACCENT_HEX[editingMacro.color]}26` : 'transparent',
-                          color: on ? ACCENT_HEX[editingMacro.color] : '#7c8190',
-                          boxShadow: on ? `inset 0 0 0 1px ${ACCENT_HEX[editingMacro.color]}66` : 'none',
+                          color: on ? ACCENT_HEX[editingMacro.color] : '#9cb4bb',
+                          boxShadow: on
+                            ? `inset 0 0 0 1px ${ACCENT_HEX[editingMacro.color]}66`
+                            : 'none',
                         }}
                       >
-                        <Ico className="h-3.5 w-3.5" />
+                        <Ico className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
                     );
                   })}
@@ -1214,28 +1075,30 @@ export function SmartDeckView({
               </div>
             </div>
 
-            <div className="col-span-12 flex items-center justify-between border-t border-white/[0.06] pt-2.5">
+            <div className="col-span-12 flex items-center justify-between border-t border-[#98c8ce24] pt-2.5">
               <button
                 type="button"
                 hidden={!existingMacro}
                 onClick={() => handleDeleteMacro(editingMacro.id)}
                 className={`flex items-center gap-1 rounded-full border border-[#ff5d6c]/40 bg-[#ff5d6c]/10 px-3 py-1.5 text-xs font-bold text-[#ff5d6c] ${FOCUS}`}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 Delete macro
               </button>
               <div className="ml-auto flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setEditingMacro(null)}
-                  className={`rounded-full bg-white/[0.07] px-3.5 py-1.5 text-xs font-bold text-[#c9ccd6] ${FOCUS}`}
+                  className={`rounded-full border border-[#98c8ce29] bg-[#bcfff20d] px-3.5 py-1.5 text-xs font-bold text-[#effaf7] ${FOCUS}`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className={`rounded-full bg-[#c6b4ff] px-4 py-1.5 text-xs font-bold text-[#241c30] disabled:opacity-50 ${FOCUS}`}
-                  disabled={!isConnected || !editingMacro.label.trim() || !editingMacro.payload.trim()}
+                  className={`rounded-full bg-[#88f1d1] px-4 py-1.5 text-xs font-extrabold text-[#08221c] disabled:opacity-50 ${FOCUS}`}
+                  disabled={
+                    !isConnected || !editingMacro.label.trim() || !editingMacro.payload.trim()
+                  }
                 >
                   {existingMacro ? 'Save changes' : 'Create macro'}
                 </button>
