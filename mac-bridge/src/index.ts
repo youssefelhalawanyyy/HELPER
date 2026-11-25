@@ -234,6 +234,7 @@ setTimeout(() => gitService.start(5000), 500);
 setTimeout(() => clipboardTracker.start(1800), 700);
 setTimeout(() => processService.start(5000), 900);
 setTimeout(() => deepTelemetry.start(6500), 1100);
+setTimeout(() => void networkCommandService.scanNetwork(), 1350);
 
 // --- Express Routes ---
 app.use(
@@ -305,6 +306,7 @@ app.use(
     getProjectDir: () => configStore.getAll().projectDir,
     lanIp,
     bridgePort: BRIDGE_PORT,
+    networkService: networkCommandService,
   }),
 );
 

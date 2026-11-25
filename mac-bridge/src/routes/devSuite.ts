@@ -5,6 +5,8 @@ import { createPreviewSession } from '../services/localPreviewService.js';
 import { publicPushKey, subscribeDevice } from '../services/watchPush.js';
 import { editSites, healthDays, watchList, checkWatched } from '../services/deskMonitor.js';
 import { desktopSnapshot, formatPrompt, typeIntoHost } from '../services/missionTools.js';
+import type { NetworkCommandService } from '../services/networkCommandService.js';
+import type { NetworkFixAction } from '../types/protocol.js';
 import { Router } from 'express';
 import {
   chatWithNour,
@@ -25,6 +27,7 @@ export function createDevSuiteRouter(opts: {
   getProjectDir: () => string;
   lanIp: string;
   bridgePort: number;
+  networkService?: NetworkCommandService;
 }): Router {
   const router = Router();
 
@@ -214,5 +217,66 @@ export function createDevSuiteRouter(opts: {
       res.status(400).json({ error: (e as Error).message });
     }
   });
+
+  // --- NetOps Pro REST Endpoints (Scan, Speed, Fix & Diagnostic Probe) ---
+  router.get('/netops/state', (_req, res) => {
+    if (!opts.networkService) {
+      res.status(503).json({ ok: false, error: 'NetOps service unavailable' });
+      return;
+    }
+    res.json({ ok: true, state: opts.networkService.getLatest() });
+  });
+
+  router.post('/netops/scan', async (_req, res) => {
+    if (!opts.networkService) {
+      res.status(503).json({ ok: false, error: 'NetOps service unavailable' });
+      return;
+    }
+    const state = await opts.networkService.scanNetwork();
+    res.json({ ok: true, state });
+  });
+
+  router.post('/netops/speedtest', async (_req, res) => {
+    if (!opts.networkService) {
+      res.status(503).json({ ok: false, error: 'NetOps service unavailable' });
+      return;
+    }
+    const state = await opts.networkService.runSpeedTest();
+    res.json({ ok: true, state });
+  });
+
+  router.post('/netops/fix', async (req, res) => {
+    if (!opts.networkService) {
+      res.status(503).json({ ok: false, error: 'NetOps service unavailable' });
+      return;
+    }
+    const action = req.body?.action as NetworkFixAction | undefined;
+    if (!action) {
+      res.status(400).json({ ok: false, error: 'Missing fix action' });
+      return;
+    }
+    const message = await opts.networkService.runNetworkFix(action);
+    res.json({ ok: true, message, state: opts.networkService.getLatest() });
+  });
+
+  router.post('/netops/probe', async (req, res) => {
+    if (!opts.networkService) {
+      res.status(503).json({ ok: false, error: 'NetOps service unavailable' });
+      return;
+    }
+    const mode = req.body?.mode as 'ping' | 'dns' | 'ports' | undefined;
+    const target = typeof req.body?.target === 'string' ? req.body.target : '';
+    if (!mode || !['ping', 'dns', 'ports'].includes(mode)) {
+      res.status(400).json({ ok: false, error: 'Invalid probe mode' });
+      return;
+    }
+    try {
+      const result = await opts.networkService.runProbe(mode, target);
+      res.json(result);
+    } catch (e) {
+      res.status(400).json({ ok: false, error: (e as Error).message });
+    }
+  });
+
   return router;
 }

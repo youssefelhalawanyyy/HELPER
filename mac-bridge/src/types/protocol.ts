@@ -403,9 +403,62 @@ export interface NetworkDevice {
   mac: string;
   hostname: string;
   vendor: string;
+  latencyMs?: number | null;
   isNew?: boolean;
   isGateway?: boolean;
   isSelf?: boolean;
+}
+
+export interface NetOpsHopMetric {
+  id: string;
+  label: string;
+  target: string;
+  latencyMs: number | null;
+  status: 'ok' | 'warn' | 'bad' | 'idle';
+}
+
+export interface NetOpsPortResult {
+  port: number;
+  service: string;
+  open: boolean;
+  latencyMs: number | null;
+}
+
+export interface NetOpsDnsRecord {
+  type: string;
+  value: string;
+  ttl?: number;
+}
+
+export interface NetOpsProbeResult {
+  ok: boolean;
+  mode: 'ping' | 'dns' | 'ports';
+  target: string;
+  resolvedIp?: string;
+  source: 'bridge' | 'phone';
+  ts: number;
+  summary: string;
+  ping?: {
+    sent: number;
+    received: number;
+    lossPct: number;
+    minMs: number | null;
+    avgMs: number | null;
+    maxMs: number | null;
+    jitterMs: number | null;
+    httpStatus?: number | null;
+    httpMs?: number | null;
+  };
+  dns?: {
+    lookupMs: number | null;
+    resolver: string;
+    records: NetOpsDnsRecord[];
+  };
+  ports?: {
+    scannedCount: number;
+    openCount: number;
+    items: NetOpsPortResult[];
+  };
 }
 
 export interface NetworkCommandState {
@@ -419,14 +472,19 @@ export interface NetworkCommandState {
   gatewayIp: string;
   publicIp: string;
   isp: string;
+  colo?: string;
   dnsServers: string[];
   vpnActive: boolean;
   downMbps: number | null;
   upMbps: number | null;
   pingMs: number | null;
+  gatewayPingMs?: number | null;
+  googlePingMs?: number | null;
   jitterMs: number | null;
   packetLossPct: number | null;
   dnsMs: number | null;
+  speedPhase?: 'idle' | 'ping' | 'download' | 'upload';
+  hops?: NetOpsHopMetric[];
   grade: 'ULTRA' | 'FAST' | 'FAIR' | 'SLOW' | 'IDLE';
   devices: NetworkDevice[];
   wifiPassword: string | null;
