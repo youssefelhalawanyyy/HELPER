@@ -11,6 +11,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  ShieldAlert,
   ZoomIn,
 } from 'lucide-react';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
@@ -38,13 +39,16 @@ export function LiveScreenPreview({
   const [zoom, setZoom] = useState<1 | 1.75 | 2.5>(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fullscreen, setFullscreen] = useState(false);
-  const [streamNonce, setStreamNonce] = useState(() => Date.now());
+  const [retryTick, setRetryTick] = useState(0);
   const [streamReady, setStreamReady] = useState(false);
-  const [streamError, setStreamError] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [requestingPerm, setRequestingPerm] = useState(false);
+  const [fps, setFps] = useState(0);
   const [ripples, setRipples] = useState<TapRipple[]>([]);
 
-  const imgRef = useRef<HTMLImageElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const imgSizeRef = useRef({ w: 16, h: 9 });
   const lastTapRef = useRef<{ ts: number; nx: number; ny: number }>({ ts: 0, nx: 0, ny: 0 });
   const dragRef = useRef<{
     active: boolean;
@@ -60,17 +64,114 @@ export function LiveScreenPreview({
   const isConnected =
     deck.status === 'connected' && Boolean(deck.bridgeBaseUrl && deck.pairing?.token);
 
-  const streamUrl =
-    isConnected && !paused
-      ? `${deck.bridgeBaseUrl}/api/screen/stream?q=${quality}&token=${encodeURIComponent(deck.pairing!.token)}&s=${streamNonce}`
-      : isConnected && paused
-        ? `${deck.bridgeBaseUrl}/api/screen/peek?w=960&token=${encodeURIComponent(deck.pairing!.token)}&t=${streamNonce}`
-        : '';
-
+  // Zero-flicker, Cloudflare-tunnel & iOS-Safari proof live canvas streaming loop
   useEffect(() => {
-    setStreamReady(false);
-    setStreamError(false);
-  }, [quality, paused, streamNonce, deck.bridgeBaseUrl]);
+    if (!isConnected || paused || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+
+    let cancelled = false;
+    let seq = 0;
+    let frameTimes: number[] = [];
+    const controller = new AbortController();
+
+    const pump = async () => {
+      while (!cancelled) {
+        const t0 = performance.now();
+        try {
+          const url = `${deck.bridgeBaseUrl}/api/screen/frame?q=${quality}&seq=${seq}&token=${encodeURIComponent(deck.pairing!.token)}`;
+          const res = await fetch(url, {
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+
+          if (cancelled) break;
+
+          if (res.status === 403) {
+            setPermissionDenied(true);
+            setStreamReady(false);
+            setFps(0);
+            // Poll permission gently every 2s so it auto-starts the instant user grants it on Mac!
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+
+          if (res.status === 204 || !res.ok) {
+            await new Promise((r) => setTimeout(r, 120));
+            continue;
+          }
+
+          const nextSeq = Number(res.headers.get('x-screen-seq') || 0);
+          if (nextSeq > 0) seq = nextSeq;
+
+          const blob = await res.blob();
+          if (cancelled || blob.size < 100) continue;
+
+          const canvas = canvasRef.current;
+          if (!canvas) continue;
+          const ctx = canvas.getContext('2d', { alpha: false });
+          if (!ctx) continue;
+
+          if (typeof createImageBitmap === 'function') {
+            const bmp = await createImageBitmap(blob);
+            if (!cancelled) {
+              if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+                canvas.width = bmp.width;
+                canvas.height = bmp.height;
+                imgSizeRef.current = { w: bmp.width, h: bmp.height };
+              }
+              ctx.drawImage(bmp, 0, 0);
+            }
+            bmp.close();
+          } else {
+            const objUrl = URL.createObjectURL(blob);
+            await new Promise<void>((resolve) => {
+              const img = new Image();
+              img.onload = () => {
+                if (!cancelled) {
+                  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    imgSizeRef.current = { w: img.naturalWidth, h: img.naturalHeight };
+                  }
+                  ctx.drawImage(img, 0, 0);
+                }
+                URL.revokeObjectURL(objUrl);
+                resolve();
+              };
+              img.onerror = () => {
+                URL.revokeObjectURL(objUrl);
+                resolve();
+              };
+              img.src = objUrl;
+            });
+          }
+
+          setPermissionDenied(false);
+          setStreamReady(true);
+
+          const now = performance.now();
+          frameTimes.push(now);
+          frameTimes = frameTimes.filter((t) => now - t <= 1000);
+          setFps(frameTimes.length);
+
+          // Tiny yield to keep touch & scroll events 100% immediate
+          const elapsed = now - t0;
+          const minFrameMs = quality === 'turbo' ? 38 : quality === 'balanced' ? 55 : 80;
+          if (elapsed < minFrameMs) {
+            await new Promise((r) => setTimeout(r, minFrameMs - elapsed));
+          }
+        } catch {
+          if (cancelled) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    };
+
+    void pump();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [isConnected, paused, quality, retryTick, deck.bridgeBaseUrl, deck.pairing]);
 
   useEffect(() => {
     return () => {
@@ -78,18 +179,43 @@ export function LiveScreenPreview({
     };
   }, []);
 
+  const handleRequestPermission = async () => {
+    if (!isConnected || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    setRequestingPerm(true);
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/screen/request-permission`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deck.pairing.token}`,
+        },
+      });
+      const data = (await res.json()) as { granted?: boolean; message?: string };
+      deck.showToast(true, data.message || 'Opened Mac Screen Recording Settings');
+      if (data.granted) {
+        setPermissionDenied(false);
+        setRetryTick((t) => t + 1);
+      }
+    } catch {
+      deck.showToast(false, 'Could not open Mac settings');
+    } finally {
+      setRequestingPerm(false);
+    }
+  };
+
   // Compute exact normalized (0..1, 0..1) screen coordinates accounting for object-contain letterboxing & zoom/pan
   const clientToScreenNorm = useCallback(
     (clientX: number, clientY: number): { nx: number; ny: number; xPct: number; yPct: number } | null => {
-      const img = imgRef.current;
+      const canvas = canvasRef.current;
       const stage = stageRef.current;
-      if (!img || !stage) return null;
+      if (!canvas || !stage) return null;
 
-      const rect = img.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return null;
 
-      const natW = img.naturalWidth || 16;
-      const natH = img.naturalHeight || 9;
+      const natW = imgSizeRef.current.w || 16;
+      const natH = imgSizeRef.current.h || 9;
       const imgAspect = natW / natH;
       const boxAspect = rect.width / rect.height;
 
@@ -127,11 +253,11 @@ export function LiveScreenPreview({
     setRipples((prev) => [...prev.slice(-3), { id, xPct, yPct, kind }]);
     window.setTimeout(() => {
       setRipples((prev) => prev.filter((r) => r.id !== id));
-    }, 420);
+    }, 380);
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isConnected) return;
+    if (!isConnected || permissionDenied) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = {
       active: true,
@@ -144,7 +270,7 @@ export function LiveScreenPreview({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current.active || !isConnected) return;
+    if (!dragRef.current.active || !isConnected || permissionDenied) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
     if (Math.hypot(dx, dy) > 6) {
@@ -185,7 +311,7 @@ export function LiveScreenPreview({
     const wasMoved = dragRef.current.moved;
     dragRef.current.active = false;
     dragRef.current.moved = false;
-    if (!isConnected || wasMoved) return;
+    if (!isConnected || permissionDenied || wasMoved) return;
 
     const pos = clientToScreenNorm(e.clientX, e.clientY);
     if (!pos) return;
@@ -217,22 +343,21 @@ export function LiveScreenPreview({
   };
 
   const saveSnapshot = () => {
-    if (!isConnected) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !streamReady) return;
     soundEngine.playClick();
-    const url = `${deck.bridgeBaseUrl}/api/screen/peek?w=1280&token=${encodeURIComponent(deck.pairing!.token)}&t=${Date.now()}`;
     const a = document.createElement('a');
-    a.href = url;
+    a.href = canvas.toDataURL('image/jpeg', 0.92);
     a.download = `devdeck-screen-${Date.now()}.jpg`;
-    a.target = '_blank';
     a.click();
-    deck.showToast(true, 'Screen snapshot captured');
+    deck.showToast(true, 'Screen snapshot saved');
   };
 
-  const stageBody = (
+  return (
     <div
       className={
         fullscreen
-          ? 'fixed inset-0 z-[90] flex flex-col gap-2 bg-[#040c11]/98 p-2.5 backdrop-blur-xl'
+          ? 'fixed inset-0 z-[90] flex flex-col gap-2 bg-[#040c11] p-2.5'
           : 'flex min-h-0 flex-1 flex-col gap-1.5'
       }
       data-no-swipe="true"
@@ -244,18 +369,37 @@ export function LiveScreenPreview({
             className="flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold uppercase"
             style={{
               background:
-                isConnected && !paused && streamReady
+                isConnected && !paused && streamReady && !permissionDenied
                   ? 'rgba(52,211,153,0.18)'
-                  : 'rgba(251,191,36,0.16)',
-              color: isConnected && !paused && streamReady ? '#34d399' : '#fbbf24',
+                  : permissionDenied
+                    ? 'rgba(255,93,108,0.18)'
+                    : 'rgba(251,191,36,0.16)',
+              color:
+                isConnected && !paused && streamReady && !permissionDenied
+                  ? '#34d399'
+                  : permissionDenied
+                    ? '#ff5d6c'
+                    : '#fbbf24',
             }}
           >
             <span
               className={`h-1.5 w-1.5 rounded-full ${
-                isConnected && !paused && streamReady ? 'animate-pulse bg-[#34d399]' : 'bg-[#fbbf24]'
+                isConnected && !paused && streamReady && !permissionDenied
+                  ? 'animate-pulse bg-[#34d399]'
+                  : permissionDenied
+                    ? 'bg-[#ff5d6c]'
+                    : 'bg-[#fbbf24]'
               }`}
             />
-            {!isConnected ? 'OFFLINE' : paused ? 'PAUSED' : streamReady ? 'LIVE' : 'SYNC…'}
+            {!isConnected
+              ? 'OFFLINE'
+              : permissionDenied
+                ? 'PERM'
+                : paused
+                  ? 'PAUSED'
+                  : streamReady
+                    ? `LIVE ${fps > 0 ? `${fps}FPS` : ''}`
+                    : 'SYNC…'}
           </span>
 
           {/* Quality / Speed Switcher */}
@@ -321,7 +465,6 @@ export function LiveScreenPreview({
             onClick={() => {
               soundEngine.playClick();
               setPaused((p) => !p);
-              setStreamNonce(Date.now());
             }}
             className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#effaf7]"
           >
@@ -334,7 +477,8 @@ export function LiveScreenPreview({
             onClick={() => {
               soundEngine.playClick();
               setPaused(false);
-              setStreamNonce(Date.now());
+              setPermissionDenied(false);
+              setRetryTick((t) => t + 1);
             }}
             className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#9cb4bb] hover:text-white"
           >
@@ -367,51 +511,56 @@ export function LiveScreenPreview({
         }}
         className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-xl border border-[#88f1d1]/25 bg-[#03090d]"
       >
-        {isConnected && streamUrl ? (
+        {isConnected ? (
           <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              ref={imgRef}
-              key={`${quality}-${paused}-${streamNonce}`}
-              src={streamUrl}
-              alt="Live Computer Screen Preview"
-              draggable={false}
-              onLoad={() => {
-                setStreamReady(true);
-                setStreamError(false);
-              }}
-              onError={() => setStreamError(true)}
+            <canvas
+              ref={canvasRef}
               className="h-full w-full object-contain transition-transform duration-100"
               style={{
                 transform: `scale(${zoom}) translate(${pan.x}%, ${pan.y}%)`,
               }}
             />
 
-            {!streamReady && !streamError && (
+            {!streamReady && !permissionDenied && (
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55">
                 <Monitor className="h-5 w-5 animate-pulse text-[#88f1d1]" />
                 <span className="font-mono-tech text-[9px] font-bold text-[#88f1d1]">
-                  CONNECTING LIVE STREAM…
+                  STARTING LIVE SCREEN…
                 </span>
               </div>
             )}
 
-            {streamError && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/80 p-3 text-center">
-                <span className="text-[10px] font-bold text-[#fbbf24]">
-                  Screen stream needs Screen Recording permission or bridge reconnect
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setStreamError(false);
-                    setStreamNonce(Date.now());
-                  }}
-                  className="rounded-lg bg-[#88f1d1] px-3 py-1 text-[9px] font-extrabold text-[#061c17]"
-                >
-                  RETRY LIVE STREAM
-                </button>
+            {permissionDenied && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#040c11]/95 p-3 text-center">
+                <ShieldAlert className="h-6 w-6 text-[#fbbf24]" />
+                <div className="text-[11px] font-extrabold text-white">
+                  Enable macOS Screen Recording (1-Time)
+                </div>
+                <p className="max-w-[260px] text-[9px] leading-relaxed text-[#9cb4bb]">
+                  macOS blocks screen capture until you flip the toggle ON for Terminal / Antigravity
+                  in <b>System Settings → Privacy &amp; Security → Screen Recording</b>.
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={requestingPerm}
+                    onClick={() => void handleRequestPermission()}
+                    className="rounded-xl bg-[#88f1d1] px-3 py-1.5 text-[9.5px] font-extrabold text-[#061c17]"
+                  >
+                    {requestingPerm ? 'OPENING…' : 'OPEN MAC SETTINGS'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setPermissionDenied(false);
+                      setRetryTick((t) => t + 1);
+                    }}
+                    className="rounded-xl border border-white/15 bg-white/[0.06] px-2.5 py-1.5 text-[9.5px] font-bold text-white"
+                  >
+                    RETRY
+                  </button>
+                </div>
               </div>
             )}
 
@@ -431,10 +580,11 @@ export function LiveScreenPreview({
               />
             ))}
 
-            {/* Subtle Corner Hint */}
-            <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono-tech text-[7.5px] font-bold text-[#cbd5e1]">
-              Tap screen to click · Drag to aim · 2x tap to open
-            </div>
+            {streamReady && !permissionDenied && (
+              <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono-tech text-[7.5px] font-bold text-[#cbd5e1]">
+                Tap screen to click · Drag to aim · 2x tap to open
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center text-[#9cb4bb]">
@@ -467,7 +617,7 @@ export function LiveScreenPreview({
         <button
           type="button"
           onClick={saveSnapshot}
-          disabled={!isConnected}
+          disabled={!streamReady}
           className="flex h-6 items-center justify-center gap-0.5 rounded-lg border border-[#88f1d1]/30 bg-[#88f1d1]/12 text-[8.5px] font-extrabold text-[#88f1d1] disabled:opacity-40"
         >
           <Camera className="h-2.5 w-2.5" />
@@ -476,6 +626,4 @@ export function LiveScreenPreview({
       </div>
     </div>
   );
-
-  return stageBody;
 }

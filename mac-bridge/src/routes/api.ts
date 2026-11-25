@@ -15,7 +15,10 @@ import {
 } from '../macos/hardware.js';
 import {
   attachMjpegScreenStream,
+  checkScreenCapturePermission,
   getLatestCachedScreenFrame,
+  getLiveScreenFrame,
+  requestScreenCapturePermission,
   type ScreenQualityPreset,
 } from '../services/screenStreamService.js';
 import {
@@ -556,7 +559,56 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     res.json({ ok, message: ok ? 'Image copied to computer clipboard' : 'Could not write image to clipboard' });
   });
 
-  // --- Ultra-Fast Live MJPEG Screen Stream (Native CoreGraphics / Zero-Disk) ---
+  // --- Ultra-Fast Live Screen Status, Permission & Frame/MJPEG Endpoints ---
+  router.get('/screen/status', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    const granted = await checkScreenCapturePermission();
+    res.json({ ok: true, granted, platform: process.platform });
+  });
+
+  router.post('/screen/request-permission', deps.auth.requireAuth, async (_req, res) => {
+    const result = await requestScreenCapturePermission();
+    res.json(result);
+  });
+
+  router.get('/screen/frame', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).end();
+      return;
+    }
+    const qRaw = String(req.query.q || 'turbo').toLowerCase();
+    const preset: ScreenQualityPreset =
+      qRaw === 'hd' ? 'hd' : qRaw === 'balanced' ? 'balanced' : 'turbo';
+    const lastSeq = Number(req.query.seq) || 0;
+    const { frame, seq, permissionDenied } = await getLiveScreenFrame(preset, lastSeq);
+    if (permissionDenied) {
+      res.status(403).json({
+        ok: false,
+        permissionDenied: true,
+        error: 'Screen Recording permission required on Mac',
+      });
+      return;
+    }
+    if (!frame) {
+      res.status(204).end();
+      return;
+    }
+    res.setHeader('content-type', 'image/jpeg');
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('x-screen-seq', String(seq));
+    res.setHeader('access-control-expose-headers', 'x-screen-seq');
+    res.send(frame);
+  });
+
   router.get('/screen/stream', async (req, res) => {
     const token =
       (typeof req.query.token === 'string' ? req.query.token : '') ||

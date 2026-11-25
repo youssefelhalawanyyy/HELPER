@@ -93,6 +93,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
 int main(int argc, char **argv) {
     @autoreleasepool {
+        if (argc > 1 && strcmp(argv[1], "--check") == 0) {
+            return CGPreflightScreenCaptureAccess() ? 0 : 10;
+        }
+        if (argc > 1 && strcmp(argv[1], "--request") == 0) {
+            CGRequestScreenCaptureAccess();
+            return CGPreflightScreenCaptureAccess() ? 0 : 10;
+        }
+        if (!CGPreflightScreenCaptureAccess()) {
+            return 10;
+        }
+
         int maxWidth = (argc > 1) ? atoi(argv[1]) : 800;
         double quality = (argc > 2) ? atof(argv[2]) : 0.50;
         int targetFps = (argc > 3) ? atoi(argv[3]) : 22;

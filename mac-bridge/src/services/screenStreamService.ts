@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const IS_WIN = process.platform === 'win32';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const NATIVE_SRC = path.resolve(__dirname, '../../native/screen_stream.m');
-const NATIVE_BIN = path.join(os.tmpdir(), 'devdeck-screen-stream-v1');
+const NATIVE_BIN = path.join(os.tmpdir(), 'devdeck-screen-stream-v2');
 
 export type ScreenQualityPreset = 'turbo' | 'balanced' | 'hd';
 
@@ -22,9 +22,9 @@ interface StreamProfile {
 }
 
 const PROFILES: Record<ScreenQualityPreset, StreamProfile> = {
-  turbo: { width: 760, quality: 0.46, fps: 22 },
-  balanced: { width: 960, quality: 0.6, fps: 16 },
-  hd: { width: 1280, quality: 0.74, fps: 11 },
+  turbo: { width: 760, quality: 0.48, fps: 24 },
+  balanced: { width: 960, quality: 0.62, fps: 18 },
+  hd: { width: 1280, quality: 0.76, fps: 12 },
 };
 
 interface ActiveStream {
@@ -34,8 +34,11 @@ interface ActiveStream {
   latestFrame: Buffer | null;
   latestTs: number;
   frameCount: number;
+  lastAccessTs: number;
+  permissionDenied: boolean;
   stopTimer: ReturnType<typeof setTimeout> | null;
   fallbackTimer: ReturnType<typeof setInterval> | null;
+  waiters: Array<(frame: Buffer | null) => void>;
 }
 
 const activeStreams = new Map<string, ActiveStream>();
@@ -85,10 +88,51 @@ async function ensureNativeStreamer(): Promise<string | null> {
   return compilePromise;
 }
 
+export async function checkScreenCapturePermission(): Promise<boolean> {
+  if (IS_WIN) return true;
+  const bin = await ensureNativeStreamer();
+  if (!bin) return true;
+  try {
+    await execFileAsync(bin, ['--check'], { timeout: 2500 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function requestScreenCapturePermission(): Promise<{ ok: boolean; granted: boolean; message: string }> {
+  if (IS_WIN) return { ok: true, granted: true, message: 'Windows screen capture is ready' };
+  const bin = await ensureNativeStreamer();
+  if (bin) {
+    try {
+      await execFileAsync(bin, ['--request'], { timeout: 2500 });
+      return { ok: true, granted: true, message: 'Screen Recording permission already granted!' };
+    } catch {
+      // Permission not yet granted — open macOS System Settings directly to Screen Recording
+    }
+  }
+  await execFileAsync('open', [
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  ]).catch(() => {});
+  return {
+    ok: true,
+    granted: false,
+    message: 'Opened macOS Screen Recording Settings — enable your terminal/IDE toggle, then tap Retry.',
+  };
+}
+
 function broadcastFrame(stream: ActiveStream, jpeg: Buffer) {
   stream.latestFrame = jpeg;
   stream.latestTs = Date.now();
   stream.frameCount += 1;
+  stream.permissionDenied = false;
+
+  if (stream.waiters.length > 0) {
+    const waiters = stream.waiters.splice(0, stream.waiters.length);
+    for (const resolve of waiters) resolve(jpeg);
+  }
+
+  if (stream.clients.size === 0) return;
   const header = Buffer.from(
     `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.byteLength}\r\n\r\n`,
   );
@@ -98,7 +142,6 @@ function broadcastFrame(stream: ActiveStream, jpeg: Buffer) {
       stream.clients.delete(res);
       continue;
     }
-    // Skip frame if socket backpressure is high so latency stays near-zero!
     if ((res.socket?.writableLength ?? 0) > 120 * 1024) continue;
     try {
       res.write(header);
@@ -127,7 +170,21 @@ function stopStream(stream: ActiveStream) {
     }
   }
   stream.proc = null;
+  const waiters = stream.waiters.splice(0, stream.waiters.length);
+  for (const resolve of waiters) resolve(null);
   activeStreams.delete(stream.key);
+}
+
+function scheduleAutoStop(stream: ActiveStream) {
+  if (stream.stopTimer) clearTimeout(stream.stopTimer);
+  stream.stopTimer = setTimeout(() => {
+    stream.stopTimer = null;
+    if (stream.clients.size === 0 && Date.now() - stream.lastAccessTs >= 2500) {
+      stopStream(stream);
+    } else if (stream.clients.size === 0) {
+      scheduleAutoStop(stream);
+    }
+  }, 2600);
 }
 
 async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPreset) {
@@ -143,11 +200,11 @@ async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPrese
     stream.proc = proc;
 
     let buf: Buffer = Buffer.alloc(0);
-    proc.stdout.on('data', (chunk: Buffer) => {
+    proc.stdout?.on('data', (chunk: Buffer) => {
       buf = buf.byteLength === 0 ? chunk : Buffer.concat([buf, chunk]);
       while (buf.byteLength >= 4) {
         const len = buf.readUInt32BE(0);
-        if (len === 0 || len > 8 * 1024 * 1024) {
+        if (len === 0 || len > 10 * 1024 * 1024) {
           buf = Buffer.alloc(0);
           break;
         }
@@ -158,35 +215,31 @@ async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPrese
       }
     });
 
-    proc.on('exit', () => {
+    proc.on('exit', (code) => {
       if (stream.proc === proc) stream.proc = null;
-      if (stream.clients.size === 0) {
+      if (code === 10 || code === 2) {
+        stream.permissionDenied = true;
+        const waiters = stream.waiters.splice(0, stream.waiters.length);
+        for (const resolve of waiters) resolve(null);
         activeStreams.delete(stream.key);
-      } else if (stream.frameCount === 0 && !stream.fallbackTimer) {
-        // Fallback if ScreenCaptureKit permission is unavailable
-        let busy = false;
-        const intervalMs = Math.max(120, Math.round(1000 / Math.min(10, prof.fps)));
-        stream.fallbackTimer = setInterval(() => {
-          if (busy || stream.clients.size === 0) return;
-          busy = true;
-          void captureScreenPeekJpeg(prof.width)
-            .then((jpg) => {
-              if (jpg && jpg.byteLength > 0) broadcastFrame(stream, jpg);
-            })
-            .finally(() => {
-              busy = false;
-            });
-        }, intervalMs);
+        return;
+      }
+      if (stream.clients.size === 0 && Date.now() - stream.lastAccessTs >= 2500) {
+        activeStreams.delete(stream.key);
       }
     });
     return;
   }
 
-  // Fallback (Windows or if clang unavailable): tight non-overlapping capture loop
+  // Windows / non-clang fallback
   let busy = false;
-  const intervalMs = Math.max(85, Math.round(1000 / Math.min(12, prof.fps)));
+  const intervalMs = Math.max(80, Math.round(1000 / Math.min(14, prof.fps)));
   stream.fallbackTimer = setInterval(() => {
-    if (busy || stream.clients.size === 0) return;
+    if (busy) return;
+    if (stream.clients.size === 0 && Date.now() - stream.lastAccessTs >= 2500) {
+      stopStream(stream);
+      return;
+    }
     busy = true;
     void captureScreenPeekJpeg(prof.width)
       .then((jpg) => {
@@ -198,26 +251,87 @@ async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPrese
   }, intervalMs);
 }
 
-export async function attachMjpegScreenStream(
-  res: Response,
-  preset: ScreenQualityPreset = 'turbo',
-): Promise<void> {
-  const key = preset;
-  let stream = activeStreams.get(key);
+function getOrStartStream(preset: ScreenQualityPreset): ActiveStream {
+  let stream = activeStreams.get(preset);
   if (!stream) {
     stream = {
-      key,
+      key: preset,
       proc: null,
       clients: new Set(),
       latestFrame: null,
       latestTs: 0,
       frameCount: 0,
+      lastAccessTs: Date.now(),
+      permissionDenied: false,
       stopTimer: null,
       fallbackTimer: null,
+      waiters: [],
     };
-    activeStreams.set(key, stream);
+    activeStreams.set(preset, stream);
     void startCaptureLoop(stream, preset);
-  } else if (stream.stopTimer) {
+  }
+  stream.lastAccessTs = Date.now();
+  return stream;
+}
+
+/**
+ * Ultra-fast RAM-cached frame getter for iOS Safari & Cloudflare HTTPS tunnels (zero MJPEG buffering!).
+ * Keeps the ScreenCaptureKit GPU daemon warm while frames are actively polled and auto-stops 2.6s after idle.
+ */
+export async function getLiveScreenFrame(
+  preset: ScreenQualityPreset = 'turbo',
+  lastSeq = 0,
+): Promise<{ frame: Buffer | null; seq: number; permissionDenied: boolean }> {
+  const hasPerm = await checkScreenCapturePermission();
+  if (!hasPerm) {
+    return { frame: null, seq: 0, permissionDenied: true };
+  }
+
+  const stream = getOrStartStream(preset);
+  scheduleAutoStop(stream);
+
+  // If we already have a newer frame in RAM, return it in <1ms!
+  if (stream.latestFrame && stream.frameCount > lastSeq) {
+    return { frame: stream.latestFrame, seq: stream.frameCount, permissionDenied: false };
+  }
+
+  // Otherwise wait up to 900ms for the next GPU frame (normally arrives in 15-45ms!)
+  const frame = await new Promise<Buffer | null>((resolve) => {
+    const timer = setTimeout(() => {
+      const idx = stream.waiters.indexOf(onFrame);
+      if (idx >= 0) stream.waiters.splice(idx, 1);
+      resolve(stream.latestFrame);
+    }, 900);
+    const onFrame = (buf: Buffer | null) => {
+      clearTimeout(timer);
+      resolve(buf);
+    };
+    stream.waiters.push(onFrame);
+  });
+
+  return {
+    frame,
+    seq: stream.frameCount,
+    permissionDenied: stream.permissionDenied,
+  };
+}
+
+export async function attachMjpegScreenStream(
+  res: Response,
+  preset: ScreenQualityPreset = 'turbo',
+): Promise<void> {
+  const hasPerm = await checkScreenCapturePermission();
+  if (!hasPerm) {
+    res.status(403).json({
+      ok: false,
+      permissionDenied: true,
+      error: 'macOS Screen Recording permission required',
+    });
+    return;
+  }
+
+  const stream = getOrStartStream(preset);
+  if (stream.stopTimer) {
     clearTimeout(stream.stopTimer);
     stream.stopTimer = null;
   }
@@ -233,7 +347,6 @@ export async function attachMjpegScreenStream(
 
   stream.clients.add(res);
 
-  // Immediately push the latest cached frame if available so first paint is <5ms!
   if (stream.latestFrame) {
     const jpg = stream.latestFrame;
     res.write(
@@ -244,13 +357,10 @@ export async function attachMjpegScreenStream(
   }
 
   const cleanup = () => {
-    stream?.clients.delete(res);
-    if (stream && stream.clients.size === 0 && !stream.stopTimer) {
-      stream.stopTimer = setTimeout(() => {
-        if (stream && stream.clients.size === 0) {
-          stopStream(stream);
-        }
-      }, 1500);
+    stream.clients.delete(res);
+    if (stream.clients.size === 0) {
+      stream.lastAccessTs = Date.now();
+      scheduleAutoStop(stream);
     }
   };
 
