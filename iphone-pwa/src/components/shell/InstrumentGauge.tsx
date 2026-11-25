@@ -194,7 +194,7 @@ export const InstrumentGauge = memo(function InstrumentGauge({
   value,
   unit = '%',
   max = 100,
-  accent = '#22d3ee',
+  accent = '#88f1d1',
   heat,
   mode,
   status,
@@ -300,19 +300,19 @@ export const InstrumentGauge = memo(function InstrumentGauge({
       >
         <defs>
           <linearGradient id={`${uid}-bezel`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#58667a" />
-            <stop offset="38%" stopColor="#202834" />
-            <stop offset="72%" stopColor="#0e131b" />
-            <stop offset="100%" stopColor="#384455" />
+            <stop offset="0%" stopColor="#5d838d" />
+            <stop offset="38%" stopColor="#1c333c" />
+            <stop offset="72%" stopColor="#0c181f" />
+            <stop offset="100%" stopColor="#355560" />
           </linearGradient>
           <radialGradient id={`${uid}-face`} cx="50%" cy="42%" r="58%">
-            <stop offset="0%" stopColor="#17202d" />
-            <stop offset="62%" stopColor="#0b1018" />
-            <stop offset="100%" stopColor="#05080d" />
+            <stop offset="0%" stopColor="#152b34" />
+            <stop offset="62%" stopColor="#0c1920" />
+            <stop offset="100%" stopColor="#060e13" />
           </radialGradient>
           <linearGradient id={`${uid}-hub`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#495668" />
-            <stop offset="100%" stopColor="#121821" />
+            <stop offset="0%" stopColor="#4c6e77" />
+            <stop offset="100%" stopColor="#102028" />
           </linearGradient>
         </defs>
 

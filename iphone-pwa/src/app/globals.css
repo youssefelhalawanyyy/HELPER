@@ -10,8 +10,8 @@
 :root {
   color-scheme: only dark;
   box-sizing: border-box;
-  --scrollbar-thumb: #3a3e4b;
-  --scrollbar-track: #101114;
+  --scrollbar-thumb: #2b4b54;
+  --scrollbar-track: #0b151b;
 }
 
 * {
@@ -29,7 +29,7 @@ body {
   padding: 0;
   background: var(--canvas);
   overflow: hidden;
-  color: #f2f3f7;
+  color: #effaf7;
   font-family: 'Archivo', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-stretch: 100%;
   -webkit-user-select: none;
@@ -39,7 +39,7 @@ body {
 }
 
 button:focus-visible {
-  outline: 2px solid #ffffff;
+  outline: 2px solid #88f1d1;
   outline-offset: 2px;
 }
 
@@ -77,12 +77,12 @@ button:focus-visible {
 }
 
 .hw-key {
-  background: linear-gradient(180deg, #1b1d24 0%, #121318 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(165deg, #152831 0%, #0d1920 100%);
+  border: 1px solid #98c8ce29;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 -2px 0 rgba(0, 0, 0, 0.55),
-    0 4px 12px rgba(0, 0, 0, 0.65);
+    inset 0 1px 0 #bcfff212,
+    inset 0 -2px 0 rgba(3, 10, 14, 0.65),
+    0 4px 12px rgba(2, 8, 12, 0.55);
 }
 
 @keyframes devdeck-ping {
@@ -159,13 +159,13 @@ button:focus-visible {
 dialog.hw-dialog {
   margin: auto;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid #98c8ce36;
   border-radius: var(--panel-radius);
-  background: var(--panel-fill);
-  color: #f2f3f7;
+  background: #101d25;
+  color: #effaf7;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 24px 64px rgba(0, 0, 0, 0.92);
+    inset 0 1px 0 #bcfff214,
+    0 24px 64px rgba(2, 8, 12, 0.92);
   max-width: min(560px, 92vw);
   max-height: 88dvh;
   overflow: hidden;

@@ -562,23 +562,23 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
           }}
           className="flex items-center gap-1.5"
         >
-          <div className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-white/12 bg-[#070910] px-2 focus-within:border-[#22d3ee]">
+          <div className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-[#b3e5df36] bg-[#0a151c] px-2 focus-within:border-[#88f1d1]">
             {parsedTarget.isLocal ? (
               <span
                 className="font-mono-tech flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
                 style={{
                   background:
                     sessionInfo?.reachable
-                      ? 'rgba(52,211,153,0.18)'
+                      ? 'rgba(136,241,209,0.16)'
                       : 'rgba(251,191,36,0.18)',
-                  color: sessionInfo?.reachable ? '#34d399' : '#fbbf24',
+                  color: sessionInfo?.reachable ? '#88f1d1' : '#fbbf24',
                 }}
               >
                 <Radio className="h-2.5 w-2.5" />
                 {parsedTarget.localPort ? `:${parsedTarget.localPort}` : 'LOCAL'}
               </span>
             ) : (
-              <Lock className="h-3 w-3 shrink-0 text-[#22d3ee]" />
+              <Lock className="h-3 w-3 shrink-0 text-[#88f1d1]" />
             )}
 
             <input
@@ -587,14 +587,14 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
               spellCheck={false}
               aria-label="Localhost port or website URL"
               placeholder="localhost:3000, :5173, or https://app.com"
-              className="font-mono-tech min-w-0 flex-1 bg-transparent text-[9.5px] text-white outline-none placeholder:text-zinc-500"
+              className="font-mono-tech min-w-0 flex-1 bg-transparent text-[9.5px] text-[#effaf7] outline-none placeholder:text-[#78959e]"
             />
           </div>
 
           <button
             type="submit"
             disabled={inspecting || bridging}
-            className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-gradient-to-r from-[#22d3ee] to-[#34d399] px-2.5 text-[9px] font-extrabold text-[#041318] disabled:opacity-50"
+            className="flex h-7 shrink-0 items-center gap-1 rounded-xl bg-[#88f1d1] px-2.5 text-[9px] font-extrabold text-[#08221c] disabled:opacity-50"
           >
             {inspecting || bridging ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -612,9 +612,9 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
             }}
             aria-label={expanded ? 'Show DevTools inspector' : 'Expand preview stage'}
             aria-pressed={expanded}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-zinc-200"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] text-[#effaf7]"
           >
-            {expanded ? <Minimize2 className="h-3.5 w-3.5 text-[#22d3ee]" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            {expanded ? <Minimize2 className="h-3.5 w-3.5 text-[#88f1d1]" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
 
           <a
@@ -622,7 +622,7 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
             target="_blank"
             rel="noreferrer"
             aria-label="Open preview in browser"
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-zinc-200"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] text-[#effaf7]"
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
@@ -687,9 +687,9 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
                   }}
                   className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase"
                   style={{
-                    background: active ? 'rgba(167,139,250,0.22)' : 'rgba(255,255,255,0.04)',
-                    borderColor: active ? '#a78bfa' : 'rgba(255,255,255,0.08)',
-                    color: active ? '#c4b5fd' : '#9ca3af',
+                    background: active ? 'rgba(136,241,209,0.18)' : '#bcfff20d',
+                    borderColor: active ? '#88f1d1' : '#b3e5df36',
+                    color: active ? '#88f1d1' : '#9cb4bb',
                   }}
                 >
                   <Icon className="h-2.5 w-2.5" />
@@ -707,11 +707,11 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
                 setRotated((r) => !r);
               }}
               aria-label="Rotate viewport orientation"
-              className="font-mono-tech flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[8px] font-bold text-zinc-300"
+              className="font-mono-tech flex shrink-0 items-center gap-1 rounded-full border border-[#b3e5df36] bg-[#bcfff20d] px-2 py-0.5 text-[8px] font-bold text-[#effaf7]"
             >
-              <RotateCw className="h-2.5 w-2.5 text-[#22d3ee]" />
+              <RotateCw className="h-2.5 w-2.5 text-[#88f1d1]" />
               {vpW}×{vpH}
-              <span className="text-zinc-500">{Math.round(scale * 100)}%</span>
+              <span className="text-[#9cb4bb]">{Math.round(scale * 100)}%</span>
             </button>
           )}
         </div>
@@ -846,10 +846,10 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
             <div className={styles.tabRow} role="tablist" aria-label="Web Studio DevTools">
               {(
                 [
-                  ['audit', 'Audit', ShieldCheck, '#34d399'],
-                  ['console', errorCount > 0 ? `Console (${errorCount})` : 'Console', Terminal, errorCount > 0 ? '#ff5d6c' : '#fbbf24'],
-                  ['headers', 'Headers', Globe, '#22d3ee'],
-                  ['share', 'Share QR', QrCode, '#a78bfa'],
+                  ['audit', 'Audit', ShieldCheck, '#88f1d1'],
+                  ['console', errorCount > 0 ? `Console (${errorCount})` : 'Console', Terminal, errorCount > 0 ? '#ff5d6c' : '#fde68a'],
+                  ['headers', 'Headers', Globe, '#7dd3fc'],
+                  ['share', 'Share QR', QrCode, '#88f1d1'],
                 ] as const
               ).map(([id, label, Icon, accent]) => (
                 <button
@@ -1074,11 +1074,11 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
           >
             <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-white/[0.07] bg-[#06080e] p-2.5 text-center">
               <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&bgcolor=06080e&color=22d3ee&data=${encodeURIComponent(shareUrl)}`}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&bgcolor=0a151c&color=88f1d1&data=${encodeURIComponent(shareUrl)}`}
                 alt="QR code to open preview URL on another device"
                 width={116}
                 height={116}
-                className="rounded-xl border border-[#22d3ee]/35 p-1"
+                className="rounded-xl border border-[#88f1d1]/35 p-1"
               />
               <div className="font-mono-tech max-w-full truncate px-2 text-[8.5px] font-bold text-[#34d399]">
                 {shareUrl}

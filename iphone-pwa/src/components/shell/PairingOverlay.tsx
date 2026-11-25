@@ -181,10 +181,10 @@ export function PairingOverlay({
             role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') onClose?.(); }} aria-label="Pair with computer"
             className="pair-sheet tile deck-scroll relative w-full max-w-[740px] overflow-y-auto p-3.5"
             style={{
-              borderRadius: 24,
-              borderColor: 'rgba(255,255,255,0.12)',
+              borderRadius: 21,
+              borderColor: 'rgba(152,200,206,0.22)',
               boxShadow:
-                'inset 0 1px 0 rgba(255,255,255,0.09), 0 30px 80px -15px rgba(0,0,0,0.95)',
+                'inset 0 1px 0 rgba(188,255,242,0.08), 0 30px 80px -15px rgba(2,8,12,0.95)',
             }}
           >
             {/* Compact Header Row */}
@@ -239,7 +239,7 @@ export function PairingOverlay({
               {/* Left Column: Mode Tabs + Inputs + OTP PIN + Submit */}
               <form onSubmit={handleSubmit} className="col-span-7 flex flex-col gap-2.5">
                 {/* Mode Tabs */}
-                <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.07] bg-black/70 p-1">
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-[#98c8ce29] bg-[#0a151c] p-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -249,8 +249,8 @@ export function PairingOverlay({
                     }}
                     className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10.5px] font-bold transition-all ${
                       mode === 'tunnel'
-                        ? 'bg-[#1b1d24] text-[#22d3ee] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                        : 'text-[#7c8190] hover:text-zinc-200'
+                        ? 'bg-[#142b34] text-[#88f1d1] shadow-[inset_0_1px_0_rgba(188,255,242,0.1)]'
+                        : 'text-[#9cb4bb] hover:text-[#effaf7]'
                     }`}
                   >
                     <Globe className="h-3 w-3 shrink-0" />
@@ -265,8 +265,8 @@ export function PairingOverlay({
                     }}
                     className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10.5px] font-bold transition-all ${
                       mode === 'lan'
-                        ? 'bg-[#1b1d24] text-[#34d399] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                        : 'text-[#7c8190] hover:text-zinc-200'
+                        ? 'bg-[#142b34] text-[#88f1d1] shadow-[inset_0_1px_0_rgba(188,255,242,0.1)]'
+                        : 'text-[#9cb4bb] hover:text-[#effaf7]'
                     }`}
                   >
                     <Wifi className="h-3 w-3 shrink-0" />

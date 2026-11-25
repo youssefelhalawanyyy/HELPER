@@ -100,35 +100,35 @@ export function SnippetDrawer({ open, snippets, onClose, onSend }: SnippetDrawer
             {adding && (
               <form
                 onSubmit={handleAdd}
-                className="flex flex-col gap-2 border-b border-white/[0.08] bg-[#121217] p-3"
+                className="flex flex-col gap-2 border-b border-[#98c8ce29] bg-[#101d25] p-3"
               >
                 <input
                   type="text"
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                   placeholder="Snippet label (e.g. Auth Header)"
-                  className="rounded-lg border border-white/10 bg-black px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
+                  className="rounded-lg border border-[#b3e5df36] bg-[#0a151c] px-2.5 py-1.5 text-xs text-[#effaf7] outline-none focus:border-[#88f1d1]"
                 />
                 <textarea
                   rows={2}
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   placeholder="Text or {{uuid}} / {{email}} / {{iso}}"
-                  className="font-mono-tech rounded-lg border border-white/10 bg-black px-2.5 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-cyan-400"
+                  className="font-mono-tech rounded-lg border border-[#b3e5df36] bg-[#0a151c] px-2.5 py-1.5 text-[11px] text-[#effaf7] outline-none focus:border-[#88f1d1]"
                 />
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-1.5 text-[11px] text-zinc-300">
+                  <label className="flex items-center gap-1.5 text-[11px] text-[#9cb4bb]">
                     <input
                       type="checkbox"
                       checked={autoPaste}
                       onChange={(e) => setAutoPaste(e.target.checked)}
-                      className="accent-cyan-400"
+                      className="accent-[#88f1d1]"
                     />
                     Auto-paste on Mac (⌘V)
                   </label>
                   <button
                     type="submit"
-                    className="rounded-lg bg-cyan-500 px-3 py-1 text-[11px] font-semibold text-black"
+                    className="rounded-lg bg-[#88f1d1] px-3 py-1 text-[11px] font-semibold text-[#08221c]"
                   >
                     Save
                   </button>

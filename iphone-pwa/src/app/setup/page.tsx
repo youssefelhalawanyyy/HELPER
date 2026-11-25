@@ -54,8 +54,8 @@ function CopyBlock({
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#07090e]">
-      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] bg-white/[0.02] px-3.5 py-2">
+    <div className="overflow-hidden rounded-2xl border border-[#98c8ce29] bg-[#0a151c]">
+      <div className="flex items-center justify-between gap-2 border-b border-[#98c8ce24] bg-[#101d25] px-3.5 py-2">
         <span
           className="font-mono-tech text-[11px] font-bold tracking-wider uppercase"
           style={{ color: accent }}
@@ -65,7 +65,7 @@ function CopyBlock({
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[11px] font-bold text-zinc-200 transition-colors hover:border-white/25 hover:text-white"
+          className="flex items-center gap-1.5 rounded-lg border border-[#b3e5df36] bg-[#bcfff20d] px-2.5 py-1 text-[11px] font-bold text-[#effaf7] transition-colors hover:border-[#88f1d1]"
         >
           {copied ? (
             <>
@@ -203,9 +203,9 @@ npm run live`;
 }`;
 
   return (
-    <div className="setup-screen deck-scroll fixed inset-0 overflow-y-auto bg-[#030407] text-[#f2f3f7] select-text">
+    <div className="setup-screen deck-scroll fixed inset-0 overflow-y-auto bg-[#091319] text-[#effaf7] select-text">
       {/* Sticky Top Navigation */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-black/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-[#98c8ce29] bg-[#0d1921]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-3">
           <div className="flex items-center gap-3">
             <Brand />

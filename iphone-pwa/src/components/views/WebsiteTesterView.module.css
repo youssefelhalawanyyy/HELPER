@@ -5,7 +5,7 @@
   overflow-x: auto;
   scrollbar-width: none;
   scroll-snap-type: inline proximity;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #acdbcb30;
 }
 
 .tabRow::-webkit-scrollbar {
@@ -13,7 +13,7 @@
 }
 
 .tabBtn {
-  --tab-accent: #22d3ee;
+  --tab-accent: #88f1d1;
   position: relative;
   flex: none;
   scroll-snap-align: start;
@@ -25,7 +25,7 @@
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8b95a7;
+  color: #9cb4bb;
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -33,7 +33,7 @@
 }
 
 .tabBtn:focus-visible {
-  outline: 2px solid #22d3ee;
+  outline: 2px solid #88f1d1;
   outline-offset: -2px;
   border-radius: 6px;
 }
@@ -68,12 +68,12 @@
   min-height: 0;
   flex: 1 1 0;
   overflow: hidden;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 15px;
+  border: 1px solid #98c8ce29;
   background:
-    radial-gradient(circle at 50% 25%, rgba(34, 211, 238, 0.07), transparent 65%),
-    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    #05070c;
+    radial-gradient(ellipse at 50% 18%, #23555555, transparent 62%),
+    radial-gradient(#88f1d118 1px, transparent 1px),
+    #0a151c;
   background-size:
     100% 100%,
     14px 14px,
@@ -82,16 +82,16 @@
 
 .bezelMobile {
   border-radius: 18px;
-  border: 2px solid #2c3545;
+  border: 2px solid #355863;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 18px 40px rgba(0, 0, 0, 0.72);
+    0 0 0 1px #98c8ce29,
+    0 18px 40px rgba(2, 8, 12, 0.78);
 }
 
 .bezelDesktop {
   border-radius: 10px;
-  border: 1.5px solid #2b3444;
+  border: 1.5px solid #355863;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.07),
-    0 18px 40px rgba(0, 0, 0, 0.72);
+    0 0 0 1px #98c8ce29,
+    0 18px 40px rgba(2, 8, 12, 0.78);
 }

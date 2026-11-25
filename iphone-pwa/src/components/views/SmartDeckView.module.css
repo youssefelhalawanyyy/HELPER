@@ -1,11 +1,16 @@
 .deck {
   height: 100%;
   container: smartdeck / size;
-  color: #f4f3fa;
-  --surface: #211f2a;
-  --line: #34343b;
-  --muted: #b4b2bf;
-  --lilac: #c6b4ff;
+  color: #effaf7;
+  --surface: #101d25;
+  --surface2: #152832;
+  --border: #98c8ce29;
+  --line: #98c8ce29;
+  --muted: #9cb4bb;
+  --mutedSoft: #7d9aa2;
+  --text: #effaf7;
+  --textSubtle: #b8d0d6;
+  --lilac: #88f1d1;
 }
 .workspace {
   height: 100%;
@@ -24,9 +29,12 @@
   align-items: center;
   flex: 0 0 clamp(166px, 28cqh, 270px);
   overflow: hidden;
-  border-radius: 16px;
-  background: #d0c2f1;
-  color: #20192e;
+  border-radius: 21px;
+  border: 1px solid #98c8ce2e;
+  background:
+    radial-gradient(ellipse at 95% 3%, #23555588, transparent 55%),
+    linear-gradient(125deg, #10292c, #101923 90%);
+  color: #effaf7;
 }
 .hero::before {
   content: '';
@@ -37,6 +45,8 @@
   width: auto;
   aspect-ratio: 2.4;
   max-width: 64%;
+  opacity: 0.36;
+  filter: hue-rotate(-55deg) saturate(0.8);
   background: url('/smartdeck-keypad.webp') center right / auto 120% no-repeat;
   mask-image: linear-gradient(90deg, transparent, black 34%);
 }
@@ -51,6 +61,7 @@
   gap: 6px;
   max-width: 100%;
   overflow: hidden;
+  color: #88f1d1;
   font:
     650 11px/1.1 ui-monospace,
     monospace;
@@ -62,10 +73,10 @@
   height: 7px;
   border-radius: 50%;
   flex: none;
-  background: #62536e;
+  background: #5b7880;
 }
 .connection[data-live='true'] i {
-  background: #167653;
+  background: #88f1d1;
 }
 .hero h1 {
   margin: 6px 0;
@@ -73,12 +84,13 @@
   font-weight: 800;
   line-height: 0.96;
   letter-spacing: -0.072em;
+  color: #effaf7;
 }
 .hero p {
   margin: 9px 0 15px;
   font-size: clamp(12px, 1.15cqw, 16px);
   line-height: 1.35;
-  color: #483b59;
+  color: #9cb4bb;
 }
 .heroButton,
 .tool,
@@ -92,19 +104,20 @@
   cursor: pointer;
   font-weight: 650;
   font-size: 12px;
-  border-radius: 9px;
+  border-radius: 12px;
 }
 .heroButton {
   min-height: 35px;
-  padding: 0 12px;
-  color: white;
-  background: #26202f;
+  padding: 0 14px;
+  color: #effaf7;
+  background: #bcfff20d;
+  border: 1px solid #b3e5df36;
 }
 .heroButton svg:last-child {
   margin-left: 6px;
 }
 .heroButton:hover {
-  background: #40344f;
+  background: #bcfff21c;
 }
 .panels {
   flex: 1;
@@ -119,7 +132,7 @@
   min-width: 0;
   padding: clamp(12px, 1.5cqw, 24px);
   border: 1px solid var(--line);
-  border-radius: 15px;
+  border-radius: 21px;
   background: var(--surface);
 }
 .library,
@@ -157,10 +170,10 @@
   padding: 0 9px;
   width: min(34%, 190px);
   min-height: 32px;
-  border: 1px solid #44434d;
-  border-radius: 8px;
+  border: 1px solid #b3e5df36;
+  border-radius: 10px;
   color: var(--muted);
-  background: #1e1e24;
+  background: #0b161d;
 }
 .search input {
   width: 100%;
@@ -172,19 +185,19 @@
   border-color: var(--lilac);
 }
 .search input::placeholder {
-  color: #aaa7b5;
+  color: #78959e;
 }
 .tool {
   min-height: 32px;
   padding: 0 10px;
-  background: #2b2931;
-  color: #e4deef;
-  border: 1px solid #47424f;
+  background: #bcfff20d;
+  color: #effaf7;
+  border: 1px solid #b3e5df36;
 }
 .tool[aria-pressed='true'],
 .tool:hover {
   color: var(--lilac);
-  border-color: #87779f;
+  border-color: var(--lilac);
 }
 .profileBar {
   margin-top: 12px;
@@ -205,19 +218,19 @@
   font-size: 11px;
   font-weight: 650;
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: 9px;
 }
 .profiles button[aria-pressed='true'] {
-  background: #3a3249;
-  color: #e6d7ff;
+  background: #bcfff218;
+  color: #88f1d1;
 }
 .profiles button:hover,
 .follow:hover {
-  background: #29272f;
+  background: #bcfff20f;
 }
 .follow {
   color: var(--lilac);
-  border: 1px solid #494051;
+  border: 1px solid #b3e5df36;
 }
 .deck button:disabled {
   opacity: 0.5;
@@ -408,7 +421,7 @@ button.key:active {
   color: var(--muted);
 }
 .refresh:hover:enabled {
-  background: #333039;
+  background: #bcfff214;
 }
 .count {
   font:
@@ -430,7 +443,7 @@ button.key:active {
   font-size: 12px;
 }
 .portEmpty svg {
-  color: #96909f;
+  color: #7d9aa2;
   flex: none;
 }
 .portList {
@@ -454,7 +467,7 @@ button.key:active {
     monospace;
 }
 .portList i {
-  background: #77d4aa;
+  background: #88f1d1;
   width: 5px;
   height: 5px;
 }
@@ -463,24 +476,25 @@ button.key:active {
   color: #ffb3bc;
   padding: 5px 8px;
   border-radius: 6px;
-  background: #3a252a;
+  background: #3a2028;
   font-size: 11px;
 }
 .actionInfo {
   display: grid;
   gap: 14px;
   font-size: 14px;
-  color: #dcd8e5;
+  color: #effaf7;
 }
 .actionInfo > div {
-  border-radius: 9px;
+  border-radius: 12px;
   padding: 12px;
-  background: #29272f;
+  background: #0c1820;
+  border: 1px solid #98c8ce26;
 }
 .actionInfo strong {
   display: block;
   margin-bottom: 4px;
-  color: #c6b4ff;
+  color: #88f1d1;
 }
 .actionInfo button {
   justify-self: start;
@@ -490,16 +504,16 @@ button.key:active {
   justify-items: center;
   gap: 4px;
   padding: 7px 2px;
-  border-radius: 8px;
-  background: #26252d;
-  border: 1px solid #38353f;
+  border-radius: 10px;
+  background: #0c1820;
+  border: 1px solid #98c8ce26;
   font-size: 10px;
-  color: #ccc6d6;
+  color: #9cb4bb;
 }
 .actionChoice[aria-pressed='true'] {
-  border-color: #a68cca;
-  background: #3d324c;
-  color: #e4ceff;
+  border-color: #88f1d1;
+  background: #153137;
+  color: #88f1d1;
 }
 .editor .key {
   min-height: 105px;
@@ -815,7 +829,7 @@ button.key:active {
 button.key:hover,
 button.key[data-active='true'] {
   border-color: var(--accent);
-  background: #2a263a;
+  background: #152832;
 }
 
 button.key:active {
@@ -824,8 +838,8 @@ button.key:active {
 
 .key[data-edit='true'] {
   border-style: dashed;
-  border-color: #8870a0;
-  background: #252135;
+  border-color: #88f1d188;
+  background: #13252f;
 }
 
 .keyTop {
@@ -842,8 +856,8 @@ button.key:active {
   display: grid;
   place-items: center;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, #151120);
-  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, #0c1820);
+  border-radius: 8px;
 }
 
 .keyDetail,

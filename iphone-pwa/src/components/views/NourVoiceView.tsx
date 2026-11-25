@@ -59,14 +59,14 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
 
   const orbColor =
     phase === 'listening'
-      ? '#22d3ee'
+      ? '#7dd3fc'
       : phase === 'speaking'
-        ? '#f472b6'
+        ? '#88f1d1'
         : phase === 'thinking'
           ? '#fbbf24'
           : phase === 'wake_listening'
             ? '#34d399'
-            : '#c084fc';
+            : '#88f1d1';
 
   const phaseLabel =
     phase === 'listening'
@@ -189,8 +189,8 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
               className="relative grid h-20 w-20 place-items-center rounded-full border-2"
               style={{
                 borderColor: orbColor,
-                background: `radial-gradient(circle at 32% 28%, ${orbColor}70, #160e26 70%)`,
-                boxShadow: `0 0 ${22 + Math.round(orbEnergy * 28)}px ${orbColor}66, inset 0 0 18px ${orbColor}40`,
+                background: `radial-gradient(circle at 32% 28%, ${orbColor}66, #0d242a 72%)`,
+                boxShadow: `0 0 ${22 + Math.round(orbEnergy * 28)}px ${orbColor}55, inset 0 0 18px ${orbColor}38`,
               }}
             >
               {phase === 'speaking' ? (
@@ -265,26 +265,26 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
         <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] pb-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <div
-              className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-black text-white"
+              className="relative grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-black text-[#08221c]"
               style={{
-                background: 'linear-gradient(135deg, #f472b6, #a78bfa)',
-                boxShadow: '0 0 12px rgba(244,114,182,0.4)',
+                background: 'linear-gradient(135deg, #88f1d1, #7dd3fc)',
+                boxShadow: '0 0 12px rgba(136,241,209,0.35)',
               }}
             >
               {(botName || 'ن').slice(0, 1)}
               <span
-                className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#161620]"
+                className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#101d25]"
                 style={{ background: phase === 'idle' ? '#34d399' : orbColor }}
               />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-[11px] font-extrabold text-white">{botName}</span>
-                <span className="rounded-full bg-[#f472b6]/15 px-1.5 py-0.5 text-[7.5px] font-extrabold text-[#f9a8d4]">
+                <span className="truncate text-[11px] font-extrabold text-[#effaf7]">{botName}</span>
+                <span className="rounded-full border border-[#b3e5df36] bg-[#bcfff20d] px-1.5 py-0.5 text-[7.5px] font-extrabold text-[#88f1d1]">
                   {phaseLabel}
                 </span>
               </div>
-              <div className="text-[8px] text-zinc-400">
+              <div className="text-[8px] text-[#9cb4bb]">
                 {turns.length > 0 ? `${turns.length} messages · Continuous memory` : 'Voice + Chat Companion'}
               </div>
             </div>
@@ -304,18 +304,18 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
         <div
           ref={scrollRef}
           dir="rtl"
-          className="deck-scroll min-h-0 flex-1 space-y-2 overflow-y-auto rounded-xl border border-white/[0.06] bg-[#07080e]/90 p-2.5 text-right"
+          className="deck-scroll min-h-0 flex-1 space-y-2 overflow-y-auto rounded-xl border border-[#98c8ce29] bg-[#0a151c] p-2.5 text-right"
         >
           {turns.length === 0 && !liveTranscript && phase !== 'thinking' ? (
             <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#f472b6]/30 bg-[#f472b6]/10">
-                <Sparkles className="h-5 w-5 text-[#f472b6]" />
+              <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#b3e5df36] bg-[#bcfff20d]">
+                <Sparkles className="h-5 w-5 text-[#88f1d1]" />
               </div>
               <div className="space-y-0.5">
-                <div className="text-[11px] font-extrabold text-white">
+                <div className="text-[11px] font-extrabold text-[#effaf7]">
                   أهلاً! أنا {botName} — موجودة معاك في أي وقت
                 </div>
-                <div className="text-[9px] text-zinc-400">
+                <div className="text-[9px] text-[#9cb4bb]">
                   اتكلم بصوتك أو اكتب تحت، وندردش في الكود أو في أي حاجة تخطر على بالك.
                 </div>
               </div>
@@ -330,7 +330,7 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
                     key={chip}
                     type="button"
                     onClick={() => void triggerPrompt(chip)}
-                    className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[8.5px] font-bold text-zinc-200 transition-colors hover:border-[#f472b6]/50 hover:bg-[#f472b6]/10"
+                    className="rounded-full border border-[#b3e5df36] bg-[#bcfff20d] px-2.5 py-1 text-[8.5px] font-bold text-[#effaf7] transition-colors hover:border-[#88f1d1] hover:bg-[#bcfff21a]"
                   >
                     {chip}
                   </button>
@@ -352,8 +352,8 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
                   >
                     {!isUser && (
                       <div
-                        className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[8.5px] font-black text-white"
-                        style={{ background: 'linear-gradient(135deg, #f472b6, #a78bfa)' }}
+                        className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[8.5px] font-black text-[#08221c]"
+                        style={{ background: 'linear-gradient(135deg, #88f1d1, #7dd3fc)' }}
                       >
                         {(botName || 'ن').slice(0, 1)}
                       </div>
@@ -362,8 +362,8 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
                     <div
                       className={`group max-w-[86%] rounded-2xl px-3 py-2 text-[10.5px] leading-relaxed ${
                         isUser
-                          ? 'rounded-bl-sm border border-[#22d3ee]/30 bg-gradient-to-br from-[#0e2a36] to-[#0a1c26] text-[#e6fbff]'
-                          : 'rounded-br-sm border border-white/[0.09] bg-gradient-to-br from-[#1d182b] to-[#141220] text-zinc-100'
+                          ? 'rounded-bl-sm border border-[#88f1d1]/35 bg-gradient-to-br from-[#133338] to-[#0d2229] text-[#effaf7]'
+                          : 'rounded-br-sm border border-[#98c8ce29] bg-[#102129] text-[#effaf7]'
                       }`}
                     >
                       <div>{t.text}</div>
@@ -438,14 +438,14 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
             }}
             dir="rtl"
             placeholder={`اكتب أو اتكلم مع ${botName}…`}
-            className="h-8 min-w-0 flex-1 rounded-xl border border-white/10 bg-[#080a10] px-3 text-right text-[10px] text-white outline-none placeholder:text-zinc-500 focus:border-[#f472b6]/60"
+            className="h-8 min-w-0 flex-1 rounded-xl border border-[#b3e5df36] bg-[#0a151c] px-3 text-right text-[10px] text-[#effaf7] outline-none placeholder:text-[#78959e] focus:border-[#88f1d1]"
           />
           <button
             type="button"
             onClick={handleSendText}
             disabled={!draft.trim()}
             aria-label="Send message"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gradient-to-r from-[#f472b6] to-[#a78bfa] text-[#140a1a] disabled:opacity-35"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#88f1d1] text-[#08221c] disabled:opacity-35"
           >
             <Send className="h-3.5 w-3.5" />
           </button>

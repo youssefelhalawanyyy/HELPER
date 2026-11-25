@@ -513,16 +513,20 @@ export function DeckShell() {
                     });
                   }
                 }}
-                className="flex h-5 shrink-0 items-center gap-1 rounded-full px-2.5 text-[9px] font-extrabold whitespace-nowrap text-white"
+                className="flex h-5 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[9px] font-extrabold whitespace-nowrap"
                 style={{
                   background:
                     activeView === 'antigravity' || deck.antigravityState.active
-                      ? '#2563eb'
-                      : '#23252d',
-                  boxShadow:
+                      ? '#88f1d1'
+                      : '#bcfff20d',
+                  borderColor:
                     activeView === 'antigravity' || deck.antigravityState.active
-                      ? '0 0 14px #2563eb88'
-                      : 'none',
+                      ? '#88f1d1'
+                      : '#b3e5df36',
+                  color:
+                    activeView === 'antigravity' || deck.antigravityState.active
+                      ? '#08221c'
+                      : '#effaf7',
                 }}
               >
                 <Zap className="h-[10px] w-[10px] shrink-0 fill-current" />
@@ -616,19 +620,19 @@ export function DeckShell() {
           {/* Bottom Bar: Interactive Swipe Page Dots + Live Dev Log Marquee */}
           <footer className="console-footer">
             {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
-            <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/[0.08] bg-[#101114] px-2 py-0.5">
+            <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#98c8ce29] bg-[#0d1921] px-2 py-0.5">
               <button
                 type="button"
                 aria-label="Previous page"
                 onClick={() => goToIndex(pageIdx - 1)}
-                className="text-zinc-400 hover:text-white"
+                className="text-[#9cb4bb] hover:text-[#effaf7]"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
 
               <span
                 className="min-w-[82px] text-center text-[9.5px] font-extrabold uppercase tracking-wider"
-                style={{ color: activePage.accent }}
+                style={{ color: '#88f1d1' }}
               >
                 {activePage.label}
               </span>
@@ -637,19 +641,19 @@ export function DeckShell() {
                 type="button"
                 aria-label="Next page"
                 onClick={() => goToIndex(pageIdx + 1)}
-                className="text-zinc-400 hover:text-white"
+                className="text-[#9cb4bb] hover:text-[#effaf7]"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
 
             {/* Live Dev Log Marquee */}
-            <div className="flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-full border border-white/[0.07] bg-[#101114]">
-              <span className="sub z-10 grid h-full shrink-0 place-items-center whitespace-nowrap border-r border-white/[0.08] bg-[#1a1b22] px-2.5 !text-[8.5px]">
+            <div className="flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-full border border-[#98c8ce29] bg-[#0d1921]">
+              <span className="sub z-10 grid h-full shrink-0 place-items-center whitespace-nowrap border-r border-[#98c8ce26] bg-[#11222c] px-2.5 !text-[8.5px]">
                 Dev log
               </span>
               <div className="relative min-w-0 flex-1 overflow-hidden">
-                <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#f2f3f7]">
+                <div className="anim-mq flex whitespace-nowrap text-[10px] font-semibold text-[#effaf7]">
                   {[0, 1].map((dup) => (
                     <span key={dup} className="flex">
                       {tickerItems.map(([color, text], i) => (
