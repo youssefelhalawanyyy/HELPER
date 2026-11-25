@@ -25,7 +25,7 @@ export class LogStreamer {
     exitCode: null,
   };
   private recentLines: LogLine[] = [];
-  private readonly maxBuffer = 200;
+  private readonly maxBuffer = 350;
 
   constructor(
     private onLine: (line: LogLine) => void,
@@ -62,6 +62,30 @@ export class LogStreamer {
     }
   }
 
+  startShellStream(shellCommand: string, label: string, cwd: string): void {
+    this.stop();
+    const trimmed = shellCommand.trim();
+    if (!trimmed) return;
+    const child = IS_WIN
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', trimmed], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: { ...process.env, FORCE_COLOR: '0' },
+        })
+      : spawn('/bin/zsh', ['-lc', trimmed], {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}`,
+            FORCE_COLOR: '0',
+          },
+        });
+
+    this.attachChild(child, 'custom', label || trimmed, trimmed, cwd);
+  }
+
   startPreset(preset: LogPreset, cwd: string): void {
     this.stop();
     const cmdLabel = `${preset.command} ${preset.args.join(' ')}`.trim();
@@ -85,19 +109,33 @@ export class LogStreamer {
       : spawn(preset.command, preset.args, {
           cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, FORCE_COLOR: '0' },
+          env: {
+            ...process.env,
+            PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}`,
+            FORCE_COLOR: '0',
+          },
         });
 
+    this.attachChild(child, preset.id, preset.label, cmdLabel, cwd);
+  }
+
+  private attachChild(
+    child: ChildProcess,
+    presetId: string,
+    label: string,
+    cmdLabel: string,
+    cwd: string,
+  ): void {
     this.child = child;
     this.status = {
       running: true,
-      presetId: preset.id,
+      presetId,
       command: cmdLabel,
       pid: child.pid ?? null,
       exitCode: null,
     };
     this.onStatus(this.status);
-    this.emitLine('stdout', `[devdeck] started "${preset.label}" (${cmdLabel}) in ${cwd}`);
+    this.emitLine('stdout', `[devdeck] started "${label}" (${cmdLabel}) in ${cwd}`);
 
     let outBuf = '';
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -121,7 +159,7 @@ export class LogStreamer {
       this.child = null;
       this.status = {
         running: false,
-        presetId: preset.id,
+        presetId,
         command: cmdLabel,
         pid: null,
         exitCode: code,
@@ -129,10 +167,9 @@ export class LogStreamer {
       this.onStatus(this.status);
       if (code === 0) {
         this.emitLine('stdout', `[devdeck] exited cleanly (code 0)`);
-        this.onAlert('success', `${preset.label} finished (0)`);
+        this.onAlert('success', `${label} finished (0)`);
       } else {
-        this.emitLine('stderr', `[devdeck] exited with code ${code ?? 'killed'}`);
-        this.onAlert('error', `${preset.label} failed (code ${code ?? 'killed'})`);
+        this.emitLine('stderr', `[devdeck] exited with code ${code ?? 'stopped'}`);
       }
     });
 

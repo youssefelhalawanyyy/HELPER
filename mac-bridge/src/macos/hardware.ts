@@ -1,10 +1,69 @@
 import { execFile, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { ensureWinMouseDaemon, IS_WIN, runPowerShell, sendWinVirtualKey } from '../platform/win32.js';
 
 const execFileAsync = promisify(execFile);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const BRIDGE_ROOT = path.resolve(__dirname, '../..');
+const DISPLAY_CTL_SRC = path.join(BRIDGE_ROOT, 'native', 'display_ctl.c');
+const DISPLAY_CTL_BIN = path.join(BRIDGE_ROOT, 'data', 'display_ctl');
 
-let trackedBrightness = 70;
+let displayCompilePromise: Promise<string | null> | null = null;
+let displayCompileFailed = false;
+
+async function ensureMacDisplayCtlBinary(): Promise<string | null> {
+  if (IS_WIN || process.platform !== 'darwin') return null;
+  if (displayCompileFailed) return null;
+
+  const needsCompile =
+    !fs.existsSync(DISPLAY_CTL_BIN) ||
+    (fs.existsSync(DISPLAY_CTL_SRC) &&
+      fs.statSync(DISPLAY_CTL_SRC).mtimeMs > fs.statSync(DISPLAY_CTL_BIN).mtimeMs);
+
+  if (!needsCompile && fs.existsSync(DISPLAY_CTL_BIN)) {
+    return DISPLAY_CTL_BIN;
+  }
+  if (displayCompilePromise) return displayCompilePromise;
+
+  displayCompilePromise = (async () => {
+    try {
+      if (!fs.existsSync(DISPLAY_CTL_SRC)) return null;
+      fs.mkdirSync(path.dirname(DISPLAY_CTL_BIN), { recursive: true });
+      await execFileAsync(
+        'clang',
+        [
+          '-O2',
+          '-framework',
+          'CoreGraphics',
+          '-F/System/Library/PrivateFrameworks',
+          '-framework',
+          'DisplayServices',
+          DISPLAY_CTL_SRC,
+          '-o',
+          DISPLAY_CTL_BIN,
+        ],
+        { timeout: 10_000 },
+      );
+      return DISPLAY_CTL_BIN;
+    } catch {
+      displayCompileFailed = true;
+      return null;
+    } finally {
+      displayCompilePromise = null;
+    }
+  })();
+
+  return displayCompilePromise;
+}
+
+// Pre-warm native display brightness binary on macOS load
+void ensureMacDisplayCtlBinary();
+
+let trackedBrightness = 75;
+let lastBrightnessReadTs = 0;
 let trackedWinVolume = 50;
 let trackedWinMuted = false;
 
@@ -32,12 +91,12 @@ export async function setMacVolume(level: number): Promise<number> {
   const clamped = Math.max(0, Math.min(100, Math.round(level)));
   if (IS_WIN) {
     const diff = clamped - trackedWinVolume;
-    const steps = Math.min(10, Math.max(1, Math.round(Math.abs(diff) / 2)));
+    const steps = Math.min(12, Math.max(1, Math.round(Math.abs(diff) / 2)));
     const vk = diff >= 0 ? '0xAF' : '0xAE'; // VK_VOLUME_UP / VK_VOLUME_DOWN
     try {
       await runPowerShell(
-        `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class V { [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo); }'; for($i=0;$i -lt ${steps};$i++){ [V]::keybd_event(${vk},0,0,[UIntPtr]::Zero); [V]::keybd_event(${vk},0,2,[UIntPtr]::Zero) }`,
-        2000,
+        `for($i=0;$i -lt ${steps};$i++){ [DevDeckWinApi]::TapKey(${vk}) }`,
+        1800,
       );
     } catch {
       // Ignore transient error
@@ -47,6 +106,15 @@ export async function setMacVolume(level: number): Promise<number> {
   }
 
   await execFileAsync('osascript', ['-e', `set volume output volume ${clamped}`], { timeout: 1500 });
+  return clamped;
+}
+
+export async function setMacMicVolume(level: number): Promise<number> {
+  const clamped = Math.max(0, Math.min(100, Math.round(level)));
+  if (IS_WIN) {
+    return clamped;
+  }
+  await execFileAsync('osascript', ['-e', `set volume input volume ${clamped}`], { timeout: 1500 }).catch(() => {});
   return clamped;
 }
 
@@ -75,15 +143,53 @@ export async function toggleMacMute(): Promise<boolean> {
   return setMacMute(!current.muted);
 }
 
-export async function adjustMacBrightness(deltaSteps: number): Promise<number> {
-  const steps = Math.max(-4, Math.min(4, Math.round(deltaSteps)));
-  if (steps === 0) return trackedBrightness;
-  trackedBrightness = Math.max(0, Math.min(100, trackedBrightness + steps * 6));
+export async function getMacBrightness(): Promise<number> {
+  const now = Date.now();
+  if (now - lastBrightnessReadTs < 2500) {
+    return trackedBrightness;
+  }
+  lastBrightnessReadTs = now;
+
+  if (IS_WIN) {
+    try {
+      const out = await runPowerShell(
+        '$b = (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | Select-Object -First 1).CurrentBrightness; if ($null -ne $b) { Write-Output $b }',
+        1800,
+      );
+      const val = Number(out.trim());
+      if (Number.isFinite(val) && val >= 0 && val <= 100) {
+        trackedBrightness = Math.round(val);
+      }
+    } catch {
+      // Desktop monitors without WMI keep trackedBrightness
+    }
+    return trackedBrightness;
+  }
+
+  const bin = await ensureMacDisplayCtlBinary();
+  if (bin) {
+    try {
+      const { stdout } = await execFileAsync(bin, [], { timeout: 1000 });
+      const val = Number(stdout.trim());
+      if (Number.isFinite(val) && val >= 0 && val <= 100) {
+        trackedBrightness = Math.round(val);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  return trackedBrightness;
+}
+
+export async function setMacBrightness(level: number): Promise<number> {
+  const clamped = Math.max(2, Math.min(100, Math.round(level)));
+  trackedBrightness = clamped;
+  lastBrightnessReadTs = Date.now();
 
   if (IS_WIN) {
     try {
       await runPowerShell(
-        `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue).WmiSetBrightness(1, ${trackedBrightness})`,
+        `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue).WmiSetBrightness(1, ${clamped})`,
         2000,
       );
     } catch {
@@ -92,15 +198,34 @@ export async function adjustMacBrightness(deltaSteps: number): Promise<number> {
     return trackedBrightness;
   }
 
-  const keyCode = steps > 0 ? 144 : 145;
-  const count = Math.abs(steps);
-  const script = `tell application "System Events" to repeat ${count} times\nkey code ${keyCode}\nend repeat`;
+  // Primary on macOS: Native DisplayServices private framework (<2ms exact 0-100% hardware control!)
+  const bin = await ensureMacDisplayCtlBinary();
+  if (bin) {
+    try {
+      await execFileAsync(bin, [String(clamped)], { timeout: 1000 });
+      return trackedBrightness;
+    } catch {
+      // Fall back to key codes below
+    }
+  }
+
+  const keyCode = clamped >= 50 ? 144 : 145;
   try {
-    await execFileAsync('osascript', ['-e', script], { timeout: 1500 });
+    await execFileAsync(
+      'osascript',
+      ['-e', `tell application "System Events" to key code ${keyCode}`],
+      { timeout: 1200 },
+    );
   } catch {
     // Graceful fallback
   }
   return trackedBrightness;
+}
+
+export async function adjustMacBrightness(deltaSteps: number): Promise<number> {
+  const cur = await getMacBrightness();
+  const next = Math.max(2, Math.min(100, cur + Math.round(deltaSteps * 6)));
+  return setMacBrightness(next);
 }
 
 export function getTrackedBrightness(): number {
@@ -158,7 +283,6 @@ export async function wakeMacDisplay(): Promise<void> {
     );
     return;
   }
-  // macOS: assert user activity via caffeinate -u + nudge HID event tap so display lights up immediately
   const child = spawn('caffeinate', ['-u', '-t', '5'], {
     detached: true,
     stdio: 'ignore',

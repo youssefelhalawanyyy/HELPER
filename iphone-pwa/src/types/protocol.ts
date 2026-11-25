@@ -73,6 +73,10 @@ export interface DockerContainer {
   name: string;
   status: string;
   state: string;
+  image?: string;
+  ports?: string;
+  cpuPct?: string;
+  memUsage?: string;
 }
 
 export type WindowSnapPosition = 'left' | 'right' | 'maximize' | 'center' | 'top' | 'bottom';
@@ -582,6 +586,7 @@ export type ClientEvent =
   | { type: 'port:kill'; payload: { requestId: string; pid: number; port: number } }
   | { type: 'ports:refresh'; payload: { requestId: string } }
   | { type: 'logs:start'; payload: { requestId: string; presetId: string } }
+  | { type: 'logs:custom'; payload: { requestId: string; command: string; label?: string } }
   | { type: 'logs:stop'; payload: { requestId: string } }
   | { type: 'git:refresh'; payload: { requestId: string } }
   | { type: 'git:deploy'; payload: { requestId: string; action: 'push' | 'deploy' } }
@@ -589,7 +594,7 @@ export type ClientEvent =
   | { type: 'webhook:copy'; payload: { requestId: string; eventId: string } }
   | {
       type: 'hardware:dial';
-      payload: { mode: 'volume' | 'brightness' | 'scroll'; delta: number; value?: number };
+      payload: { mode: 'volume' | 'brightness' | 'mic' | 'scroll'; delta: number; value?: number };
     }
   | { type: 'hardware:mute'; payload: { requestId: string; muted: boolean } }
   | { type: 'hardware:lock'; payload: { requestId: string } }
@@ -603,7 +608,20 @@ export type ClientEvent =
   | { type: 'processes:refresh'; payload: { requestId: string } }
   | {
       type: 'docker:action';
-      payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' };
+      payload: {
+        requestId: string;
+        id: string;
+        action:
+          | 'start'
+          | 'stop'
+          | 'restart'
+          | 'remove'
+          | 'logs'
+          | 'prune'
+          | 'launch_daemon'
+          | 'start_all'
+          | 'stop_all';
+      };
     }
   | { type: 'docker:refresh'; payload: { requestId: string } }
   | { type: 'app:focus'; payload: { requestId: string; appName: string } }

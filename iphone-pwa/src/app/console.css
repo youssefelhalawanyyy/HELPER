@@ -813,7 +813,7 @@
 }
 @media (min-height: 600px) {
   .telemetry-gauges > div {
-    width: min(42%, 134px);
+    width: min(100%, 112px);
     height: auto;
   }
 }

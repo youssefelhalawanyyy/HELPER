@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { IS_WIN, sendWinVirtualKey } from '../platform/win32.js';
 import type { MediaState } from '../types/protocol.js';
-import { getMacVolumeState, getTrackedBrightness } from './hardware.js';
+import { getMacBrightness, getMacVolumeState } from './hardware.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,8 +43,10 @@ async function musicArt(key: string) {
   return url;
 }
 export async function getMediaState(): Promise<MediaState> {
-  const { volume, muted } = await getMacVolumeState();
-  const brightness = getTrackedBrightness();
+  const [{ volume, muted }, brightness] = await Promise.all([
+    getMacVolumeState(),
+    getMacBrightness(),
+  ]);
 
   if (IS_WIN) {
     return {

@@ -19,6 +19,8 @@ import {
   getMacVolumeState,
   lockMacScreen,
   scrollMacVertical,
+  setMacBrightness,
+  setMacMicVolume,
   setMacMute,
   setMacVolume,
   wakeMacDisplay,
@@ -493,6 +495,21 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'logs:custom': {
+      const { requestId, command, label } = msg.payload;
+      if (!command || !command.trim()) {
+        reply(requestId, false, 'Enter a command to stream');
+        return;
+      }
+      logStreamer.startShellStream(
+        command.trim(),
+        label || command.trim(),
+        configStore.getAll().projectDir,
+      );
+      reply(requestId, true, `Streaming ${label || command.trim()}`);
+      return;
+    }
+
     case 'logs:stop': {
       logStreamer.stop();
       reply(msg.payload.requestId, true, 'Stopped log stream');
@@ -551,10 +568,26 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
           }
           broadcast({ type: 'media:state', payload: { ...(await getMediaState()), volume: nextVol } });
         } else if (mode === 'brightness') {
-          const nextBright = await adjustMacBrightness(delta > 0 ? 1 : -1);
+          const nextBright =
+            typeof value === 'number'
+              ? await setMacBrightness(value)
+              : await adjustMacBrightness(delta > 0 ? 1 : -1);
           broadcast({
             type: 'media:state',
             payload: { ...(await getMediaState()), brightness: nextBright },
+          });
+        } else if (mode === 'mic') {
+          const nextMic =
+            typeof value === 'number'
+              ? await setMacMicVolume(value)
+              : await setMacMicVolume((deepTelemetry.getLatest().micInputPct ?? 50) + delta);
+          broadcast({
+            type: 'mac:telemetry',
+            payload: {
+              ...deepTelemetry.getLatest(),
+              micInputPct: nextMic,
+              micMuted: nextMic === 0,
+            },
           });
         } else if (mode === 'scroll') {
           await scrollMacVertical(delta);
@@ -631,6 +664,16 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     }
 
     case 'docker:action': {
+      if (msg.payload.action === 'logs') {
+        const safeId = msg.payload.id.replace(/[^a-zA-Z0-9_.-]/g, '');
+        logStreamer.startShellStream(
+          `docker logs --tail 100 -f ${safeId}`,
+          `Docker Logs (${safeId.slice(0, 12)})`,
+          configStore.getAll().projectDir,
+        );
+        reply(msg.payload.requestId, true, `Streaming logs for container ${safeId.slice(0, 12)}`);
+        return;
+      }
       const res = await processService.runDockerAction(msg.payload.id, msg.payload.action);
       reply(msg.payload.requestId, res.ok, res.message);
       return;
