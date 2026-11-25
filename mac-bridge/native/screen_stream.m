@@ -104,15 +104,15 @@ int main(int argc, char **argv) {
             return 10;
         }
 
-        int maxWidth = (argc > 1) ? atoi(argv[1]) : 800;
-        double quality = (argc > 2) ? atof(argv[2]) : 0.50;
-        int targetFps = (argc > 3) ? atoi(argv[3]) : 22;
+        int maxWidth = (argc > 1) ? atoi(argv[1]) : 1120;
+        double quality = (argc > 2) ? atof(argv[2]) : 0.68;
+        int targetFps = (argc > 3) ? atoi(argv[3]) : 30;
         int displayIdx = (argc > 4) ? atoi(argv[4]) : 0;
 
-        if (maxWidth < 320) maxWidth = 320;
-        if (maxWidth > 1600) maxWidth = 1600;
-        if (quality < 0.20) quality = 0.20;
-        if (quality > 0.92) quality = 0.92;
+        if (maxWidth < 480) maxWidth = 480;
+        if (maxWidth > 2048) maxWidth = 2048;
+        if (quality < 0.25) quality = 0.25;
+        if (quality > 0.94) quality = 0.94;
         if (targetFps < 1) targetFps = 1;
         if (targetFps > 30) targetFps = 30;
 

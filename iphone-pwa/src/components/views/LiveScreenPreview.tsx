@@ -1,9 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Camera,
+  ChevronDown,
+  ChevronUp,
   CornerDownLeft,
+  Expand,
+  Hand,
+  Keyboard,
   Maximize2,
   Minimize2,
   Monitor,
@@ -11,10 +17,14 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Send,
   ShieldAlert,
+  Shrink,
+  X,
   ZoomIn,
 } from 'lucide-react';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
+import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 type QualityMode = 'turbo' | 'balanced' | 'hd';
@@ -36,9 +46,14 @@ export function LiveScreenPreview({
   const [quality, setQuality] = useState<QualityMode>('turbo');
   const [paused, setPaused] = useState(false);
   const [clickMode, setClickMode] = useState<'left' | 'right'>('left');
-  const [zoom, setZoom] = useState<1 | 1.75 | 2.5>(1);
+  const [dragSelectMode, setDragSelectMode] = useState(false);
+  const [fillMode, setFillMode] = useState<'contain' | 'cover'>('contain');
+  const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [fullscreen, setFullscreen] = useState(false);
+  const [hudVisible, setHudVisible] = useState(true);
+  const [kbdOpen, setKbdOpen] = useState(false);
+  const [kbdText, setKbdText] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [streamReady, setStreamReady] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -49,16 +64,19 @@ export function LiveScreenPreview({
     { index: 0, label: 'Display 1' },
   ]);
   const [displayIdx, setDisplayIdx] = useState(0);
-  const [dragSelectMode, setDragSelectMode] = useState(false);
   const [ripples, setRipples] = useState<TapRipple[]>([]);
-
-  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const twoFingerYRef = useRef(0);
+  const [mounted, setMounted] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imgSizeRef = useRef({ w: 16, h: 9 });
   const lastTapRef = useRef<{ ts: number; nx: number; ny: number }>({ ts: 0, nx: 0, ny: 0 });
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressFiredRef = useRef(false);
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartRef = useRef<{ span: number; zoom: number; midX: number; midY: number } | null>(
+    null,
+  );
   const dragRef = useRef<{
     active: boolean;
     moved: boolean;
@@ -69,11 +87,37 @@ export function LiveScreenPreview({
   }>({ active: false, moved: false, startX: 0, startY: 0, startPanX: 0, startPanY: 0 });
   const rafMoveRef = useRef<number | null>(null);
   const pendingMoveRef = useRef<{ nx: number; ny: number } | null>(null);
+  const hudTimerRef = useRef<number | null>(null);
+
+  useEffect(() => setMounted(true), []);
 
   const isConnected =
     deck.status === 'connected' && Boolean(deck.bridgeBaseUrl && deck.pairing?.token);
 
-  // Fetch available monitors (Display 1 / Display 2 / External)
+  // Auto-hide floating HUD in Fullscreen Touchscreen Laptop Mode after 4s of inactivity
+  const bumpHud = useCallback(() => {
+    setHudVisible(true);
+    if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current);
+    if (fullscreen && !kbdOpen) {
+      hudTimerRef.current = window.setTimeout(() => setHudVisible(false), 4000);
+    }
+  }, [fullscreen, kbdOpen]);
+
+  useEffect(() => {
+    if (fullscreen) {
+      bumpHud();
+      // Auto-upgrade to Crisp 1440p in fullscreen if user was on default
+      setQuality((q) => (q === 'turbo' ? 'balanced' : q));
+    } else {
+      setHudVisible(true);
+      setKbdOpen(false);
+    }
+    return () => {
+      if (hudTimerRef.current) window.clearTimeout(hudTimerRef.current);
+    };
+  }, [fullscreen, bumpHud]);
+
+  // Fetch available monitors (Display 1 / Display 2)
   useEffect(() => {
     if (!isConnected || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
     void fetch(
@@ -88,7 +132,7 @@ export function LiveScreenPreview({
       .catch(() => {});
   }, [isConnected, deck.bridgeBaseUrl, deck.pairing?.token]);
 
-  // Zero-flicker, Cloudflare-tunnel & iOS-Safari proof live canvas streaming loop
+  // Ultra-fast zero-delay Retina canvas frame pump (works over LAN Wi-Fi + Cloudflare HTTPS + iOS Safari)
   useEffect(() => {
     if (!isConnected || paused || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
 
@@ -113,13 +157,12 @@ export function LiveScreenPreview({
             setPermissionDenied(true);
             setStreamReady(false);
             setFps(0);
-            // Poll permission gently every 2s so it auto-starts the instant user grants it on Mac!
-            await new Promise((r) => setTimeout(r, 2000));
+            await new Promise((r) => setTimeout(r, 1800));
             continue;
           }
 
           if (res.status === 204 || !res.ok) {
-            await new Promise((r) => setTimeout(r, 120));
+            await new Promise((r) => setTimeout(r, 80));
             continue;
           }
 
@@ -131,7 +174,7 @@ export function LiveScreenPreview({
 
           const canvas = canvasRef.current;
           if (!canvas) continue;
-          const ctx = canvas.getContext('2d', { alpha: false });
+          const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
           if (!ctx) continue;
 
           if (typeof createImageBitmap === 'function') {
@@ -142,6 +185,8 @@ export function LiveScreenPreview({
                 canvas.height = bmp.height;
                 imgSizeRef.current = { w: bmp.width, h: bmp.height };
               }
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(bmp, 0, 0);
             }
             bmp.close();
@@ -156,6 +201,7 @@ export function LiveScreenPreview({
                     canvas.height = img.naturalHeight;
                     imgSizeRef.current = { w: img.naturalWidth, h: img.naturalHeight };
                   }
+                  ctx.imageSmoothingEnabled = true;
                   ctx.drawImage(img, 0, 0);
                 }
                 URL.revokeObjectURL(objUrl);
@@ -177,16 +223,9 @@ export function LiveScreenPreview({
           frameTimes = frameTimes.filter((t) => now - t <= 1000);
           setFps(frameTimes.length);
           setLatencyMs(Math.max(1, Math.round(now - t0)));
-
-          // Tiny yield to keep touch & scroll events 100% immediate
-          const elapsed = now - t0;
-          const minFrameMs = quality === 'turbo' ? 38 : quality === 'balanced' ? 55 : 80;
-          if (elapsed < minFrameMs) {
-            await new Promise((r) => setTimeout(r, minFrameMs - elapsed));
-          }
         } catch {
           if (cancelled) break;
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, 180));
         }
       }
     };
@@ -201,6 +240,7 @@ export function LiveScreenPreview({
   useEffect(() => {
     return () => {
       if (rafMoveRef.current) cancelAnimationFrame(rafMoveRef.current);
+      if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
     };
   }, []);
 
@@ -229,7 +269,7 @@ export function LiveScreenPreview({
     }
   };
 
-  // Compute exact normalized (0..1, 0..1) screen coordinates accounting for object-contain letterboxing & zoom/pan
+  // Exact normalized (0..1, 0..1) screen mapping for both object-contain & object-cover + zoom/pan
   const clientToScreenNorm = useCallback(
     (clientX: number, clientY: number): { nx: number; ny: number; xPct: number; yPct: number } | null => {
       const canvas = canvasRef.current;
@@ -249,14 +289,26 @@ export function LiveScreenPreview({
       let offsetX = 0;
       let offsetY = 0;
 
-      if (boxAspect > imgAspect) {
-        renderH = rect.height;
-        renderW = renderH * imgAspect;
-        offsetX = (rect.width - renderW) / 2;
+      if (fillMode === 'contain') {
+        if (boxAspect > imgAspect) {
+          renderH = rect.height;
+          renderW = renderH * imgAspect;
+          offsetX = (rect.width - renderW) / 2;
+        } else {
+          renderW = rect.width;
+          renderH = renderW / imgAspect;
+          offsetY = (rect.height - renderH) / 2;
+        }
       } else {
-        renderW = rect.width;
-        renderH = renderW / imgAspect;
-        offsetY = (rect.height - renderH) / 2;
+        if (boxAspect > imgAspect) {
+          renderW = rect.width;
+          renderH = renderW / imgAspect;
+          offsetY = (rect.height - renderH) / 2;
+        } else {
+          renderH = rect.height;
+          renderW = renderH * imgAspect;
+          offsetX = (rect.width - renderW) / 2;
+        }
       }
 
       const relX = clientX - rect.left - offsetX;
@@ -270,7 +322,7 @@ export function LiveScreenPreview({
 
       return { nx, ny, xPct, yPct };
     },
-    [],
+    [fillMode],
   );
 
   const pushRipple = useCallback((xPct: number, yPct: number, kind: 'left' | 'right' | 'double') => {
@@ -278,27 +330,56 @@ export function LiveScreenPreview({
     setRipples((prev) => [...prev.slice(-3), { id, xPct, yPct, kind }]);
     window.setTimeout(() => {
       setRipples((prev) => prev.filter((r) => r.id !== id));
-    }, 380);
+    }, 360);
   }, []);
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isConnected || permissionDenied) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+    // 2-Finger Pinch-to-Zoom & Smooth 2-Finger Scroll
     if (pointersRef.current.size === 2) {
+      clearLongPress();
       const pts = Array.from(pointersRef.current.values());
-      twoFingerYRef.current = (pts[0].y + pts[1].y) / 2;
+      const span = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      pinchStartRef.current = {
+        span: Math.max(20, span),
+        zoom,
+        midX: (pts[0].x + pts[1].x) / 2,
+        midY: (pts[0].y + pts[1].y) / 2,
+      };
       dragRef.current.active = false;
       return;
     }
 
-    if (dragSelectMode) {
-      const pos = clientToScreenNorm(e.clientX, e.clientY);
-      if (pos) {
-        deck.sendEvent({ type: 'trackpad:abs', payload: { nx: pos.nx, ny: pos.ny, action: 'move' } });
-        deck.sendEvent({ type: 'trackpad:drag', payload: { down: true } });
-      }
+    longPressFiredRef.current = false;
+    const pos = clientToScreenNorm(e.clientX, e.clientY);
+
+    if (dragSelectMode && pos) {
+      deck.sendEvent({ type: 'trackpad:abs', payload: { nx: pos.nx, ny: pos.ny, action: 'move' } });
+      deck.sendEvent({ type: 'trackpad:drag', payload: { down: true } });
+    } else if (pos) {
+      // 450ms Long-Press = Native Touchscreen Right-Click!
+      clearLongPress();
+      longPressTimerRef.current = window.setTimeout(() => {
+        if (!dragRef.current.moved && pointersRef.current.size === 1) {
+          longPressFiredRef.current = true;
+          soundEngine.playDetent();
+          pushRipple(pos.xPct, pos.yPct, 'right');
+          deck.sendEvent({
+            type: 'trackpad:abs',
+            payload: { nx: pos.nx, ny: pos.ny, action: 'right' },
+          });
+        }
+      }, 450);
     }
 
     dragRef.current = {
@@ -317,17 +398,29 @@ export function LiveScreenPreview({
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
 
-    // 2-Finger Direct Scroll right on the Live Screen!
-    if (pointersRef.current.size >= 2) {
+    // 2-Finger Pinch-to-Zoom OR 2-Finger Direct Scroll on Screen
+    if (pointersRef.current.size >= 2 && pinchStartRef.current) {
       const pts = Array.from(pointersRef.current.values());
-      const avgY = (pts[0].y + pts[1].y) / 2;
-      const deltaY = avgY - twoFingerYRef.current;
-      twoFingerYRef.current = avgY;
-      if (Math.abs(deltaY) >= 1.5) {
-        deck.sendEvent({
-          type: 'trackpad:scroll',
-          payload: { dx: 0, dy: Math.round(deltaY * 2.2) },
-        });
+      const span = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const midX = (pts[0].x + pts[1].x) / 2;
+      const midY = (pts[0].y + pts[1].y) / 2;
+      const scaleRatio = span / pinchStartRef.current.span;
+
+      if (Math.abs(scaleRatio - 1) > 0.14) {
+        const nextZoom = Math.max(1, Math.min(3, Number((pinchStartRef.current.zoom * scaleRatio).toFixed(2))));
+        setZoom(nextZoom);
+        if (nextZoom <= 1.02) setPan({ x: 0, y: 0 });
+      } else {
+        const dx = midX - pinchStartRef.current.midX;
+        const dy = midY - pinchStartRef.current.midY;
+        pinchStartRef.current.midX = midX;
+        pinchStartRef.current.midY = midY;
+        if (Math.abs(dx) >= 1.2 || Math.abs(dy) >= 1.2) {
+          deck.sendEvent({
+            type: 'trackpad:scroll',
+            payload: { dx: Math.round(dx * 2.0), dy: Math.round(dy * 2.4) },
+          });
+        }
       }
       return;
     }
@@ -337,10 +430,11 @@ export function LiveScreenPreview({
     const dy = e.clientY - dragRef.current.startY;
     if (Math.hypot(dx, dy) > 6) {
       dragRef.current.moved = true;
+      clearLongPress();
     }
 
     if (zoom > 1 && !dragSelectMode && dragRef.current.moved) {
-      const maxPan = (zoom - 1) * 48;
+      const maxPan = (zoom - 1) * 50;
       setPan({
         x: Math.max(-maxPan, Math.min(maxPan, dragRef.current.startPanX + dx * 0.25)),
         y: Math.max(-maxPan, Math.min(maxPan, dragRef.current.startPanY + dy * 0.25)),
@@ -370,14 +464,21 @@ export function LiveScreenPreview({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    clearLongPress();
     pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchStartRef.current = null;
     if (dragSelectMode) {
       deck.sendEvent({ type: 'trackpad:drag', payload: { down: false } });
     }
     const wasMoved = dragRef.current.moved;
+    const wasLongPress = longPressFiredRef.current;
     dragRef.current.active = false;
     dragRef.current.moved = false;
-    if (!isConnected || permissionDenied || wasMoved || pointersRef.current.size > 0) return;
+    longPressFiredRef.current = false;
+
+    if (!isConnected || permissionDenied || wasMoved || wasLongPress || pointersRef.current.size > 0) {
+      return;
+    }
 
     const pos = clientToScreenNorm(e.clientX, e.clientY);
     if (!pos) return;
@@ -399,10 +500,23 @@ export function LiveScreenPreview({
     });
   };
 
+  const toggleFullscreen = () => {
+    soundEngine.playClick();
+    setFullscreen((prev) => {
+      const next = !prev;
+      if (next) {
+        void document.documentElement.requestFullscreen?.().catch(() => {});
+      } else if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => {});
+      }
+      return next;
+    });
+  };
+
   const cycleZoom = () => {
     soundEngine.playClick();
     setZoom((z) => {
-      const next = z === 1 ? 1.75 : z === 1.75 ? 2.5 : 1;
+      const next = z < 1.5 ? 1.75 : z < 2.2 ? 2.5 : 1;
       if (next === 1) setPan({ x: 0, y: 0 });
       return next;
     });
@@ -413,285 +527,457 @@ export function LiveScreenPreview({
     if (!canvas || !streamReady) return;
     soundEngine.playClick();
     const a = document.createElement('a');
-    a.href = canvas.toDataURL('image/jpeg', 0.92);
+    a.href = canvas.toDataURL('image/jpeg', 0.94);
     a.download = `devdeck-screen-${Date.now()}.jpg`;
     a.click();
-    deck.showToast(true, 'Screen snapshot saved');
+    deck.showToast(true, 'HD screen snapshot saved');
   };
 
-  return (
+  const sendSpecialKey = (
+    key: 'esc' | 'tab' | 'enter' | 'backspace' | 'undo' | 'copy' | 'paste' | 'spotlight' | 'left' | 'up' | 'down' | 'right',
+  ) => {
+    soundEngine.playClick();
+    deck.sendEvent({ type: 'hardware:key', payload: { requestId: makeRequestId(), key } });
+  };
+
+  const controlsBar = (
     <div
       className={
         fullscreen
-          ? 'fixed inset-0 z-[90] flex flex-col gap-2 bg-[#040c11] p-2.5'
-          : 'flex min-h-0 flex-1 flex-col gap-1.5'
+          ? 'flex flex-wrap items-center justify-between gap-1.5 rounded-2xl border border-[#88f1d1]/25 bg-[#061218]/92 px-2.5 py-1.5 shadow-2xl'
+          : 'flex flex-wrap items-center justify-between gap-1'
       }
-      data-no-swipe="true"
+      onClick={() => bumpHud()}
     >
-      {/* Top Pro Controls Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-1">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1">
+        <span
+          className="flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold uppercase"
+          style={{
+            background:
+              isConnected && !paused && streamReady && !permissionDenied
+                ? 'rgba(52,211,153,0.18)'
+                : permissionDenied
+                  ? 'rgba(255,93,108,0.18)'
+                  : 'rgba(251,191,36,0.16)',
+            color:
+              isConnected && !paused && streamReady && !permissionDenied
+                ? '#34d399'
+                : permissionDenied
+                  ? '#ff5d6c'
+                  : '#fbbf24',
+          }}
+        >
           <span
-            className="flex items-center gap-1 rounded-full px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold uppercase"
-            style={{
-              background:
-                isConnected && !paused && streamReady && !permissionDenied
-                  ? 'rgba(52,211,153,0.18)'
-                  : permissionDenied
-                    ? 'rgba(255,93,108,0.18)'
-                    : 'rgba(251,191,36,0.16)',
-              color:
-                isConnected && !paused && streamReady && !permissionDenied
-                  ? '#34d399'
-                  : permissionDenied
-                    ? '#ff5d6c'
-                    : '#fbbf24',
-            }}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                isConnected && !paused && streamReady && !permissionDenied
-                  ? 'animate-pulse bg-[#34d399]'
-                  : permissionDenied
-                    ? 'bg-[#ff5d6c]'
-                    : 'bg-[#fbbf24]'
-              }`}
-            />
-            {!isConnected
-              ? 'OFFLINE'
-              : permissionDenied
-                ? 'PERM'
-                : paused
-                  ? 'PAUSED'
-                  : streamReady
-                    ? `${fps > 0 ? `${fps} FPS` : 'LIVE'}${latencyMs > 0 ? ` · ${latencyMs}ms` : ''}`
-                    : 'SYNC…'}
-          </span>
+            className={`h-1.5 w-1.5 rounded-full ${
+              isConnected && !paused && streamReady && !permissionDenied
+                ? 'animate-pulse bg-[#34d399]'
+                : permissionDenied
+                  ? 'bg-[#ff5d6c]'
+                  : 'bg-[#fbbf24]'
+            }`}
+          />
+          {!isConnected
+            ? 'OFFLINE'
+            : permissionDenied
+              ? 'PERM'
+              : paused
+                ? 'PAUSED'
+                : streamReady
+                  ? `${fps > 0 ? `${fps} FPS` : 'LIVE'}${latencyMs > 0 ? ` · ${latencyMs}ms` : ''}`
+                  : 'SYNC…'}
+        </span>
 
-          {/* Multi-Monitor Switcher (when 2+ displays detected) */}
-          {displays.length > 1 && (
+        {displays.length > 1 && (
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playClick();
+              setDisplayIdx((i) => (i + 1) % displays.length);
+            }}
+            className="rounded-lg border border-[#7dd3fc]/35 bg-[#7dd3fc]/15 px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold text-[#7dd3fc]"
+          >
+            D{displayIdx + 1}/{displays.length}
+          </button>
+        )}
+
+        <div className="flex rounded-lg border border-[#98c8ce29] bg-[#071117] p-0.5">
+          {(
+            [
+              ['turbo', 'FAST'],
+              ['balanced', 'CRISP'],
+              ['hd', 'ULTRA'],
+            ] as const
+          ).map(([q, lbl]) => (
             <button
+              key={q}
               type="button"
               onClick={() => {
                 soundEngine.playClick();
-                setDisplayIdx((i) => (i + 1) % displays.length);
+                setQuality(q);
               }}
-              className="rounded-lg border border-[#7dd3fc]/35 bg-[#7dd3fc]/15 px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold text-[#7dd3fc]"
+              className="rounded px-1.5 py-0.5 text-[7.5px] font-extrabold uppercase"
+              style={{
+                background: quality === q ? '#153137' : 'transparent',
+                color: quality === q ? '#88f1d1' : '#8aa2a9',
+              }}
             >
-              D{displayIdx + 1}/{displays.length}
+              {lbl}
             </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          title="Fit vs Fill entire iPhone screen"
+          onClick={() => {
+            soundEngine.playClick();
+            setFillMode((m) => (m === 'contain' ? 'cover' : 'contain'));
+          }}
+          className="flex h-6 items-center gap-0.5 rounded-lg border border-white/10 bg-white/[0.05] px-1.5 text-[8px] font-extrabold text-[#effaf7] uppercase"
+        >
+          {fillMode === 'cover' ? <Shrink className="h-2.5 w-2.5 text-[#88f1d1]" /> : <Expand className="h-2.5 w-2.5 text-[#7dd3fc]" />}
+          {fillMode === 'cover' ? 'FILL' : 'FIT'}
+        </button>
+
+        <button
+          type="button"
+          title="Toggle Drag-to-Select / Window Drag"
+          onClick={() => {
+            soundEngine.playClick();
+            setDragSelectMode((d) => !d);
+          }}
+          className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
+          style={{
+            borderColor: dragSelectMode ? '#a78bfa' : 'rgba(179,229,223,0.2)',
+            background: dragSelectMode ? 'rgba(167,139,250,0.22)' : 'rgba(255,255,255,0.05)',
+            color: dragSelectMode ? '#c4b5fd' : '#9cb4bb',
+          }}
+        >
+          <Hand className="h-2.5 w-2.5" />
+          DRAG
+        </button>
+
+        <button
+          type="button"
+          title="Left vs Right Click on tap (or long-press anytime for right-click)"
+          onClick={() => {
+            soundEngine.playClick();
+            setClickMode((m) => (m === 'left' ? 'right' : 'left'));
+          }}
+          className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
+          style={{
+            borderColor: clickMode === 'right' ? '#fbbf24' : 'rgba(179,229,223,0.2)',
+            background: clickMode === 'right' ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.05)',
+            color: clickMode === 'right' ? '#fbbf24' : '#88f1d1',
+          }}
+        >
+          <MousePointerClick className="h-2.5 w-2.5" />
+          {clickMode === 'right' ? 'R-TAP' : 'L-TAP'}
+        </button>
+
+        <button
+          type="button"
+          title="Cycle Zoom (or 2-finger pinch)"
+          onClick={cycleZoom}
+          className="flex h-6 items-center gap-0.5 rounded-lg border border-white/10 bg-white/[0.05] px-1.5 font-mono-tech text-[8px] font-extrabold text-[#effaf7]"
+        >
+          <ZoomIn className="h-2.5 w-2.5 text-[#7dd3fc]" />
+          {zoom.toFixed(zoom % 1 === 0 ? 0 : 1)}x
+        </button>
+
+        {fullscreen && (
+          <button
+            type="button"
+            title="Touchscreen Laptop Keyboard"
+            onClick={() => {
+              soundEngine.playClick();
+              setKbdOpen((v) => !v);
+            }}
+            className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
+            style={{
+              borderColor: kbdOpen ? '#7dd3fc' : 'rgba(255,255,255,0.12)',
+              background: kbdOpen ? 'rgba(125,211,252,0.22)' : 'rgba(255,255,255,0.05)',
+              color: kbdOpen ? '#7dd3fc' : '#effaf7',
+            }}
+          >
+            <Keyboard className="h-3 w-3" />
+            KEYS
+          </button>
+        )}
+
+        <button
+          type="button"
+          aria-label={paused ? 'Resume live stream' : 'Pause live stream'}
+          onClick={() => {
+            soundEngine.playClick();
+            setPaused((p) => !p);
+          }}
+          className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#effaf7]"
+        >
+          {paused ? <Play className="h-3 w-3 text-[#34d399]" /> : <Pause className="h-3 w-3" />}
+        </button>
+
+        <button
+          type="button"
+          aria-label="Reconnect screen stream"
+          onClick={() => {
+            soundEngine.playClick();
+            setPaused(false);
+            setPermissionDenied(false);
+            setRetryTick((t) => t + 1);
+          }}
+          className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#9cb4bb] hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+
+        <button
+          type="button"
+          aria-label={fullscreen ? 'Exit full mobile screen' : 'Full mobile touchscreen laptop mode'}
+          onClick={toggleFullscreen}
+          className="flex h-6 items-center gap-1 rounded-lg border border-[#88f1d1]/45 bg-[#88f1d1]/18 px-2 text-[8px] font-extrabold text-[#88f1d1] uppercase"
+        >
+          {fullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          {fullscreen ? 'EXIT' : 'FULL'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const stageElement = (
+    <div
+      ref={stageRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => {
+        clearLongPress();
+        pointersRef.current.clear();
+        pinchStartRef.current = null;
+        dragRef.current.active = false;
+        dragRef.current.moved = false;
+      }}
+      className={
+        fullscreen
+          ? 'relative flex h-full w-full flex-1 touch-none select-none items-center justify-center overflow-hidden bg-black'
+          : 'relative flex min-h-[155px] flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-xl border border-[#88f1d1]/30 bg-black shadow-inner'
+      }
+    >
+      {isConnected ? (
+        <>
+          <canvas
+            ref={canvasRef}
+            className="h-full w-full transition-transform duration-75"
+            style={{
+              objectFit: fillMode,
+              transform: `scale(${zoom}) translate(${pan.x}%, ${pan.y}%)`,
+            }}
+          />
+
+          {!streamReady && !permissionDenied && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/65">
+              <Monitor className="h-6 w-6 animate-pulse text-[#88f1d1]" />
+              <span className="font-mono-tech text-[9.5px] font-bold text-[#88f1d1]">
+                STARTING RETINA SCREEN STREAM…
+              </span>
+            </div>
           )}
 
-          {/* Quality / Speed Switcher */}
-          <div className="flex rounded-lg border border-[#98c8ce29] bg-[#071117] p-0.5">
-            {(
-              [
-                ['turbo', 'TURBO'],
-                ['balanced', 'BAL'],
-                ['hd', 'HD'],
-              ] as const
-            ).map(([q, lbl]) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setQuality(q);
-                }}
-                className="rounded px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
-                style={{
-                  background: quality === q ? '#153137' : 'transparent',
-                  color: quality === q ? '#88f1d1' : '#8aa2a9',
-                }}
-              >
-                {lbl}
-              </button>
-            ))}
-          </div>
-        </div>
+          {permissionDenied && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#040c11]/95 p-3 text-center">
+              <ShieldAlert className="h-6 w-6 text-[#fbbf24]" />
+              <div className="text-[11px] font-extrabold text-white">
+                Enable macOS Screen Recording (1-Time)
+              </div>
+              <p className="max-w-[270px] text-[9px] leading-relaxed text-[#9cb4bb]">
+                Flip ON Screen Recording for Terminal / Antigravity in{' '}
+                <b>System Settings → Privacy &amp; Security → Screen Recording</b>.
+              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={requestingPerm}
+                  onClick={() => void handleRequestPermission()}
+                  className="rounded-xl bg-[#88f1d1] px-3 py-1.5 text-[9.5px] font-extrabold text-[#061c17]"
+                >
+                  {requestingPerm ? 'OPENING…' : 'OPEN MAC SETTINGS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    setPermissionDenied(false);
+                    setRetryTick((t) => t + 1);
+                  }}
+                  className="rounded-xl border border-white/15 bg-white/[0.06] px-2.5 py-1.5 text-[9.5px] font-bold text-white"
+                >
+                  RETRY
+                </button>
+              </div>
+            </div>
+          )}
 
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            title="Toggle Drag-to-Select / Window Drag directly on screen"
-            onClick={() => {
-              soundEngine.playClick();
-              setDragSelectMode((d) => !d);
-            }}
-            className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
-            style={{
-              borderColor: dragSelectMode ? '#a78bfa' : 'rgba(179,229,223,0.22)',
-              background: dragSelectMode ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
-              color: dragSelectMode ? '#c4b5fd' : '#9cb4bb',
-            }}
-          >
-            DRAG
-          </button>
-
-          <button
-            type="button"
-            title="Toggle Left vs Right Click on tap"
-            onClick={() => {
-              soundEngine.playClick();
-              setClickMode((m) => (m === 'left' ? 'right' : 'left'));
-            }}
-            className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
-            style={{
-              borderColor: clickMode === 'right' ? '#fbbf24' : 'rgba(179,229,223,0.22)',
-              background: clickMode === 'right' ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.05)',
-              color: clickMode === 'right' ? '#fbbf24' : '#88f1d1',
-            }}
-          >
-            <MousePointerClick className="h-2.5 w-2.5" />
-            {clickMode === 'right' ? 'R-TAP' : 'L-TAP'}
-          </button>
-
-          <button
-            type="button"
-            title="Zoom Preview"
-            onClick={cycleZoom}
-            className="flex h-6 items-center gap-0.5 rounded-lg border border-white/10 bg-white/[0.05] px-1.5 font-mono-tech text-[8px] font-extrabold text-[#effaf7]"
-          >
-            <ZoomIn className="h-2.5 w-2.5 text-[#7dd3fc]" />
-            {zoom}x
-          </button>
-
-          <button
-            type="button"
-            aria-label={paused ? 'Resume live stream' : 'Pause live stream'}
-            onClick={() => {
-              soundEngine.playClick();
-              setPaused((p) => !p);
-            }}
-            className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#effaf7]"
-          >
-            {paused ? <Play className="h-3 w-3 text-[#34d399]" /> : <Pause className="h-3 w-3" />}
-          </button>
-
-          <button
-            type="button"
-            aria-label="Reconnect screen stream"
-            onClick={() => {
-              soundEngine.playClick();
-              setPaused(false);
-              setPermissionDenied(false);
-              setRetryTick((t) => t + 1);
-            }}
-            className="grid h-6 w-6 place-items-center rounded-lg border border-white/10 bg-white/[0.05] text-[#9cb4bb] hover:text-white"
-          >
-            <RefreshCw className="h-3 w-3" />
-          </button>
-
-          <button
-            type="button"
-            aria-label={fullscreen ? 'Exit fullscreen preview' : 'Fullscreen screen preview'}
-            onClick={() => {
-              soundEngine.playClick();
-              setFullscreen((f) => !f);
-            }}
-            className="grid h-6 w-6 place-items-center rounded-lg border border-[#88f1d1]/40 bg-[#88f1d1]/15 text-[#88f1d1]"
-          >
-            {fullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Live Interactive Screen Viewport */}
-      <div
-        ref={stageRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={() => {
-          dragRef.current.active = false;
-          dragRef.current.moved = false;
-        }}
-        className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-xl border border-[#88f1d1]/25 bg-[#03090d]"
-      >
-        {isConnected ? (
-          <>
-            <canvas
-              ref={canvasRef}
-              className="h-full w-full object-contain transition-transform duration-100"
+          {/* Crisp Touchscreen Tap Ripples */}
+          {ripples.map((r) => (
+            <span
+              key={r.id}
+              aria-hidden="true"
+              className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2"
               style={{
-                transform: `scale(${zoom}) translate(${pan.x}%, ${pan.y}%)`,
+                left: `${r.xPct}%`,
+                top: `${r.yPct}%`,
+                width: r.kind === 'double' ? 30 : 22,
+                height: r.kind === 'double' ? 30 : 22,
+                borderColor: r.kind === 'right' ? '#fbbf24' : '#88f1d1',
               }}
             />
+          ))}
 
-            {!streamReady && !permissionDenied && (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55">
-                <Monitor className="h-5 w-5 animate-pulse text-[#88f1d1]" />
-                <span className="font-mono-tech text-[9px] font-bold text-[#88f1d1]">
-                  STARTING LIVE SCREEN…
-                </span>
-              </div>
-            )}
+          {!fullscreen && streamReady && !permissionDenied && (
+            <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-md bg-black/70 px-1.5 py-0.5 font-mono-tech text-[7.5px] font-bold text-[#cbd5e1]">
+              Tap: Click · Hold: Right-Click · 2-Finger: Scroll/Zoom
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center text-[#9cb4bb]">
+          <Monitor className="h-6 w-6 opacity-50" />
+          <span className="text-[10px] font-bold">Connect Mac / PC Bridge for Live Screen</span>
+        </div>
+      )}
+    </div>
+  );
 
-            {permissionDenied && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#040c11]/95 p-3 text-center">
-                <ShieldAlert className="h-6 w-6 text-[#fbbf24]" />
-                <div className="text-[11px] font-extrabold text-white">
-                  Enable macOS Screen Recording (1-Time)
-                </div>
-                <p className="max-w-[260px] text-[9px] leading-relaxed text-[#9cb4bb]">
-                  macOS blocks screen capture until you flip the toggle ON for Terminal / Antigravity
-                  in <b>System Settings → Privacy &amp; Security → Screen Recording</b>.
-                </p>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={requestingPerm}
-                    onClick={() => void handleRequestPermission()}
-                    className="rounded-xl bg-[#88f1d1] px-3 py-1.5 text-[9.5px] font-extrabold text-[#061c17]"
-                  >
-                    {requestingPerm ? 'OPENING…' : 'OPEN MAC SETTINGS'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playClick();
-                      setPermissionDenied(false);
-                      setRetryTick((t) => t + 1);
-                    }}
-                    className="rounded-xl border border-white/15 bg-white/[0.06] px-2.5 py-1.5 text-[9.5px] font-bold text-white"
-                  >
-                    RETRY
-                  </button>
-                </div>
-              </div>
-            )}
+  // TRUE 100% EDGE-TO-EDGE FULL MOBILE TOUCHSCREEN LAPTOP PORTAL
+  if (fullscreen && mounted) {
+    return createPortal(
+      <div
+        data-no-swipe="true"
+        className="fixed inset-0 z-[9999] flex h-[100dvh] w-[100vw] flex-col overflow-hidden bg-black"
+      >
+        {/* Full Edge-to-Edge Live Laptop Screen */}
+        {stageElement}
 
-            {/* Instant Tap Ripple Feedback */}
-            {ripples.map((r) => (
-              <span
-                key={r.id}
-                aria-hidden="true"
-                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2"
-                style={{
-                  left: `${r.xPct}%`,
-                  top: `${r.yPct}%`,
-                  width: r.kind === 'double' ? 28 : 20,
-                  height: r.kind === 'double' ? 28 : 20,
-                  borderColor: r.kind === 'right' ? '#fbbf24' : '#88f1d1',
-                }}
+        {/* Floating Auto-Hiding Top Touchscreen Laptop HUD */}
+        <div className="pointer-events-none fixed top-2 right-2 left-2 z-[10000] flex flex-col items-center gap-1.5">
+          {hudVisible ? (
+            <div className="pointer-events-auto flex w-full max-w-[96vw] items-center justify-center gap-1.5">
+              {controlsBar}
+              <button
+                type="button"
+                aria-label="Hide toolbar"
+                onClick={() => setHudVisible(false)}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/15 bg-[#061218]/90 text-[#9cb4bb]"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={bumpHud}
+              className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#88f1d1]/30 bg-[#061218]/75 px-3 py-0.5 font-mono-tech text-[8.5px] font-extrabold text-[#88f1d1] shadow-lg"
+            >
+              <ChevronDown className="h-3 w-3" />
+              {fps > 0 ? `${fps} FPS` : 'LIVE'} · CONTROLS
+            </button>
+          )}
+        </div>
+
+        {/* Floating On-Screen Laptop Keyboard & Shortcut Drawer */}
+        {kbdOpen && (
+          <div className="fixed right-2 bottom-2 left-2 z-[10001] mx-auto max-w-2xl space-y-1.5 rounded-2xl border border-[#7dd3fc]/40 bg-[#061218]/96 p-2 shadow-2xl">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!kbdText) return;
+                soundEngine.playClick();
+                deck.sendEvent({
+                  type: 'hardware:type',
+                  payload: { requestId: makeRequestId(), text: kbdText, enter: true },
+                });
+                setKbdText('');
+              }}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                autoFocus
+                value={kbdText}
+                onChange={(e) => setKbdText(e.target.value)}
+                placeholder="Type directly onto your laptop screen…"
+                className="font-mono-tech h-8 min-w-0 flex-1 rounded-xl border border-white/15 bg-black/80 px-2.5 text-xs text-white outline-none focus:border-[#7dd3fc]"
               />
-            ))}
-
-            {streamReady && !permissionDenied && (
-              <div className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono-tech text-[7.5px] font-bold text-[#cbd5e1]">
-                Tap screen to click · Drag to aim · 2x tap to open
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center gap-1.5 p-3 text-center text-[#9cb4bb]">
-            <Monitor className="h-6 w-6 opacity-50" />
-            <span className="text-[10px] font-bold">Connect Mac / PC Bridge for Live Screen</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!kbdText) return;
+                  soundEngine.playClick();
+                  deck.sendEvent({
+                    type: 'hardware:type',
+                    payload: { requestId: makeRequestId(), text: kbdText, enter: false },
+                  });
+                  setKbdText('');
+                }}
+                className="h-8 rounded-xl bg-white/10 px-2.5 text-[10px] font-extrabold text-white"
+              >
+                TYPE
+              </button>
+              <button
+                type="submit"
+                className="flex h-8 items-center gap-1 rounded-xl bg-[#7dd3fc] px-3 text-[10px] font-extrabold text-[#04141c]"
+              >
+                <Send className="h-3 w-3" />
+                ↵
+              </button>
+              <button
+                type="button"
+                onClick={() => setKbdOpen(false)}
+                className="grid h-8 w-8 place-items-center rounded-xl bg-white/10 text-zinc-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </form>
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  ['esc', 'ESC'],
+                  ['tab', 'TAB'],
+                  ['undo', 'UNDO'],
+                  ['copy', 'COPY'],
+                  ['paste', 'PASTE'],
+                  ['spotlight', 'SEARCH'],
+                  ['left', '←'],
+                  ['up', '↑'],
+                  ['down', '↓'],
+                  ['right', '→'],
+                  ['backspace', '⌫'],
+                  ['enter', '↵'],
+                ] as const
+              ).map(([k, lbl]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => sendSpecialKey(k)}
+                  className="font-mono-tech rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-[9.5px] font-extrabold text-[#effaf7] active:bg-[#7dd3fc]/25"
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-      </div>
+      </div>,
+      document.body,
+    );
+  }
 
-      {/* Bottom Instant Shortcut & Snapshot Bar */}
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-1" data-no-swipe="true">
+      {controlsBar}
+      {stageElement}
       <div className="grid grid-cols-5 gap-1">
         {(
           [

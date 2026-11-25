@@ -23,9 +23,9 @@ interface StreamProfile {
 }
 
 const PROFILES: Record<ScreenQualityPreset, StreamProfile> = {
-  turbo: { width: 760, quality: 0.48, fps: 24 },
-  balanced: { width: 960, quality: 0.62, fps: 18 },
-  hd: { width: 1280, quality: 0.76, fps: 12 },
+  turbo: { width: 1120, quality: 0.68, fps: 30 },
+  balanced: { width: 1440, quality: 0.78, fps: 24 },
+  hd: { width: 1920, quality: 0.86, fps: 18 },
 };
 
 interface ActiveStream {
