@@ -90,6 +90,20 @@ app.use(express.json({ limit: '12mb' }));
 app.use(express.text({ limit: '2mb' }));
 
 const clients = new Set<WebSocket>();
+const lastBroadcastPayload = new Map<string, string>();
+const DEDUPE_EVENTS = new Set<ServerEvent['type']>([
+  'git:status',
+  'ports:update',
+  'docker:update',
+  'media:state',
+  'antigravity:state',
+  'perf:state',
+  'caffeine:state',
+  'focus:state',
+  'processes:update',
+  'mac:telemetry',
+  'clipboard:update',
+]);
 
 function sendTo(ws: WebSocket, event: ServerEvent): void {
   if (ws.readyState === WebSocket.OPEN) {
@@ -98,7 +112,12 @@ function sendTo(ws: WebSocket, event: ServerEvent): void {
 }
 
 function broadcast(event: ServerEvent): void {
+  if (clients.size === 0) return;
   const payload = JSON.stringify(event);
+  if (DEDUPE_EVENTS.has(event.type)) {
+    if (lastBroadcastPayload.get(event.type) === payload) return;
+    lastBroadcastPayload.set(event.type, payload);
+  }
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(payload);
@@ -236,17 +255,53 @@ setInterval(async () => {
   } finally {
     readingMedia = false;
   }
-}, 5000).unref();
-statsService.start(2000);
-powerThermalService.start(50);
-activeAppPoller.start(1500);
-antigravityService.start(1200);
-setTimeout(() => portService.start(4000), 300);
-setTimeout(() => gitService.start(5000), 500);
-setTimeout(() => clipboardTracker.start(1800), 700);
-setTimeout(() => processService.start(5000), 900);
-setTimeout(() => deepTelemetry.start(6500), 1100);
-setTimeout(() => void networkCommandService.scanNetwork(), 1350);
+}, 6000).unref();
+
+// Smart Active/Idle Poller Manager: ~0% CPU when no iPhone is connected, instant full telemetry on connect
+let pollersRunning = false;
+let idleStopTimer: ReturnType<typeof setTimeout> | null = null;
+let initialNetScanned = false;
+
+function startActivePollers(): void {
+  if (idleStopTimer) {
+    clearTimeout(idleStopTimer);
+    idleStopTimer = null;
+  }
+  if (pollersRunning) return;
+  pollersRunning = true;
+  lastBroadcastPayload.clear();
+  statsService.start(2500);
+  antigravityService.start(2800);
+  portService.start(6000);
+  gitService.start(8000);
+  clipboardTracker.start(2500);
+  processService.start(6000);
+  deepTelemetry.start(10000);
+  if (!initialNetScanned) {
+    initialNetScanned = true;
+    setTimeout(() => void networkCommandService.scanNetwork(), 900);
+  }
+}
+
+function scheduleIdleSleep(): void {
+  if (clients.size > 0 || idleStopTimer) return;
+  idleStopTimer = setTimeout(() => {
+    idleStopTimer = null;
+    if (clients.size > 0) return;
+    pollersRunning = false;
+    statsService.stop();
+    antigravityService.stop();
+    portService.stop();
+    gitService.stop();
+    clipboardTracker.stop();
+    processService.stop();
+    deepTelemetry.stop();
+  }, 15_000);
+}
+
+// Keep lightweight guards running cleanly at low overhead
+powerThermalService.start(120);
+activeAppPoller.start(2200);
 
 // --- Express Routes ---
 app.use(
@@ -1183,6 +1238,8 @@ wss.on('connection', (ws, req) => {
   }
 
   clients.add(ws);
+  (req.socket as { setNoDelay?: (v: boolean) => void })?.setNoDelay?.(true);
+  startActivePollers();
 
   // Hydrate newly connected iPhone immediately
   sendTo(ws, {
@@ -1253,6 +1310,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     clients.delete(ws);
+    if (clients.size === 0) scheduleIdleSleep();
   });
 });
 

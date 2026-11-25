@@ -372,6 +372,8 @@ export function useDevDeckSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const retryCountRef = useRef(0);
+  const logQueueRef = useRef<LogLine[]>([]);
+  const logFlushTimerRef = useRef<number | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -459,7 +461,16 @@ export function useDevDeckSocket() {
               setPorts(msg.payload.ports);
               break;
             case 'logs:line':
-              setLogs((prev) => [...prev.slice(-199), msg.payload]);
+              logQueueRef.current.push(msg.payload);
+              if (logFlushTimerRef.current === null) {
+                logFlushTimerRef.current = window.setTimeout(() => {
+                  logFlushTimerRef.current = null;
+                  const batch = logQueueRef.current;
+                  if (batch.length === 0) return;
+                  logQueueRef.current = [];
+                  setLogs((prev) => [...prev, ...batch].slice(-200));
+                }, 120);
+              }
               break;
             case 'logs:status':
               setLogStatus(msg.payload);

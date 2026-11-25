@@ -109,19 +109,16 @@ const NourVoiceView = dynamic(
 
 const PAGE_VARIANTS = {
   enter: (dir: number) => ({
-    x: dir > 0 ? 26 : -26,
+    x: dir > 0 ? 12 : -12,
     opacity: 0,
-    scale: 0.995,
   }),
   center: {
     x: 0,
     opacity: 1,
-    scale: 1,
   },
   exit: (dir: number) => ({
-    x: dir > 0 ? -26 : 26,
+    x: dir > 0 ? -12 : 12,
     opacity: 0,
-    scale: 0.995,
   }),
 };
 
@@ -177,29 +174,7 @@ export function DeckShell() {
   // Persistent Nour Voice AI session — stays alive while swiping across ALL pages!
   const nour = useNourVoice(deck, goToView);
 
-  // Idle-prefetch secondary view chunks after first paint so tab swipes feel instant
-  useEffect(() => {
-    const warmChunks = () => {
-      void import('@/components/views/AntigravityMissionView');
-      void import('@/components/views/HardwareToolsView');
-      void import('@/components/views/SystemDoctorView');
-      void import('@/components/views/NetworkCommandView');
-      void import('@/components/views/PowerThermalView');
-      void import('@/components/views/LiveMonitorView');
-      void import('@/components/views/MacInspectorView');
-      void import('@/components/views/LaunchControlView');
-    };
-    const w = window as unknown as {
-      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    if (w.requestIdleCallback) {
-      const id = w.requestIdleCallback(warmChunks, { timeout: 1800 });
-      return () => w.cancelIdleCallback?.(id);
-    }
-    const t = window.setTimeout(warmChunks, 900);
-    return () => window.clearTimeout(t);
-  }, []);
+  // Secondary views load on-demand via next/dynamic and cache automatically — zero upfront CPU burst on launch!
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -354,7 +329,7 @@ export function DeckShell() {
 
                 {/* Multi-PC 1-Tap Switcher Popover */}
                 {pcMenuOpen && (
-                  <div className="fixed top-12 left-4 z-50 w-64 rounded-2xl border border-[#98c8ce33] bg-[#0b1820]/98 p-2 shadow-2xl backdrop-blur-xl">
+                  <div className="fixed top-12 left-4 z-50 w-64 rounded-2xl border border-[#98c8ce33] bg-[#0b1820] p-2 shadow-2xl">
                     <div className="mb-1.5 flex items-center justify-between px-2 text-[9px] font-extrabold text-[#9cb4bb] uppercase">
                       <span>Saved Computers ({deck.savedPcs.length})</span>
                       <button
@@ -689,7 +664,7 @@ export function DeckShell() {
                 animate="center"
                 exit="exit"
                 transition={
-                  reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 350, damping: 34 }
+                  reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }
                 }
                 className="console-view"
                 data-screen={activeView}
