@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { Response } from 'express';
+import si from 'systeminformation';
 import { captureScreenPeekJpeg } from '../macos/hardware.js';
 
 const execFileAsync = promisify(execFile);
@@ -187,14 +188,34 @@ function scheduleAutoStop(stream: ActiveStream) {
   }, 2600);
 }
 
-async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPreset) {
+export async function listScreenDisplays(): Promise<Array<{ index: number; label: string }>> {
+  try {
+    const gfx = await si.graphics();
+    const list = (gfx.displays || []).map((d, idx) => {
+      const w = d.currentResX || d.resolutionX || 0;
+      const h = d.currentResY || d.resolutionY || 0;
+      const res = w && h ? ` (${w}×${h})` : '';
+      return { index: idx, label: `Display ${idx + 1}${res}` };
+    });
+    if (list.length > 0) return list;
+  } catch {
+    // Fallback
+  }
+  return [{ index: 0, label: 'Display 1' }];
+}
+
+async function startCaptureLoop(
+  stream: ActiveStream,
+  preset: ScreenQualityPreset,
+  displayIdx = 0,
+) {
   const prof = PROFILES[preset];
   const nativeBin = await ensureNativeStreamer();
 
   if (nativeBin) {
     const proc = spawn(
       nativeBin,
-      [String(prof.width), String(prof.quality), String(prof.fps), '0'],
+      [String(prof.width), String(prof.quality), String(prof.fps), String(Math.max(0, displayIdx))],
       { stdio: ['ignore', 'pipe', 'ignore'] },
     );
     stream.proc = proc;
@@ -251,11 +272,12 @@ async function startCaptureLoop(stream: ActiveStream, preset: ScreenQualityPrese
   }, intervalMs);
 }
 
-function getOrStartStream(preset: ScreenQualityPreset): ActiveStream {
-  let stream = activeStreams.get(preset);
+function getOrStartStream(preset: ScreenQualityPreset, displayIdx = 0): ActiveStream {
+  const key = `${preset}:${Math.max(0, displayIdx)}`;
+  let stream = activeStreams.get(key);
   if (!stream) {
     stream = {
-      key: preset,
+      key,
       proc: null,
       clients: new Set(),
       latestFrame: null,
@@ -267,8 +289,8 @@ function getOrStartStream(preset: ScreenQualityPreset): ActiveStream {
       fallbackTimer: null,
       waiters: [],
     };
-    activeStreams.set(preset, stream);
-    void startCaptureLoop(stream, preset);
+    activeStreams.set(key, stream);
+    void startCaptureLoop(stream, preset, displayIdx);
   }
   stream.lastAccessTs = Date.now();
   return stream;
@@ -281,13 +303,14 @@ function getOrStartStream(preset: ScreenQualityPreset): ActiveStream {
 export async function getLiveScreenFrame(
   preset: ScreenQualityPreset = 'turbo',
   lastSeq = 0,
+  displayIdx = 0,
 ): Promise<{ frame: Buffer | null; seq: number; permissionDenied: boolean }> {
   const hasPerm = await checkScreenCapturePermission();
   if (!hasPerm) {
     return { frame: null, seq: 0, permissionDenied: true };
   }
 
-  const stream = getOrStartStream(preset);
+  const stream = getOrStartStream(preset, displayIdx);
   scheduleAutoStop(stream);
 
   // If we already have a newer frame in RAM, return it in <1ms!
@@ -319,6 +342,7 @@ export async function getLiveScreenFrame(
 export async function attachMjpegScreenStream(
   res: Response,
   preset: ScreenQualityPreset = 'turbo',
+  displayIdx = 0,
 ): Promise<void> {
   const hasPerm = await checkScreenCapturePermission();
   if (!hasPerm) {
@@ -330,7 +354,7 @@ export async function attachMjpegScreenStream(
     return;
   }
 
-  const stream = getOrStartStream(preset);
+  const stream = getOrStartStream(preset, displayIdx);
   if (stream.stopTimer) {
     clearTimeout(stream.stopTimer);
     stream.stopTimer = null;

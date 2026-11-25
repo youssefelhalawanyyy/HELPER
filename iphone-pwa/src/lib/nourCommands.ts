@@ -84,8 +84,37 @@ export function localNourCommand(
     matches[0].click();
     return 'ضغطت على الزرار.';
   }
-  if (/^(?:wake (?:the )?(?:display|screen)|صحي الشاشة)$/.test(text))
+  if (/^(?:wake (?:the )?(?:display|screen)|صحي الشاشة|افتحلي اللابتوب|افتح اللابتوب|صحي اللابتوب|wake laptop|wake computer)$/.test(text))
     return send({ type: 'hardware:wake', payload: { requestId } });
+  if (/(?:super mode|سوبر مود|وضع سوبر|حولي علي سوبر|حولي على سوبر|حول سوبر)/.test(text)) {
+    navigate('perf');
+    return send({ type: 'perf:setMode', payload: { requestId, mode: 'super' } });
+  }
+  if (/(?:turbo mode|تيربو مود|وضع تيربو|حولي علي تيربو|حولي على تيربو)/.test(text)) {
+    navigate('perf');
+    return send({ type: 'perf:setMode', payload: { requestId, mode: 'turbo' } });
+  }
+  if (/(?:eco mode|ايكو مود|وضع ايكو|حولي علي ايكو|حولي على ايكو)/.test(text)) {
+    navigate('perf');
+    return send({ type: 'perf:setMode', payload: { requestId, mode: 'eco' } });
+  }
+  if (/(?:normal mode|نورمال مود|الوضع العادي|حولي علي عادي)/.test(text)) {
+    navigate('perf');
+    return send({ type: 'perf:setMode', payload: { requestId, mode: 'normal' } });
+  }
+  if (/(?:بردي الجهاز|برد الجهاز|cool down|throttle hog|خففي الحرار[هة])/.test(text)) {
+    navigate('power');
+    const hog = deck.processes[0];
+    if (hog) {
+      deck.sendEvent({ type: 'process:kill', payload: { requestId, pid: hog.pid, force: false } });
+      return `قفلت أتقل برنامج مسبب حرارة (${hog.name}) وفتحت Power Guard.`;
+    }
+    return send({ type: 'power:fanMode', payload: { requestId, mode: 'max' } });
+  }
+  if (/(?:الدوكيومنتس|documents|اخر ملف|ملفاتي|افتحي الملفات)/.test(text)) {
+    navigate('files');
+    return 'فتحتلك Files & Drop — اختار Documents عشان تحمل أو تشوف آخر ملفاتك.';
+  }
   if (/^(?:mute|اكتمي الصوت)$/.test(text))
     return send({ type: 'hardware:mute', payload: { requestId, muted: true } });
   if (/^(?:unmute|افتحي الصوت)$/.test(text))

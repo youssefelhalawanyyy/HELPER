@@ -135,6 +135,53 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
     });
   };
 
+  // Speed History Log (persisted across tests) + Auto Intruder Push Alert
+  const [speedHistory, setSpeedHistory] = useState<Array<{ down: number; up: number; ping: number; ts: number }>>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem('devdeck.speedHist.v1') || '[]');
+      return Array.isArray(parsed) ? parsed.slice(-12) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [intruderAlertOn, setIntruderAlertOn] = useState(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem('devdeck.intruderAlert.v1') !== '0' : true,
+  );
+  const alertedMacsRef = useRef<Set<string>>(new Set());
+  const lastSpeedTsRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (net.downMbps && net.downMbps > 0 && net.updatedAt && net.updatedAt !== lastSpeedTsRef.current) {
+      lastSpeedTsRef.current = net.updatedAt;
+      setSpeedHistory((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.down === net.downMbps && last.up === (net.upMbps || 0)) return prev;
+        const next = [
+          ...prev.slice(-11),
+          { down: net.downMbps || 0, up: net.upMbps || 0, ping: net.pingMs || 0, ts: Date.now() },
+        ];
+        try {
+          window.localStorage.setItem('devdeck.speedHist.v1', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    }
+  }, [net.downMbps, net.upMbps, net.pingMs, net.updatedAt]);
+
+  useEffect(() => {
+    if (!intruderAlertOn || !net.devices?.length) return;
+    for (const dev of net.devices) {
+      if (dev.isSelf || dev.isGateway || !dev.mac) continue;
+      if (!deviceLabels[dev.mac] && !alertedMacsRef.current.has(dev.mac)) {
+        alertedMacsRef.current.add(dev.mac);
+        if (Object.keys(deviceLabels).length > 0) {
+          deck.triggerFlash('warning', `New Wi-Fi Device: ${dev.hostname || dev.ip} (${dev.vendor || 'Unknown'})`);
+        }
+      }
+    }
+  }, [intruderAlertOn, net.devices, deviceLabels, deck]);
+
   const selectTab = (id: RightTabId) => {
     soundEngine.playClick();
     setRightTab(id);
@@ -529,8 +576,66 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
                 <strong className="ml-1 text-[#88f1d1]">· FAST</strong>
               )}
             </span>
-            <span className="shrink-0">GW: {net.gatewayIp || '--'}</span>
+            {net.gatewayIp ? (
+              <a
+                href={`http://${net.gatewayIp}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open Router Admin Page"
+                className="shrink-0 rounded-full border border-[#7dd3fc]/35 bg-[#7dd3fc]/12 px-2 py-0.5 text-[8px] font-extrabold text-[#7dd3fc] hover:bg-[#7dd3fc]/25"
+              >
+                ROUTER: {net.gatewayIp} ↗
+              </a>
+            ) : (
+              <span className="shrink-0">GW: --</span>
+            )}
           </div>
+
+          {/* Wi-Fi Password Reveal + Speed History Sparkline + Intruder Alert Toggle */}
+          {speedHistory.length >= 2 && (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-[#98c8ce20] bg-[#0a151c] px-2 py-1">
+              <div className="shrink-0">
+                <div className="text-[7.5px] font-extrabold text-[#88f1d1] uppercase">
+                  Speed History ({speedHistory.length})
+                </div>
+                <div className="font-mono-tech text-[8px] text-[#9cb4bb]">
+                  Peak {Math.max(...speedHistory.map((h) => h.down)).toFixed(0)} Mbps
+                </div>
+              </div>
+              <div className="flex h-5 flex-1 items-end gap-0.5">
+                {speedHistory.map((h, i) => {
+                  const maxD = Math.max(10, ...speedHistory.map((x) => x.down));
+                  const pct = Math.max(18, Math.min(100, (h.down / maxD) * 100));
+                  return (
+                    <div
+                      key={i}
+                      title={`${h.down}↓ / ${h.up}↑ Mbps · ${h.ping}ms`}
+                      className="flex-1 rounded-t bg-[#88f1d1]/75"
+                      style={{ height: `${pct}%` }}
+                    />
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  const next = !intruderAlertOn;
+                  setIntruderAlertOn(next);
+                  try {
+                    window.localStorage.setItem('devdeck.intruderAlert.v1', next ? '1' : '0');
+                  } catch {}
+                }}
+                className="shrink-0 rounded-full border px-1.5 py-0.5 text-[7.5px] font-extrabold uppercase"
+                style={{
+                  borderColor: intruderAlertOn ? '#fbbf24' : 'rgba(255,255,255,0.1)',
+                  color: intruderAlertOn ? '#fbbf24' : '#7c8190',
+                }}
+              >
+                {intruderAlertOn ? 'ALERT ON' : 'ALERT OFF'}
+              </button>
+            </div>
+          )}
 
           {/* Wi-Fi Password Reveal Row */}
           <div className="flex items-center justify-between gap-1.5 rounded-xl border border-[#98c8ce20] bg-[#101d25] px-2 py-1">

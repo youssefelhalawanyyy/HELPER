@@ -22,10 +22,13 @@ import {
   Rocket,
   Server,
   Sliders,
+  Sparkles,
+  Star,
 } from 'lucide-react';
 
 export const PAGES = [
   { id: 'preview', label: 'Desk Clock', title: 'Desk Clock', icon: Clock3, accent: '#88f1d1' },
+  { id: 'favorites', label: 'Favorites', title: 'My Favorites', icon: Star, accent: '#fbbf24' },
   { id: 'deck', label: 'Deck', title: 'Smart Deck', icon: Grid2X2, accent: '#88f1d1' },
   { id: 'antigravity', label: 'Antigravity', title: 'Antigravity', icon: Bot, accent: '#7dd3fc' },
   { id: 'monitor', label: 'Monitor', title: 'Live Monitor', icon: Activity, accent: '#88f1d1' },
@@ -37,6 +40,7 @@ export const PAGES = [
     icon: MousePointer2,
     accent: '#88f1d1',
   },
+  { id: 'studio', label: 'Studio', title: 'Meeting & 2FA', icon: Sparkles, accent: '#fbbf24' },
   { id: 'launch', label: 'Launch', title: 'Launch Control', icon: Rocket, accent: '#fde68a' },
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#88f1d1' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#7dd3fc' },

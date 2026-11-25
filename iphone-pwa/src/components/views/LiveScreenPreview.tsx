@@ -44,7 +44,16 @@ export function LiveScreenPreview({
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [requestingPerm, setRequestingPerm] = useState(false);
   const [fps, setFps] = useState(0);
+  const [latencyMs, setLatencyMs] = useState(0);
+  const [displays, setDisplays] = useState<Array<{ index: number; label: string }>>([
+    { index: 0, label: 'Display 1' },
+  ]);
+  const [displayIdx, setDisplayIdx] = useState(0);
+  const [dragSelectMode, setDragSelectMode] = useState(false);
   const [ripples, setRipples] = useState<TapRipple[]>([]);
+
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const twoFingerYRef = useRef(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +73,21 @@ export function LiveScreenPreview({
   const isConnected =
     deck.status === 'connected' && Boolean(deck.bridgeBaseUrl && deck.pairing?.token);
 
+  // Fetch available monitors (Display 1 / Display 2 / External)
+  useEffect(() => {
+    if (!isConnected || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    void fetch(
+      `${deck.bridgeBaseUrl}/api/screen/displays?token=${encodeURIComponent(deck.pairing.token)}`,
+    )
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; displays?: Array<{ index: number; label: string }> }) => {
+        if (d.ok && Array.isArray(d.displays) && d.displays.length > 0) {
+          setDisplays(d.displays);
+        }
+      })
+      .catch(() => {});
+  }, [isConnected, deck.bridgeBaseUrl, deck.pairing?.token]);
+
   // Zero-flicker, Cloudflare-tunnel & iOS-Safari proof live canvas streaming loop
   useEffect(() => {
     if (!isConnected || paused || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
@@ -77,7 +101,7 @@ export function LiveScreenPreview({
       while (!cancelled) {
         const t0 = performance.now();
         try {
-          const url = `${deck.bridgeBaseUrl}/api/screen/frame?q=${quality}&seq=${seq}&token=${encodeURIComponent(deck.pairing!.token)}`;
+          const url = `${deck.bridgeBaseUrl}/api/screen/frame?q=${quality}&display=${displayIdx}&seq=${seq}&token=${encodeURIComponent(deck.pairing!.token)}`;
           const res = await fetch(url, {
             cache: 'no-store',
             signal: controller.signal,
@@ -152,6 +176,7 @@ export function LiveScreenPreview({
           frameTimes.push(now);
           frameTimes = frameTimes.filter((t) => now - t <= 1000);
           setFps(frameTimes.length);
+          setLatencyMs(Math.max(1, Math.round(now - t0)));
 
           // Tiny yield to keep touch & scroll events 100% immediate
           const elapsed = now - t0;
@@ -171,7 +196,7 @@ export function LiveScreenPreview({
       cancelled = true;
       controller.abort();
     };
-  }, [isConnected, paused, quality, retryTick, deck.bridgeBaseUrl, deck.pairing]);
+  }, [isConnected, paused, quality, displayIdx, retryTick, deck.bridgeBaseUrl, deck.pairing]);
 
   useEffect(() => {
     return () => {
@@ -259,6 +284,23 @@ export function LiveScreenPreview({
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isConnected || permissionDenied) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointersRef.current.size === 2) {
+      const pts = Array.from(pointersRef.current.values());
+      twoFingerYRef.current = (pts[0].y + pts[1].y) / 2;
+      dragRef.current.active = false;
+      return;
+    }
+
+    if (dragSelectMode) {
+      const pos = clientToScreenNorm(e.clientX, e.clientY);
+      if (pos) {
+        deck.sendEvent({ type: 'trackpad:abs', payload: { nx: pos.nx, ny: pos.ny, action: 'move' } });
+        deck.sendEvent({ type: 'trackpad:drag', payload: { down: true } });
+      }
+    }
+
     dragRef.current = {
       active: true,
       moved: false,
@@ -270,14 +312,34 @@ export function LiveScreenPreview({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current.active || !isConnected || permissionDenied) return;
+    if (!isConnected || permissionDenied) return;
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // 2-Finger Direct Scroll right on the Live Screen!
+    if (pointersRef.current.size >= 2) {
+      const pts = Array.from(pointersRef.current.values());
+      const avgY = (pts[0].y + pts[1].y) / 2;
+      const deltaY = avgY - twoFingerYRef.current;
+      twoFingerYRef.current = avgY;
+      if (Math.abs(deltaY) >= 1.5) {
+        deck.sendEvent({
+          type: 'trackpad:scroll',
+          payload: { dx: 0, dy: Math.round(deltaY * 2.2) },
+        });
+      }
+      return;
+    }
+
+    if (!dragRef.current.active) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
     if (Math.hypot(dx, dy) > 6) {
       dragRef.current.moved = true;
     }
 
-    if (zoom > 1 && dragRef.current.moved) {
+    if (zoom > 1 && !dragSelectMode && dragRef.current.moved) {
       const maxPan = (zoom - 1) * 48;
       setPan({
         x: Math.max(-maxPan, Math.min(maxPan, dragRef.current.startPanX + dx * 0.25)),
@@ -308,10 +370,14 @@ export function LiveScreenPreview({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    if (dragSelectMode) {
+      deck.sendEvent({ type: 'trackpad:drag', payload: { down: false } });
+    }
     const wasMoved = dragRef.current.moved;
     dragRef.current.active = false;
     dragRef.current.moved = false;
-    if (!isConnected || permissionDenied || wasMoved) return;
+    if (!isConnected || permissionDenied || wasMoved || pointersRef.current.size > 0) return;
 
     const pos = clientToScreenNorm(e.clientX, e.clientY);
     if (!pos) return;
@@ -398,9 +464,23 @@ export function LiveScreenPreview({
                 : paused
                   ? 'PAUSED'
                   : streamReady
-                    ? `LIVE ${fps > 0 ? `${fps}FPS` : ''}`
+                    ? `${fps > 0 ? `${fps} FPS` : 'LIVE'}${latencyMs > 0 ? ` · ${latencyMs}ms` : ''}`
                     : 'SYNC…'}
           </span>
+
+          {/* Multi-Monitor Switcher (when 2+ displays detected) */}
+          {displays.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setDisplayIdx((i) => (i + 1) % displays.length);
+              }}
+              className="rounded-lg border border-[#7dd3fc]/35 bg-[#7dd3fc]/15 px-1.5 py-0.5 font-mono-tech text-[8px] font-extrabold text-[#7dd3fc]"
+            >
+              D{displayIdx + 1}/{displays.length}
+            </button>
+          )}
 
           {/* Quality / Speed Switcher */}
           <div className="flex rounded-lg border border-[#98c8ce29] bg-[#071117] p-0.5">
@@ -431,6 +511,23 @@ export function LiveScreenPreview({
         </div>
 
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Toggle Drag-to-Select / Window Drag directly on screen"
+            onClick={() => {
+              soundEngine.playClick();
+              setDragSelectMode((d) => !d);
+            }}
+            className="flex h-6 items-center gap-0.5 rounded-lg border px-1.5 text-[8px] font-extrabold uppercase"
+            style={{
+              borderColor: dragSelectMode ? '#a78bfa' : 'rgba(179,229,223,0.22)',
+              background: dragSelectMode ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)',
+              color: dragSelectMode ? '#c4b5fd' : '#9cb4bb',
+            }}
+          >
+            DRAG
+          </button>
+
           <button
             type="button"
             title="Toggle Left vs Right Click on tap"

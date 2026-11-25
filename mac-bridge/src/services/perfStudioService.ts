@@ -324,11 +324,37 @@ Get-Process | Where-Object { $_.WorkingSet64 -gt 40MB } | ForEach-Object { try {
     return this.state.lastActionNote;
   }
 
+  private customAppRules: Record<string, PerfStudioMode> = loadLocal<Record<string, PerfStudioMode>>(
+    'perf-app-rules.json',
+    {},
+  );
+
+  getCustomRules(): Record<string, PerfStudioMode> {
+    return { ...this.customAppRules };
+  }
+
+  setCustomRule(appName: string, mode: PerfStudioMode | null): Record<string, PerfStudioMode> {
+    const key = appName.trim();
+    if (!key) return this.getCustomRules();
+    if (!mode) {
+      delete this.customAppRules[key];
+    } else {
+      this.customAppRules[key] = mode;
+    }
+    saveLocal('perf-app-rules.json', this.customAppRules);
+    return this.getCustomRules();
+  }
+
   async handleActiveAppChange(appName: string): Promise<void> {
     if (!this.state.autoSwitchByApp || !appName) return;
     const lower = appName.toLowerCase();
     let target: PerfStudioMode = 'normal';
-    if (/blender|unity|unreal|cinema 4d|maya|steam|valorant|fortnite|cyberpunk|league of legends|davinci|after effects/i.test(lower)) {
+    const customHit = Object.entries(this.customAppRules).find(
+      ([k]) => k.toLowerCase() === lower || lower.includes(k.toLowerCase()),
+    );
+    if (customHit) {
+      target = customHit[1];
+    } else if (/blender|unity|unreal|cinema 4d|maya|steam|valorant|fortnite|cyberpunk|league of legends|davinci|after effects/i.test(lower)) {
       target = 'turbo';
     } else if (/xcode|android studio|docker|premiere|final cut|antigravity|photoshop|intellij|webstorm|pycharm|cursor|visual studio/i.test(lower)) {
       target = 'super';

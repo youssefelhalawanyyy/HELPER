@@ -9,16 +9,22 @@ import {
   Code2,
   Copy,
   Download,
+  Eye,
   File,
+  FileArchive,
   FileCode2,
   Folder,
+  FolderPlus,
   Image as ImageIcon,
   Loader2,
+  Pencil,
   RefreshCw,
   Save,
   Search,
   Send,
+  Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
@@ -50,11 +56,12 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Code Editor state
+  // Code Editor + In-App Media/PDF Preview state
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState('');
   const [fileDirty, setFileDirty] = useState(false);
   const [savingFile, setSavingFile] = useState(false);
+  const [previewEntry, setPreviewEntry] = useState<FileEntry | null>(null);
 
   // AirDrop Upload state
   const [uploading, setUploading] = useState(false);
@@ -244,6 +251,77 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
   const downloadUrl = (relPath: string) =>
     `${deck.bridgeBaseUrl}/api/files/download?root=${encodeURIComponent(root)}&path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(deck.pairing?.token || '')}`;
 
+  const previewUrl = (relPath: string) =>
+    `${deck.bridgeBaseUrl}/api/files/preview?root=${encodeURIComponent(root)}&path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(deck.pairing?.token || '')}`;
+
+  const zipUrl = (relPath: string) =>
+    `${deck.bridgeBaseUrl}/api/files/zip?root=${encodeURIComponent(root)}&path=${encodeURIComponent(relPath)}&token=${encodeURIComponent(deck.pairing?.token || '')}`;
+
+  const isPreviewable = (ext: string) =>
+    ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.pdf', '.mp4', '.mov', '.webm', '.mp3', '.wav', '.m4a'].includes(
+      ext.toLowerCase(),
+    );
+
+  const handleNewFolder = async () => {
+    if (!isConnected || !deck.bridgeBaseUrl) return;
+    const name = window.prompt('New folder name:');
+    if (!name?.trim()) return;
+    soundEngine.playClick();
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/files/mkdir`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ root, dir: currentDir, name: name.trim() }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error || 'Could not create folder');
+      deck.showToast(true, `Created folder "${name.trim()}"`);
+      void fetchList(root, currentDir, '');
+    } catch (err) {
+      deck.showToast(false, err instanceof Error ? err.message : 'Create failed');
+    }
+  };
+
+  const handleRenameEntry = async (entry: FileEntry) => {
+    if (!isConnected || !deck.bridgeBaseUrl) return;
+    const next = window.prompt(`Rename "${entry.name}" to:`, entry.name);
+    if (!next?.trim() || next.trim() === entry.name) return;
+    soundEngine.playClick();
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/files/rename`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ root, path: entry.relPath, newName: next.trim() }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error || 'Rename failed');
+      deck.showToast(true, `Renamed to "${next.trim()}"`);
+      void fetchList(root, currentDir, query);
+    } catch (err) {
+      deck.showToast(false, err instanceof Error ? err.message : 'Rename failed');
+    }
+  };
+
+  const handleDeleteEntry = async (entry: FileEntry) => {
+    if (!isConnected || !deck.bridgeBaseUrl) return;
+    if (!window.confirm(`Delete "${entry.name}" from your computer?`)) return;
+    soundEngine.playClick();
+    try {
+      const params = new URLSearchParams({ root, path: entry.relPath });
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/files/delete?${params}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error || 'Delete failed');
+      deck.showToast(true, `Deleted "${entry.name}"`);
+      if (openFilePath === entry.relPath) setOpenFilePath(null);
+      void fetchList(root, currentDir, query);
+    } catch (err) {
+      deck.showToast(false, err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
   const filteredClipboard = useMemo(() => {
     const q = clipSearch.trim().toLowerCase();
     if (!q) return deck.clipboard.history;
@@ -297,18 +375,31 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            soundEngine.playClick();
-            if (tab === 'clipboard') void handlePullClipboardImage();
-            else void fetchList();
-          }}
-          className="flex h-7 items-center gap-1 rounded-full border border-white/10 bg-white/[0.06] px-2.5 text-[10px] font-bold text-[#9cb4bb] hover:text-white"
-        >
-          <RefreshCw className={`h-3 w-3 ${loading || clipImgLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-1.5">
+          {(tab === 'drop' || tab === 'explorer') && (
+            <button
+              type="button"
+              disabled={!isConnected}
+              onClick={() => void handleNewFolder()}
+              className="flex h-7 items-center gap-1 rounded-full border border-[#88f1d1]/30 bg-[#88f1d1]/12 px-2.5 text-[10px] font-bold text-[#88f1d1] disabled:opacity-40"
+            >
+              <FolderPlus className="h-3 w-3" />
+              New Folder
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playClick();
+              if (tab === 'clipboard') void handlePullClipboardImage();
+              else void fetchList();
+            }}
+            className="flex h-7 items-center gap-1 rounded-full border border-white/10 bg-white/[0.06] px-2.5 text-[10px] font-bold text-[#9cb4bb] hover:text-white"
+          >
+            <RefreshCw className={`h-3 w-3 ${loading || clipImgLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* TAB 1: 2-WAY AIRDROP FILE & PHOTO DROP */}
@@ -399,27 +490,55 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
             <div className="deck-scroll min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
               {entries.map((entry) =>
                 entry.isDir ? (
-                  <button
+                  <div
                     key={entry.relPath}
-                    type="button"
-                    onClick={() => {
-                      soundEngine.playClick();
-                      setCurrentDir(entry.relPath);
-                    }}
-                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-left hover:bg-white/[0.06]"
+                    className="flex items-center justify-between gap-1.5 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5"
                   >
-                    <div className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playClick();
+                        setCurrentDir(entry.relPath);
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
                       <Folder className="h-3.5 w-3.5 shrink-0 text-[#fbbf24]" />
                       <div className="truncate text-[11px] font-bold text-white">{entry.name}</div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a
+                        href={zipUrl(entry.relPath)}
+                        download={`${entry.name}.zip`}
+                        title="Download folder as ZIP"
+                        className="flex items-center gap-0.5 rounded-lg bg-[#fbbf24]/18 px-2 py-1 text-[9px] font-extrabold text-[#fbbf24]"
+                      >
+                        <FileArchive className="h-3 w-3" />
+                        ZIP
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void handleRenameEntry(entry)}
+                        aria-label={`Rename ${entry.name}`}
+                        className="rounded-lg bg-white/[0.06] p-1 text-zinc-400 hover:text-white"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteEntry(entry)}
+                        aria-label={`Delete ${entry.name}`}
+                        className="rounded-lg bg-white/[0.06] p-1 text-zinc-400 hover:text-[#ff5d6c]"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
-                    <span className="font-mono-tech text-[9px] text-[#fbbf24]">Open →</span>
-                  </button>
+                  </div>
                 ) : (
                   <div
                     key={entry.relPath}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5"
+                    className="flex items-center justify-between gap-1.5 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5"
                   >
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       <File className="h-3.5 w-3.5 shrink-0 text-[#7dd3fc]" />
                       <div className="min-w-0">
                         <div className="truncate text-[11px] font-bold text-white">{entry.name}</div>
@@ -428,14 +547,45 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
                         </div>
                       </div>
                     </div>
-                    <a
-                      href={downloadUrl(entry.relPath)}
-                      download={entry.name}
-                      className="flex shrink-0 items-center gap-1 rounded-lg bg-[#7dd3fc]/20 px-2.5 py-1 text-[9.5px] font-extrabold text-[#7dd3fc]"
-                    >
-                      <Download className="h-3 w-3" />
-                      Get
-                    </a>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {isPreviewable(entry.ext) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            soundEngine.playClick();
+                            setPreviewEntry(entry);
+                          }}
+                          className="flex items-center gap-0.5 rounded-lg bg-[#88f1d1]/18 px-2 py-1 text-[9px] font-extrabold text-[#88f1d1]"
+                        >
+                          <Eye className="h-3 w-3" />
+                          View
+                        </button>
+                      )}
+                      <a
+                        href={downloadUrl(entry.relPath)}
+                        download={entry.name}
+                        className="flex items-center gap-0.5 rounded-lg bg-[#7dd3fc]/20 px-2 py-1 text-[9px] font-extrabold text-[#7dd3fc]"
+                      >
+                        <Download className="h-3 w-3" />
+                        Get
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => void handleRenameEntry(entry)}
+                        aria-label={`Rename ${entry.name}`}
+                        className="rounded-lg bg-white/[0.06] p-1 text-zinc-400 hover:text-white"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteEntry(entry)}
+                        aria-label={`Delete ${entry.name}`}
+                        className="rounded-lg bg-white/[0.06] p-1 text-zinc-400 hover:text-[#ff5d6c]"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                 ),
               )}
@@ -720,6 +870,59 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+      {/* In-App File Preview Modal (Images, PDF, Audio, Video) */}
+      {previewEntry && (
+        <div
+          data-no-swipe="true"
+          className="fixed inset-0 z-[95] flex flex-col gap-2 bg-[#040c11]/98 p-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="truncate text-xs font-extrabold text-white">{previewEntry.name}</div>
+            <div className="flex items-center gap-1.5">
+              <a
+                href={downloadUrl(previewEntry.relPath)}
+                download={previewEntry.name}
+                className="flex items-center gap-1 rounded-lg bg-[#88f1d1] px-2.5 py-1 text-[10px] font-extrabold text-[#061c17]"
+              >
+                <Download className="h-3 w-3" />
+                Download
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewEntry(null)}
+                className="grid h-7 w-7 place-items-center rounded-lg bg-white/10 text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid min-h-0 flex-1 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black p-2">
+            {['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(previewEntry.ext) ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={previewUrl(previewEntry.relPath)}
+                alt={previewEntry.name}
+                className="max-h-full max-w-full rounded-lg object-contain"
+              />
+            ) : previewEntry.ext === '.pdf' ? (
+              <iframe
+                src={previewUrl(previewEntry.relPath)}
+                title={previewEntry.name}
+                className="h-full w-full rounded-lg border-0 bg-white"
+              />
+            ) : ['.mp4', '.mov', '.webm'].includes(previewEntry.ext) ? (
+              <video
+                src={previewUrl(previewEntry.relPath)}
+                controls
+                playsInline
+                className="max-h-full max-w-full rounded-lg"
+              />
+            ) : (
+              <audio src={previewUrl(previewEntry.relPath)} controls className="w-full max-w-md" />
+            )}
           </div>
         </div>
       )}

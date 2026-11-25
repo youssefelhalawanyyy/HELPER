@@ -362,6 +362,8 @@ app.use(
       return clients.size;
     },
     getLatestInput: () => ({ latestScan, latestVoice }),
+    perfStudio: perfStudioService,
+    powerThermal: powerThermalService,
   }),
 );
 

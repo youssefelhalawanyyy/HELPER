@@ -53,7 +53,60 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
   const [wolMac, setWolMac] = useState(() =>
     typeof window !== 'undefined' ? window.localStorage.getItem('devdeck.wolMac.v1') || '' : '',
   );
+  const [schedTimer, setSchedTimer] = useState<{
+    action: 'sleep' | 'shutdown' | 'display_off';
+    firesAt: number;
+    minutes: number;
+  } | null>(null);
+  const [schedAction, setSchedAction] = useState<'sleep' | 'shutdown'>('sleep');
   const [tempHistory, setTempHistory] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (deck.status !== 'connected' || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    void fetch(`${deck.bridgeBaseUrl}/api/power/timer`, {
+      headers: { authorization: `Bearer ${deck.pairing.token}` },
+    })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; timer?: { action: 'sleep' | 'shutdown' | 'display_off'; firesAt: number; minutes: number } | null }) => {
+        if (d.ok) setSchedTimer(d.timer || null);
+      })
+      .catch(() => {});
+  }, [deck.status, deck.bridgeBaseUrl, deck.pairing?.token]);
+
+  const schedulePowerTimer = async (minutes: number) => {
+    if (!deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/power/timer`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deck.pairing.token}`,
+        },
+        body: JSON.stringify({ action: schedAction, minutes }),
+      });
+      const d = (await res.json()) as {
+        ok?: boolean;
+        timer?: { action: 'sleep' | 'shutdown' | 'display_off'; firesAt: number; minutes: number };
+        message?: string;
+      };
+      if (d.ok && d.timer) setSchedTimer(d.timer);
+      deck.showToast(Boolean(d.ok), d.message || `Scheduled ${schedAction} in ${minutes}m`);
+    } catch {
+      deck.showToast(false, 'Could not set power timer');
+    }
+  };
+
+  const cancelPowerTimer = async () => {
+    if (!deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    await fetch(`${deck.bridgeBaseUrl}/api/power/timer`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${deck.pairing.token}` },
+    }).catch(() => {});
+    setSchedTimer(null);
+    deck.showToast(true, 'Scheduled power timer cancelled');
+  };
   const p = deck.powerState;
 
   useEffect(() => {
@@ -739,6 +792,60 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               </span>
               <span className="text-[8px] text-zinc-400">2-tap safety confirm</span>
             </motion.button>
+
+            {/* Scheduled Power Timer (Sleep / Shut Down in 15m / 30m / 1h / 2h) */}
+            <div className="col-span-2 flex flex-col justify-between gap-1.5 rounded-xl border border-[#22d3ee]/30 bg-[#08151d] p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[9.5px] font-extrabold text-[#7dd3fc] uppercase">
+                  Scheduled Power Timer
+                </span>
+                <div className="flex items-center gap-1">
+                  {(['sleep', 'shutdown'] as const).map((act) => (
+                    <button
+                      key={act}
+                      type="button"
+                      onClick={() => setSchedAction(act)}
+                      className="rounded-md px-1.5 py-0.5 text-[8px] font-extrabold uppercase"
+                      style={{
+                        background: schedAction === act ? '#22d3ee' : 'rgba(255,255,255,0.06)',
+                        color: schedAction === act ? '#04141c' : '#9cb4bb',
+                      }}
+                    >
+                      {act === 'sleep' ? 'Sleep' : 'Shut Down'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {schedTimer ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-[#22d3ee]/12 px-2 py-1 text-[9.5px] font-bold text-[#7dd3fc]">
+                  <span>
+                    {schedTimer.action.toUpperCase()} in{' '}
+                    {Math.max(1, Math.ceil((schedTimer.firesAt - Date.now()) / 60_000))}m
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void cancelPowerTimer()}
+                    className="rounded bg-[#ff5d6c]/20 px-2 py-0.5 text-[8.5px] font-extrabold text-[#ff5d6c]"
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-1">
+                  {[15, 30, 60, 120].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      disabled={!isConnected}
+                      onClick={() => void schedulePowerTimer(m)}
+                      className="h-6 rounded-lg border border-white/10 bg-white/[0.05] font-mono-tech text-[9px] font-extrabold text-white hover:border-[#22d3ee] disabled:opacity-40"
+                    >
+                      {m < 60 ? `${m}m` : `${m / 60}h`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Wake-on-LAN (Magic Packet) for Powered-Off / Deep-Sleep Desktops */}
             <form

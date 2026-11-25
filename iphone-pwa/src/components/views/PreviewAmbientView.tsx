@@ -61,6 +61,10 @@ export function PreviewAmbientView({
   const [oledShift, setOledShift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showWeather, setShowWeather] = useState(true);
   const [showClipboard, setShowClipboard] = useState(true);
+  const [nightModeManual, setNightModeManual] = useState(false);
+  const [nightBrightened, setNightBrightened] = useState(false);
+  const isLateNight = now ? now.getHours() >= 0 && now.getHours() < 6 : false;
+  const nightStandActive = (nightModeManual || isLateNight) && !nightBrightened;
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
   useEffect(() => {
     setNow(new Date());
@@ -187,7 +191,16 @@ export function PreviewAmbientView({
       className={styles.dashboard}
       style={{
         transform: `translate3d(${oledShift.x}px, ${oledShift.y}px, 0)`,
-        transition: 'transform 1.2s ease-in-out',
+        transition: 'transform 1.2s ease-in-out, filter 0.35s ease',
+        ...(nightStandActive
+          ? { filter: 'brightness(0.45) sepia(1) hue-rotate(-50deg) saturate(2.6)' }
+          : {}),
+      }}
+      onClick={() => {
+        if (nightStandActive) {
+          setNightBrightened(true);
+          window.setTimeout(() => setNightBrightened(false), 8000);
+        }
       }}
     >
       <section className={styles.hero}>
@@ -197,6 +210,20 @@ export function PreviewAmbientView({
             {deck.focusState.active ? ` · Focus ${formatTimer(deck.focusState.remainingSec)}` : ''}
           </span>
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setNightModeManual((v) => !v);
+                setNightBrightened(false);
+              }}
+              title="OLED Night Stand Mode (dim red/mint night clock)"
+              style={{
+                opacity: nightModeManual || nightStandActive ? 1 : 0.55,
+                color: nightStandActive ? '#ff6b6b' : undefined,
+              }}
+            >
+              {nightStandActive ? 'Night ON' : 'Night'}
+            </button>
             <button
               type="button"
               onClick={() => setShowWeather((v) => !v)}

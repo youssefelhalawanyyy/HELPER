@@ -1,6 +1,11 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const IS_WIN = process.platform === 'win32';
 
 export type FileRootKey = 'project' | 'desktop' | 'downloads' | 'documents';
 
@@ -205,4 +210,82 @@ export function saveUploadedFile(
     relPath: path.relative(rootDir, finalPath).replace(/\\/g, '/'),
     bytes: buffer.byteLength,
   };
+}
+
+export function createWorkspaceFolder(
+  root: FileRootKey,
+  projectDir: string,
+  relDir: string,
+  folderName: string,
+): { relPath: string } {
+  const clean = path.basename(String(folderName || '').trim()).replace(/[<>:"/\\|?*]/g, '_');
+  if (!clean) throw new Error('Folder name is required');
+  const rootDir = resolveRootDir(root, projectDir);
+  const targetDir = resolveSafePath(rootDir, relDir);
+  const full = resolveSafePath(rootDir, path.join(path.relative(rootDir, targetDir), clean));
+  fs.mkdirSync(full, { recursive: true });
+  return { relPath: path.relative(rootDir, full).replace(/\\/g, '/') };
+}
+
+export function renameWorkspaceEntry(
+  root: FileRootKey,
+  projectDir: string,
+  relPath: string,
+  newName: string,
+): { relPath: string } {
+  const clean = path.basename(String(newName || '').trim()).replace(/[<>:"/\\|?*]/g, '_');
+  if (!clean) throw new Error('New name is required');
+  const rootDir = resolveRootDir(root, projectDir);
+  const src = resolveSafePath(rootDir, relPath);
+  if (src === rootDir || !fs.existsSync(src)) throw new Error('Item not found');
+  const dst = path.join(path.dirname(src), clean);
+  if (fs.existsSync(dst)) throw new Error('An item with that name already exists');
+  fs.renameSync(src, dst);
+  return { relPath: path.relative(rootDir, dst).replace(/\\/g, '/') };
+}
+
+export function deleteWorkspaceEntry(
+  root: FileRootKey,
+  projectDir: string,
+  relPath: string,
+): { deleted: string } {
+  const rootDir = resolveRootDir(root, projectDir);
+  const target = resolveSafePath(rootDir, relPath);
+  if (target === rootDir || !fs.existsSync(target)) {
+    throw new Error('Cannot delete root or missing item');
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+  return { deleted: path.relative(rootDir, target).replace(/\\/g, '/') };
+}
+
+export async function zipWorkspaceFolder(
+  root: FileRootKey,
+  projectDir: string,
+  relPath: string,
+): Promise<{ zipPath: string; filename: string }> {
+  const rootDir = resolveRootDir(root, projectDir);
+  const target = resolveSafePath(rootDir, relPath);
+  if (!fs.existsSync(target)) throw new Error('Folder not found');
+  const baseName = path.basename(target) || root;
+  const zipPath = path.join(os.tmpdir(), `devdeck-${baseName}-${Date.now()}.zip`);
+  if (IS_WIN) {
+    const srcEsc = target.replace(/'/g, "''");
+    const dstEsc = zipPath.replace(/'/g, "''");
+    await execFileAsync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Compress-Archive -Path '${srcEsc}' -DestinationPath '${dstEsc}' -Force`,
+      ],
+      { timeout: 25_000, windowsHide: true },
+    );
+  } else {
+    await execFileAsync('zip', ['-r', '-q', zipPath, path.basename(target)], {
+      cwd: path.dirname(target),
+      timeout: 25_000,
+    });
+  }
+  return { zipPath, filename: `${baseName}.zip` };
 }

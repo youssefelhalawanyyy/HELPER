@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ClipboardList,
   Coffee,
+  Lock,
   Maximize2,
   Mic,
   Minimize2,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
+import { PIN_STORAGE_KEY, PinLockOverlay } from '@/components/shell/PinLockOverlay';
 import { useDeskBreak } from '@/hooks/useDeskBreak';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
@@ -106,6 +108,14 @@ const NourVoiceView = dynamic(
   () => import('@/components/views/NourVoiceView').then((m) => m.NourVoiceView),
   { loading: ViewSkeleton },
 );
+const FavoritesView = dynamic(
+  () => import('@/components/views/FavoritesView').then((m) => m.FavoritesView),
+  { loading: ViewSkeleton },
+);
+const CommandStudioView = dynamic(
+  () => import('@/components/views/CommandStudioView').then((m) => m.CommandStudioView),
+  { loading: ViewSkeleton },
+);
 
 const PAGE_VARIANTS = {
   enter: (dir: number) => ({
@@ -139,8 +149,15 @@ export function DeckShell() {
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [savedPin, setSavedPin] = useState(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem(PIN_STORAGE_KEY) || '' : '',
+  );
+  const [pinUnlocked, setPinUnlocked] = useState(false);
+  const [pinDialogMode, setPinDialogMode] = useState<'unlock' | 'setup' | null>(null);
+  const [pendingViewIdx, setPendingViewIdx] = useState<number | null>(null);
   const reduceMotion = useReducedMotion();
-  const overlayOpen = pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion);
+  const overlayOpen =
+    pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion) || Boolean(pinDialogMode);
   const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
 
   useEffect(() => {
@@ -156,11 +173,18 @@ export function DeckShell() {
       const len = PAGES.length;
       const wrapped = ((nextIdx % len) + len) % len;
       if (wrapped === pageIdx) return;
+      const targetId = PAGES[wrapped]?.id;
+      const isProtected = targetId === 'power' || targetId === 'files' || targetId === 'ssh';
+      if (savedPin && !pinUnlocked && isProtected) {
+        setPendingViewIdx(wrapped);
+        setPinDialogMode('unlock');
+        return;
+      }
       setDirection(nextIdx > pageIdx ? 1 : -1);
       setPageIdx(wrapped);
       soundEngine.playDetent();
     },
-    [pageIdx],
+    [pageIdx, savedPin, pinUnlocked],
   );
 
   const goToView = useCallback(
@@ -472,6 +496,21 @@ export function DeckShell() {
               {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
               <motion.button
                 type="button"
+                aria-label="PIN Lock settings"
+                title={savedPin ? 'PIN Lock Enabled (tap to change/remove)' : 'Set 4-Digit PIN Lock'}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setPinDialogMode('setup');
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06]"
+                style={{ color: savedPin ? '#88f1d1' : '#8b90a0' }}
+              >
+                <Lock className="h-3 w-3" />
+              </motion.button>
+
+              <motion.button
+                type="button"
                 aria-label="Quick Snippets"
                 whileTap={{ scale: 0.9 }}
                 onClick={() => {
@@ -708,11 +747,51 @@ export function DeckShell() {
                 {activeView === 'hosting' && <HostingDashboardView deck={deck} />}
                 {activeView === 'ssh' && <SshManagerView deck={deck} />}
                 {activeView === 'nour' && <NourVoiceView nour={nour} />}
+                {activeView === 'favorites' && (
+                  <FavoritesView deck={deck} onNavigate={goToView} />
+                )}
+                {activeView === 'studio' && <CommandStudioView deck={deck} />}
               </motion.div>
             </AnimatePresence>
           </main>
 
           {/* Bottom Bar: Interactive Swipe Page Dots + Live Dev Log Marquee */}
+          {pinDialogMode && (
+            <PinLockOverlay
+              mode={pinDialogMode}
+              savedPin={savedPin}
+              onUnlock={() => {
+                setPinUnlocked(true);
+                setPinDialogMode(null);
+                if (pendingViewIdx !== null) {
+                  setPageIdx(pendingViewIdx);
+                  setPendingViewIdx(null);
+                }
+              }}
+              onSetPin={(pin) => {
+                setSavedPin(pin);
+                setPinUnlocked(true);
+                setPinDialogMode(null);
+                try {
+                  window.localStorage.setItem(PIN_STORAGE_KEY, pin);
+                } catch {}
+                deck.showToast(true, '4-digit DevDeck PIN Lock enabled');
+              }}
+              onClearPin={() => {
+                setSavedPin('');
+                setPinUnlocked(false);
+                setPinDialogMode(null);
+                try {
+                  window.localStorage.removeItem(PIN_STORAGE_KEY);
+                } catch {}
+                deck.showToast(true, 'PIN Lock removed');
+              }}
+              onClose={() => {
+                setPinDialogMode(null);
+                setPendingViewIdx(null);
+              }}
+            />
+          )}
           <footer className="console-footer">
             {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
             <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#98c8ce29] bg-[#0d1921] px-2 py-0.5">

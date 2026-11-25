@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Cpu,
@@ -140,6 +140,48 @@ export function PerfStudioView({ deck }: { deck: DevDeckState }) {
       text: `System is balanced (${stats.cpuPct}% CPU · ${stats.ramPct}% RAM) — NORMAL stock mode is ideal right now.`,
     };
   }, [isConnected, stats.ramPct, stats.ramUsedGb, stats.ramTotalGb, stats.cpuPct, power]);
+
+  const [customRules, setCustomRules] = useState<Record<string, PerfStudioMode>>({});
+  const [ruleAppInput, setRuleAppInput] = useState('');
+  const [ruleModeInput, setRuleModeInput] = useState<PerfStudioMode>('super');
+
+  useEffect(() => {
+    if (!isConnected || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    void fetch(`${deck.bridgeBaseUrl}/api/perf/rules`, {
+      headers: { authorization: `Bearer ${deck.pairing.token}` },
+    })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; rules?: Record<string, PerfStudioMode> }) => {
+        if (d.ok && d.rules) setCustomRules(d.rules);
+      })
+      .catch(() => {});
+  }, [isConnected, deck.bridgeBaseUrl, deck.pairing?.token]);
+
+  const saveAppRule = async (appName: string, mode: PerfStudioMode | null) => {
+    if (!isConnected || !deck.bridgeBaseUrl || !deck.pairing?.token || !appName.trim()) return;
+    soundEngine.playClick();
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/perf/rules`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deck.pairing.token}`,
+        },
+        body: JSON.stringify({ appName: appName.trim(), mode }),
+      });
+      const d = (await res.json()) as { ok?: boolean; rules?: Record<string, PerfStudioMode> };
+      if (d.ok && d.rules) {
+        setCustomRules(d.rules);
+        if (mode) setRuleAppInput('');
+        deck.showToast(
+          true,
+          mode ? `Rule saved: ${appName.trim()} → ${mode.toUpperCase()}` : `Removed rule for ${appName}`,
+        );
+      }
+    } catch {
+      deck.showToast(false, 'Could not save app rule');
+    }
+  };
 
   const selectMode = (mode: PerfStudioMode) => {
     soundEngine.playClick();
@@ -376,6 +418,59 @@ export function PerfStudioView({ deck }: { deck: DevDeckState }) {
             >
               {perf.autoSwitchByApp ? 'ON' : 'OFF'}
             </button>
+          </div>
+
+          {/* Custom Per-App Auto-Switch Rules Editor */}
+          <div className="space-y-1.5 rounded-xl border border-white/[0.08] bg-black/55 px-2.5 py-2">
+            <div className="text-[9px] font-extrabold tracking-wider text-[#7dd3fc] uppercase">
+              Custom App Rules ({Object.keys(customRules).length})
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={ruleAppInput}
+                onChange={(e) => setRuleAppInput(e.target.value)}
+                placeholder="App name (e.g. Chrome, Figma)…"
+                className="h-6 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#071117] px-2 text-[9.5px] text-white outline-none"
+              />
+              <select
+                value={ruleModeInput}
+                onChange={(e) => setRuleModeInput(e.target.value as PerfStudioMode)}
+                className="h-6 rounded-lg border border-white/10 bg-[#071117] px-1.5 text-[9px] font-bold text-[#88f1d1] outline-none"
+              >
+                <option value="eco">ECO</option>
+                <option value="normal">NORMAL</option>
+                <option value="super">SUPER</option>
+                <option value="turbo">TURBO</option>
+              </select>
+              <button
+                type="button"
+                disabled={!ruleAppInput.trim()}
+                onClick={() => void saveAppRule(ruleAppInput, ruleModeInput)}
+                className="h-6 rounded-lg bg-[#88f1d1] px-2 text-[9px] font-extrabold text-[#061c17] disabled:opacity-40"
+              >
+                ADD
+              </button>
+            </div>
+            {Object.keys(customRules).length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(customRules).map(([app, mode]) => (
+                  <span
+                    key={app}
+                    className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[8.5px] font-bold text-white"
+                  >
+                    {app} → <b className="text-[#88f1d1] uppercase">{mode}</b>
+                    <button
+                      type="button"
+                      onClick={() => void saveAppRule(app, null)}
+                      className="ml-0.5 text-zinc-400 hover:text-[#ff5d6c]"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 1-Tap Free RAM / Purge Cache */}

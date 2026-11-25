@@ -158,6 +158,61 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   // 3-Channel Hardware Potentiometer State (Volume / Brightness / Mic Gain)
   const mt = deck.macTelemetry;
   const [potChannel, setPotChannel] = useState<PotChannel>('volume');
+  const [audioOutputs, setAudioOutputs] = useState<string[]>([]);
+  const [currentAudioOut, setCurrentAudioOut] = useState('');
+  const [resourceAlertsOn, setResourceAlertsOn] = useState(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem('devdeck.resAlerts.v1') === '1' : false,
+  );
+  const lastAlertTsRef = useRef(0);
+
+  useEffect(() => {
+    if (deck.status !== 'connected' || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    void fetch(`${deck.bridgeBaseUrl}/api/audio/outputs`, {
+      headers: { authorization: `Bearer ${deck.pairing.token}` },
+    })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; current?: string; devices?: string[] }) => {
+        if (d.ok && Array.isArray(d.devices)) {
+          setAudioOutputs(d.devices);
+          if (d.current) setCurrentAudioOut(d.current);
+        }
+      })
+      .catch(() => {});
+  }, [deck.status, deck.bridgeBaseUrl, deck.pairing?.token]);
+
+  useEffect(() => {
+    if (!resourceAlertsOn || deck.status !== 'connected') return;
+    const now = Date.now();
+    if (now - lastAlertTsRef.current < 30_000) return;
+    const diskFree = Math.max(0, deck.stats.diskTotalGb - deck.stats.diskUsedGb);
+    if (deck.stats.ramPct >= 90) {
+      lastAlertTsRef.current = now;
+      deck.triggerFlash('warning', `High RAM Alert: ${Math.round(deck.stats.ramPct)}% used!`);
+    } else if (deck.stats.diskTotalGb > 0 && diskFree < 10) {
+      lastAlertTsRef.current = now;
+      deck.triggerFlash('error', `Low Disk Alert: only ${diskFree.toFixed(1)} GB free!`);
+    }
+  }, [resourceAlertsOn, deck]);
+
+  const switchAudioOutput = async (device: string) => {
+    if (!deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    setCurrentAudioOut(device);
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/audio/output`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deck.pairing.token}`,
+        },
+        body: JSON.stringify({ device }),
+      });
+      const d = (await res.json()) as { ok?: boolean; message?: string };
+      deck.showToast(Boolean(d.ok), d.message || `Switched to ${device}`);
+    } catch {
+      deck.showToast(false, 'Could not switch audio output');
+    }
+  };
   const [volVal, setVolVal] = useState(deck.mediaState.volume);
   const [brightVal, setBrightVal] = useState(deck.mediaState.brightness || 75);
   const [micVal, setMicVal] = useState(mt?.micInputPct || 50);
@@ -1350,16 +1405,52 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
             })}
           </div>
 
+          {/* Audio Output Switcher + Custom Resource Alerts Toggle */}
+          {potChannel === 'volume' && audioOutputs.length > 0 && (
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+              {audioOutputs.slice(0, 4).map((dev) => {
+                const active = dev === currentAudioOut || dev === mt?.audioOutputDevice;
+                return (
+                  <button
+                    key={dev}
+                    type="button"
+                    onClick={() => void switchAudioOutput(dev)}
+                    className="shrink-0 truncate rounded-md border px-1.5 py-0.5 text-[8px] font-bold"
+                    style={{
+                      maxWidth: 96,
+                      borderColor: active ? '#fbbf24' : 'rgba(255,255,255,0.08)',
+                      background: active ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.04)',
+                      color: active ? '#fbbf24' : '#9cb4bb',
+                    }}
+                  >
+                    {dev}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex items-center justify-between gap-1.5">
-            <span className="truncate text-[8.5px] text-zinc-400">
-              {potChannel === 'volume'
-                ? mt?.audioOutputDevice || 'System Audio Out'
-                : potChannel === 'brightness'
-                  ? mt?.displays?.[0] || 'Main Display'
-                  : mt?.micMuted
-                    ? 'Mic Muted'
-                    : 'Input Gain Ready'}
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                const next = !resourceAlertsOn;
+                setResourceAlertsOn(next);
+                try {
+                  window.localStorage.setItem('devdeck.resAlerts.v1', next ? '1' : '0');
+                } catch {}
+                deck.showToast(true, next ? 'Resource Alerts ON (RAM >90% / Disk <10GB)' : 'Resource Alerts OFF');
+              }}
+              className="truncate rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase"
+              style={{
+                borderColor: resourceAlertsOn ? '#34d399' : 'rgba(255,255,255,0.1)',
+                background: resourceAlertsOn ? 'rgba(52,211,153,0.14)' : 'rgba(255,255,255,0.04)',
+                color: resourceAlertsOn ? '#34d399' : '#9cb4bb',
+              }}
+            >
+              {resourceAlertsOn ? 'ALERTS ON' : 'ALERTS OFF'}
+            </button>
 
             {potChannel === 'volume' && (
               <button

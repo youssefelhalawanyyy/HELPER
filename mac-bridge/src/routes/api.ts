@@ -1,9 +1,10 @@
-import { type ChildProcess } from 'node:child_process';
+import { type ChildProcess, execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { Router } from 'express';
 import type { AuthManager } from '../auth.js';
 import type { ConfigStore } from '../config.js';
@@ -18,18 +19,29 @@ import {
   checkScreenCapturePermission,
   getLatestCachedScreenFrame,
   getLiveScreenFrame,
+  listScreenDisplays,
   requestScreenCapturePermission,
   type ScreenQualityPreset,
 } from '../services/screenStreamService.js';
 import {
   type FileRootKey,
+  createWorkspaceFolder,
+  deleteWorkspaceEntry,
   listWorkspaceFiles,
   readWorkspaceTextFile,
+  renameWorkspaceEntry,
   resolveRootDir,
   resolveSafePath,
   saveUploadedFile,
   writeWorkspaceTextFile,
+  zipWorkspaceFolder,
 } from '../services/workspaceFilesService.js';
+import type { PerfStudioService } from '../services/perfStudioService.js';
+import type { PowerThermalService } from '../services/powerThermalService.js';
+import type { PerfStudioMode } from '../types/protocol.js';
+
+const execFileAsync = promisify(execFile);
+const IS_WIN = process.platform === 'win32';
 import type {
   AgentNotification,
   AgentNotificationStatus,
@@ -214,6 +226,8 @@ export interface ApiRouterDeps {
     latestScan: { filePath: string; filename: string; ts: number } | null;
     latestVoice: { text: string; ts: number } | null;
   };
+  perfStudio?: PerfStudioService;
+  powerThermal?: PowerThermalService;
 }
 
 export function createApiRouter(deps: ApiRouterDeps): Router {
@@ -547,6 +561,254 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     }
   });
 
+  router.post('/files/mkdir', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.body?.root);
+      const dir = typeof req.body?.dir === 'string' ? req.body.dir : '';
+      const name = typeof req.body?.name === 'string' ? req.body.name : '';
+      const out = createWorkspaceFolder(root, deps.config.getAll().projectDir, dir, name);
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Create folder failed' });
+    }
+  });
+
+  router.post('/files/rename', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.body?.root);
+      const relPath = typeof req.body?.path === 'string' ? req.body.path : '';
+      const newName = typeof req.body?.newName === 'string' ? req.body.newName : '';
+      const out = renameWorkspaceEntry(root, deps.config.getAll().projectDir, relPath, newName);
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Rename failed' });
+    }
+  });
+
+  router.delete('/files/delete', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.query.root || req.body?.root);
+      const relPath =
+        (typeof req.query.path === 'string' ? req.query.path : '') ||
+        (typeof req.body?.path === 'string' ? req.body.path : '');
+      const out = deleteWorkspaceEntry(root, deps.config.getAll().projectDir, relPath);
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Delete failed' });
+    }
+  });
+
+  router.get('/files/preview', (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).end();
+      return;
+    }
+    try {
+      const root = parseRoot(req.query.root);
+      const relPath = typeof req.query.path === 'string' ? req.query.path : '';
+      const rootDir = resolveRootDir(root, deps.config.getAll().projectDir);
+      const full = resolveSafePath(rootDir, relPath);
+      if (!fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(full).replace(/"/g, '')}"`);
+      res.sendFile(full);
+    } catch {
+      res.status(400).end();
+    }
+  });
+
+  router.get('/files/zip', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    try {
+      const root = parseRoot(req.query.root);
+      const relPath = typeof req.query.path === 'string' ? req.query.path : '';
+      const { zipPath, filename } = await zipWorkspaceFolder(root, deps.config.getAll().projectDir, relPath);
+      res.download(zipPath, filename, () => {
+        try {
+          if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+        } catch {
+          // Ignore
+        }
+      });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Zip failed' });
+    }
+  });
+
+  // --- Audio Output Switcher (AirPods / Speakers / HDMI / Bluetooth) ---
+  router.get('/audio/outputs', deps.auth.requireAuth, async (_req, res) => {
+    try {
+      if (IS_WIN) {
+        res.json({ ok: true, current: 'System Speakers', devices: ['System Speakers'] });
+        return;
+      }
+      // Try SwitchAudioSource if installed, else parse system_profiler SPAudioDataType
+      try {
+        const [{ stdout: listOut }, { stdout: curOut }] = await Promise.all([
+          execFileAsync('SwitchAudioSource', ['-a', '-t', 'output'], { timeout: 2000 }),
+          execFileAsync('SwitchAudioSource', ['-c', '-t', 'output'], { timeout: 2000 }),
+        ]);
+        const devices = listOut.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+        res.json({ ok: true, current: curOut.trim(), devices });
+        return;
+      } catch {
+        const { stdout } = await execFileAsync('system_profiler', ['SPAudioDataType', '-json'], {
+          timeout: 3500,
+        });
+        const parsed = JSON.parse(stdout) as { SPAudioDataType?: Array<{ _items?: Array<Record<string, unknown>> }> };
+        const items = parsed.SPAudioDataType?.[0]?._items || [];
+        const devices: string[] = [];
+        let current = '';
+        for (const item of items) {
+          const name = String(item._name || '').trim();
+          const hasOut = Number(item.coreaudio_device_output || 0) > 0;
+          if (name && hasOut) {
+            devices.push(name);
+            if (item.coreaudio_default_audio_output_device === 'spaudio_yes') current = name;
+          }
+        }
+        res.json({ ok: true, current: current || devices[0] || 'Speakers', devices });
+      }
+    } catch {
+      res.json({ ok: true, current: 'Speakers', devices: ['MacBook Speakers'] });
+    }
+  });
+
+  router.post('/audio/output', deps.auth.requireAuth, async (req, res) => {
+    const device = typeof req.body?.device === 'string' ? req.body.device.trim() : '';
+    if (!device) {
+      res.status(400).json({ ok: false, error: 'Device name required' });
+      return;
+    }
+    try {
+      await execFileAsync('SwitchAudioSource', ['-s', device, '-t', 'output'], { timeout: 2500 });
+      res.json({ ok: true, message: `Switched audio to ${device}` });
+    } catch {
+      // Fallback: open macOS Sound Output picker or switch via CoreAudio / AppleScript
+      await execFileAsync('open', ['x-apple.systempreferences:com.apple.Sound-Settings.extension']).catch(() => {});
+      res.json({
+        ok: true,
+        message: `Opened Sound Settings for ${device} (install "brew install switchaudio-osx" for silent 1-tap switching)`,
+      });
+    }
+  });
+
+  // --- Scheduled Power Timers (Sleep / Shut Down / Display Off in N minutes) ---
+  let powerTimerHandle: ReturnType<typeof setTimeout> | null = null;
+  let powerTimerMeta: { action: 'sleep' | 'shutdown' | 'display_off'; firesAt: number; minutes: number } | null = null;
+
+  router.get('/power/timer', deps.auth.requireAuth, (_req, res) => {
+    res.json({ ok: true, timer: powerTimerMeta });
+  });
+
+  router.post('/power/timer', deps.auth.requireAuth, (req, res) => {
+    const action = req.body?.action as 'sleep' | 'shutdown' | 'display_off';
+    const minutes = Math.max(1, Math.min(720, Math.round(Number(req.body?.minutes) || 30)));
+    if (!['sleep', 'shutdown', 'display_off'].includes(action)) {
+      res.status(400).json({ ok: false, error: 'Invalid timer action' });
+      return;
+    }
+    if (powerTimerHandle) clearTimeout(powerTimerHandle);
+    const firesAt = Date.now() + minutes * 60_000;
+    powerTimerMeta = { action, firesAt, minutes };
+    powerTimerHandle = setTimeout(() => {
+      const act = powerTimerMeta?.action;
+      powerTimerMeta = null;
+      powerTimerHandle = null;
+      if (act && deps.powerThermal) {
+        void deps.powerThermal
+          .runPowerAction(act === 'display_off' ? 'display_sleep' : act)
+          .catch(() => {});
+      }
+    }, minutes * 60_000);
+    res.json({ ok: true, timer: powerTimerMeta, message: `Scheduled ${action} in ${minutes}m` });
+  });
+
+  router.delete('/power/timer', deps.auth.requireAuth, (_req, res) => {
+    if (powerTimerHandle) clearTimeout(powerTimerHandle);
+    powerTimerHandle = null;
+    powerTimerMeta = null;
+    res.json({ ok: true, message: 'Power timer cancelled' });
+  });
+
+  // --- Perf Studio Custom App Rules ---
+  router.get('/perf/rules', deps.auth.requireAuth, (_req, res) => {
+    res.json({ ok: true, rules: deps.perfStudio?.getCustomRules() || {} });
+  });
+
+  router.post('/perf/rules', deps.auth.requireAuth, (req, res) => {
+    const appName = typeof req.body?.appName === 'string' ? req.body.appName.trim() : '';
+    const mode = req.body?.mode as PerfStudioMode | null;
+    if (!appName) {
+      res.status(400).json({ ok: false, error: 'appName required' });
+      return;
+    }
+    const rules = deps.perfStudio?.setCustomRule(appName, mode || null) || {};
+    res.json({ ok: true, rules });
+  });
+
+  // --- Meeting Command Bar (DND + Pause Music + Mic/Camera/Leave Call) ---
+  router.post('/meeting/action', deps.auth.requireAuth, async (req, res) => {
+    const action = String(req.body?.action || '');
+    try {
+      if (action === 'start') {
+        if (!IS_WIN) {
+          await execFileAsync('osascript', [
+            '-e',
+            'tell application "System Events" to key code 16',
+          ]).catch(() => {});
+        }
+        res.json({ ok: true, message: 'Meeting Mode ON — media paused & controls ready' });
+        return;
+      }
+      if (action === 'mic') {
+        if (!IS_WIN) {
+          await execFileAsync('osascript', [
+            '-e',
+            'set v to input volume of (get volume settings)\nif v > 0 then\nset volume input volume 0\nelse\nset volume input volume 80\nend if',
+          ]).catch(() => {});
+        }
+        res.json({ ok: true, message: 'Toggled microphone mute' });
+        return;
+      }
+      if (action === 'camera') {
+        if (!IS_WIN) {
+          // Cmd+E works in Google Meet & Teams; Cmd+Shift+V works in Zoom
+          await execFileAsync('osascript', [
+            '-e',
+            'tell application "System Events" to keystroke "e" using {command down}',
+          ]).catch(() => {});
+        }
+        res.json({ ok: true, message: 'Toggled camera shortcut (⌘E)' });
+        return;
+      }
+      if (action === 'leave') {
+        if (!IS_WIN) {
+          await execFileAsync('osascript', [
+            '-e',
+            'tell application "System Events" to keystroke "w" using {command down}',
+          ]).catch(() => {});
+        }
+        res.json({ ok: true, message: 'Sent Leave Call / Close window (⌘W)' });
+        return;
+      }
+      res.status(400).json({ ok: false, error: 'Unknown meeting action' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Meeting action failed' });
+    }
+  });
+
   // --- Bidirectional Image Clipboard Sync ---
   router.get('/clipboard/image', deps.auth.requireAuth, async (_req, res) => {
     const dataUrl = await readClipboardImageBase64();
@@ -577,6 +839,18 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     res.json(result);
   });
 
+  router.get('/screen/displays', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    const displays = await listScreenDisplays();
+    res.json({ ok: true, displays });
+  });
+
   router.get('/screen/frame', async (req, res) => {
     const token =
       (typeof req.query.token === 'string' ? req.query.token : '') ||
@@ -589,7 +863,8 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     const preset: ScreenQualityPreset =
       qRaw === 'hd' ? 'hd' : qRaw === 'balanced' ? 'balanced' : 'turbo';
     const lastSeq = Number(req.query.seq) || 0;
-    const { frame, seq, permissionDenied } = await getLiveScreenFrame(preset, lastSeq);
+    const displayIdx = Math.max(0, Number(req.query.display) || 0);
+    const { frame, seq, permissionDenied } = await getLiveScreenFrame(preset, lastSeq, displayIdx);
     if (permissionDenied) {
       res.status(403).json({
         ok: false,
