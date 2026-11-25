@@ -25,7 +25,7 @@ import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 
 type HubTab = 'drop' | 'explorer' | 'clipboard';
-type RootKey = 'project' | 'desktop' | 'downloads';
+type RootKey = 'project' | 'desktop' | 'downloads' | 'documents';
 
 interface FileEntry {
   name: string;
@@ -173,8 +173,8 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
           method: 'POST',
           headers: authHeaders,
           body: JSON.stringify({
-            root: tab === 'drop' ? 'downloads' : root,
-            dir: tab === 'drop' ? '' : currentDir,
+            root,
+            dir: currentDir,
             filename: file.name,
             data: base64,
           }),
@@ -183,8 +183,8 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
         if (!res.ok || !data.ok) throw new Error(data.error || `Failed to send ${file.name}`);
         sent += 1;
       }
-      deck.showToast(true, `Sent ${sent} file${sent === 1 ? '' : 's'} to computer!`);
-      void fetchList(tab === 'drop' ? 'downloads' : root, tab === 'drop' ? '' : currentDir, '');
+      deck.showToast(true, `Sent ${sent} file${sent === 1 ? '' : 's'} to ~/${root}!`);
+      void fetchList(root, currentDir, '');
     } catch (err) {
       deck.showToast(false, err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -319,8 +319,17 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
               <div className="disp text-[18px] text-[#88f1d1]">iPhone → Computer Drop</div>
               <p className="mt-0.5 text-[10.5px] text-[#9cb4bb]">
                 Send photos, videos, PDFs, or any file straight into{' '}
-                <code className="text-[#88f1d1]">~/Downloads</code> on your Mac/Windows PC over LAN
-                or Cloudflare HTTPS tunnel.
+                <code className="text-[#88f1d1]">
+                  {root === 'downloads'
+                    ? '~/Downloads'
+                    : root === 'documents'
+                      ? '~/Documents'
+                      : root === 'desktop'
+                        ? '~/Desktop'
+                        : 'Project'}
+                  {currentDir ? `/${currentDir}` : ''}
+                </code>{' '}
+                on your Mac/Windows PC over LAN or Cloudflare HTTPS tunnel.
               </p>
             </div>
 
@@ -352,8 +361,8 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
 
           <div className="flex min-h-0 flex-col gap-1.5 rounded-2xl border border-white/[0.08] bg-black/45 p-3 md:col-span-7">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1 rounded-full bg-black/70 p-0.5">
-                {(['downloads', 'desktop', 'project'] as const).map((r) => (
+              <div className="flex flex-wrap items-center gap-1 rounded-full bg-black/70 p-0.5">
+                {(['downloads', 'documents', 'desktop', 'project'] as const).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -361,7 +370,7 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
                       setRoot(r);
                       setCurrentDir('');
                     }}
-                    className="rounded-full px-2.5 py-0.5 text-[9px] font-extrabold uppercase"
+                    className="rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase"
                     style={{
                       background: root === r ? '#182c35' : 'transparent',
                       color: root === r ? '#88f1d1' : '#7c8190',
@@ -371,36 +380,65 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
                   </button>
                 ))}
               </div>
-              <span className="font-mono-tech text-[9.5px] text-[#9cb4bb]">
-                Computer → iPhone Download
-              </span>
+              {currentDir ? (
+                <button
+                  type="button"
+                  onClick={goParentDir}
+                  className="flex shrink-0 items-center gap-0.5 rounded-lg bg-white/[0.08] px-2 py-0.5 text-[9px] font-bold text-white"
+                >
+                  <ArrowUp className="h-2.5 w-2.5" />
+                  Up
+                </button>
+              ) : (
+                <span className="font-mono-tech text-[9.5px] text-[#9cb4bb]">
+                  Computer → iPhone
+                </span>
+              )}
             </div>
 
             <div className="deck-scroll min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
-              {entries.filter((e) => !e.isDir).map((entry) => (
-                <div
-                  key={entry.relPath}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <File className="h-3.5 w-3.5 shrink-0 text-[#7dd3fc]" />
-                    <div className="min-w-0">
+              {entries.map((entry) =>
+                entry.isDir ? (
+                  <button
+                    key={entry.relPath}
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setCurrentDir(entry.relPath);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-left hover:bg-white/[0.06]"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-[#fbbf24]" />
                       <div className="truncate text-[11px] font-bold text-white">{entry.name}</div>
-                      <div className="font-mono-tech text-[9px] text-zinc-400">
-                        {formatBytes(entry.sizeBytes)}
+                    </div>
+                    <span className="font-mono-tech text-[9px] text-[#fbbf24]">Open →</span>
+                  </button>
+                ) : (
+                  <div
+                    key={entry.relPath}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <File className="h-3.5 w-3.5 shrink-0 text-[#7dd3fc]" />
+                      <div className="min-w-0">
+                        <div className="truncate text-[11px] font-bold text-white">{entry.name}</div>
+                        <div className="font-mono-tech text-[9px] text-zinc-400">
+                          {formatBytes(entry.sizeBytes)}
+                        </div>
                       </div>
                     </div>
+                    <a
+                      href={downloadUrl(entry.relPath)}
+                      download={entry.name}
+                      className="flex shrink-0 items-center gap-1 rounded-lg bg-[#7dd3fc]/20 px-2.5 py-1 text-[9.5px] font-extrabold text-[#7dd3fc]"
+                    >
+                      <Download className="h-3 w-3" />
+                      Get
+                    </a>
                   </div>
-                  <a
-                    href={downloadUrl(entry.relPath)}
-                    download={entry.name}
-                    className="flex shrink-0 items-center gap-1 rounded-lg bg-[#7dd3fc]/20 px-2.5 py-1 text-[9.5px] font-extrabold text-[#7dd3fc]"
-                  >
-                    <Download className="h-3 w-3" />
-                    Get
-                  </a>
-                </div>
-              ))}
+                ),
+              )}
               {entries.length === 0 && (
                 <div className="sub grid h-28 place-items-center text-center">
                   {isConnected ? 'Folder is empty' : 'Connect computer bridge to browse files'}
@@ -416,8 +454,8 @@ export function FilesHubView({ deck }: { deck: DevDeckState }) {
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-12">
           {/* File Tree & Search */}
           <div className="flex min-h-0 flex-col gap-1.5 rounded-2xl border border-white/[0.08] bg-black/50 p-2.5 md:col-span-5">
-            <div className="flex items-center gap-1">
-              {(['project', 'desktop', 'downloads'] as const).map((r) => (
+            <div className="flex flex-wrap items-center gap-1">
+              {(['project', 'documents', 'desktop', 'downloads'] as const).map((r) => (
                 <button
                   key={r}
                   type="button"

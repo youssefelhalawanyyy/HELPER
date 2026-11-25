@@ -471,7 +471,7 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
 
   // --- Remote File Explorer, Code Editor & 2-Way AirDrop File/Photo Drop ---
   const parseRoot = (val: unknown): FileRootKey =>
-    val === 'desktop' || val === 'downloads' ? val : 'project';
+    val === 'desktop' || val === 'downloads' || val === 'documents' ? val : 'project';
 
   router.get('/files/list', deps.auth.requireAuth, (req, res) => {
     try {

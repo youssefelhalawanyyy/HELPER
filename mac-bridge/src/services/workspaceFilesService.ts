@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export type FileRootKey = 'project' | 'desktop' | 'downloads';
+export type FileRootKey = 'project' | 'desktop' | 'downloads' | 'documents';
 
 export interface WorkspaceFileEntry {
   name: string;
@@ -29,6 +29,7 @@ export function resolveRootDir(root: FileRootKey, projectDir: string): string {
   const home = os.homedir();
   if (root === 'desktop') return path.join(home, 'Desktop');
   if (root === 'downloads') return path.join(home, 'Downloads');
+  if (root === 'documents') return path.join(home, 'Documents');
   return path.resolve(projectDir);
 }
 
@@ -125,7 +126,7 @@ export function listWorkspaceFiles(
 
   entries.sort((a, b) => {
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-    if (root === 'downloads' || root === 'desktop') return b.mtimeMs - a.mtimeMs;
+    if (root === 'downloads' || root === 'desktop' || root === 'documents') return b.mtimeMs - a.mtimeMs;
     return a.name.localeCompare(b.name);
   });
 
