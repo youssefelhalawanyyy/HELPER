@@ -46,6 +46,9 @@ public static class DevDeckMouse {
   public struct POINT { public int X; public int Y; }
 
   [DllImport("user32.dll")]
+  public static extern bool SetProcessDPIAware();
+
+  [DllImport("user32.dll")]
   public static extern bool GetCursorPos(out POINT p);
 
   [DllImport("user32.dll")]
@@ -63,6 +66,8 @@ public static class DevDeckMouse {
 }
 "@
 
+[DevDeckMouse]::SetProcessDPIAware() | Out-Null
+$inv = [System.Globalization.CultureInfo]::InvariantCulture
 $rx = 0.0
 $ry = 0.0
 $lastSuccess = Get-Date
@@ -77,8 +82,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 
     if ($cmd -eq 'M' -or $cmd -eq 'G') {
       if ($parts.Length -lt 3) { continue }
-      $dx = [double]$parts[1] + $rx
-      $dy = [double]$parts[2] + $ry
+      $dx = [double]::Parse($parts[1], $inv) + $rx
+      $dy = [double]::Parse($parts[2], $inv) + $ry
       $ix = [int][Math]::Truncate($dx)
       $iy = [int][Math]::Truncate($dy)
       $rx = $dx - $ix
@@ -88,6 +93,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         [DevDeckMouse]::GetCursorPos([ref]$pt) | Out-Null
         [DevDeckMouse]::SetCursorPos($pt.X + $ix, $pt.Y + $iy) | Out-Null
         $lastSuccess = Get-Date
+        $crashCount = 0
       }
     } elseif ($cmd -eq 'C') {
       $btn = if ($parts.Length -ge 2) { $parts[1] } else { 'L' }

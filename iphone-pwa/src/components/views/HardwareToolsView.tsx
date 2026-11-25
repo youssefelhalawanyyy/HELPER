@@ -18,6 +18,8 @@ import {
   LayoutGrid,
   Loader2,
   Lock,
+  Maximize2,
+  Minimize2,
   MousePointer2,
   Play,
   Presentation,
@@ -129,12 +131,30 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const lastSendRef = useRef(0);
   const faceDownTriggeredRef = useRef(false);
 
-  // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger inertia scroll + drag lock)
+  // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger inertia scroll + double-tap drag + edge scroll + Air Mouse)
   const [padPreset, setPadPreset] = useState<TrackpadPreset>('macbook');
   const [dragLock, setDragLock] = useState(false);
-  const gesture = useRef({ mode: 'pending', span: 0, x: 0, y: 0 });
+  const [padExpanded, setPadExpanded] = useState(false);
+  const [airMouseActive, setAirMouseActive] = useState(false);
+  const [touchVisual, setTouchVisual] = useState<{
+    active: boolean;
+    xPct: number;
+    yPct: number;
+    mode: 'move' | 'scroll' | 'drag' | 'air';
+  }>({ active: false, xPct: 50, yPct: 50, mode: 'move' });
+
+  const gesture = useRef<{ mode: 'pending' | 'scroll' | 'edge-scroll' | 'zoom' | 'spaces' | 'done'; span: number; x: number; y: number }>({
+    mode: 'pending',
+    span: 0,
+    x: 0,
+    y: 0,
+  });
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const twoFingerRef = useRef(false);
+  const maxFingersRef = useRef(1);
+  const lastSingleTapTsRef = useRef(0);
+  const tempTapDragRef = useRef(false);
+  const clickFreezeUntilRef = useRef(0);
+  const airPausedByTouchRef = useRef(false);
   const padFilterX = useRef(new OneEuro1D());
   const padFilterY = useRef(new OneEuro1D());
   const padLastTsRef = useRef(0);
@@ -145,6 +165,22 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const padMovedDistRef = useRef(0);
   const padRafRef = useRef<number | null>(null);
   const padActiveRef = useRef(false);
+
+  const handleAirReticleMove = useCallback((normX: number, normY: number) => {
+    setTouchVisual({
+      active: true,
+      xPct: Math.round(50 + normX * 38),
+      yPct: Math.round(50 + normY * 34),
+      mode: 'air',
+    });
+  }, []);
+
+  const performStabilizedClick = (button: 'left' | 'right') => {
+    // Freeze gyro cursor for 150ms so thumb click pressure never nudges cursor off target
+    clickFreezeUntilRef.current = performance.now() + 150;
+    soundEngine.playClick();
+    deck.sendEvent({ type: 'trackpad:click', payload: { button } });
+  };
 
   const fireShortcut = (shortcutId: string) => {
     soundEngine.playDetent();
@@ -253,87 +289,116 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const dialAccent =
     dialMode === 'volume' ? '#fbbf24' : dialMode === 'brightness' ? '#22d3ee' : '#a78bfa';
 
-  // --- Wireless Trackpad + Presentation Remote Mode ---
+  // --- Wireless Pro Glass Trackpad + Air Mouse + Presentation Remote ---
   if (subTab === 'remote') {
     return (
-      <div className="screen-grid layout-trackpad">
-        {/* Left: Smooth Multi-Touch Wireless Trackpad */}
-        <div className="tile flex flex-col gap-2 p-3">
-          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <MousePointer2 className="h-4 w-4 text-[#22d3ee]" />
-              <span className="disp text-[22px]">Trackpad</span>
+      <div className="screen-grid layout-trackpad" data-expanded={padExpanded ? 'true' : 'false'}>
+        {/* Left / Full: Precision Multi-Touch Glass Trackpad & Air Mouse */}
+        <div className="tile flex min-h-0 flex-col gap-2 p-3">
+          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#88f1d1]" />
+
+          {/* Header Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
+            <div className="flex items-center gap-2">
+              <MousePointer2 className="h-4 w-4 text-[#88f1d1]" />
+              <span className="disp text-[20px]">Pro Trackpad</span>
+              {airMouseActive && (
+                <span className="font-mono-tech rounded-full bg-[#88f1d1]/18 px-2 py-0.5 text-[8px] font-extrabold text-[#88f1d1]">
+                  GYRO 60HZ
+                </span>
+              )}
             </div>
+
             <div className="flex items-center gap-1">
-              {(
-                [
-                  ['smooth', 'Smooth'],
-                  ['macbook', 'MacBook'],
-                  ['turbo', 'Turbo'],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setPadPreset(id);
-                  }}
-                  className="rounded-full px-2 py-0.5 text-console-micro font-extrabold uppercase"
-                  style={{
-                    background: padPreset === id ? '#22d3ee' : 'rgba(255,255,255,0.06)',
-                    color: padPreset === id ? '#041317' : '#7c8190',
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+              <div className="flex rounded-xl border border-[#98c8ce29] bg-[#0a151c] p-0.5">
+                {(
+                  [
+                    ['smooth', 'Precision'],
+                    ['macbook', 'MacBook'],
+                    ['turbo', 'Turbo'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      setPadPreset(id);
+                    }}
+                    className="rounded-lg px-2 py-0.5 text-console-micro font-extrabold uppercase transition-colors"
+                    style={{
+                      background: padPreset === id ? '#153137' : 'transparent',
+                      color: padPreset === id ? '#88f1d1' : '#9cb4bb',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                aria-label={padExpanded ? 'Show Controller & Slides' : 'Expand Trackpad full screen'}
+                aria-pressed={padExpanded}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setPadExpanded((v) => !v);
+                }}
+                className="grid h-7 w-7 place-items-center rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] text-[#effaf7]"
+              >
+                {padExpanded ? (
+                  <Minimize2 aria-hidden="true" className="h-3.5 w-3.5 text-[#88f1d1]" />
+                ) : (
+                  <Maximize2 aria-hidden="true" className="h-3.5 w-3.5" />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
                   soundEngine.playClick();
                   setSubTab('controls');
                 }}
-                className="ml-1 flex items-center gap-1 rounded-full bg-white/[0.08] px-2.5 py-1 text-console-caption font-bold text-zinc-200"
+                className="flex h-7 items-center gap-1 rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] px-2.5 text-console-caption font-bold text-[#effaf7]"
               >
-                <Sliders className="h-3 w-3 text-[#fbbf24]" />
-                Dial
+                <Sliders className="h-3 w-3 text-[#88f1d1]" />
+                Tools
               </button>
             </div>
           </div>
 
-          <TrackpadAccessories deck={deck} />
+          <TrackpadAccessories
+            deck={deck}
+            airActive={airMouseActive}
+            onAirActiveChange={(on) => {
+              setAirMouseActive(on);
+              if (!on) setTouchVisual((v) => ({ ...v, active: false }));
+            }}
+            onAirReticleMove={handleAirReticleMove}
+            clickFreezeUntilRef={clickFreezeUntilRef}
+            airPausedRef={airPausedByTouchRef}
+          />
+
+          {/* Tactile Glass Surface + Dedicated Right-Edge 1-Finger Scroll Strip */}
           <div
             data-no-swipe="true"
             onPointerDown={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
               e.currentTarget.setPointerCapture(e.pointerId);
               pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+              airPausedByTouchRef.current = true;
+
+              const count = pointersRef.current.size;
+              maxFingersRef.current = Math.max(maxFingersRef.current, count);
+              const relX = e.clientX - rect.left;
+              const relY = e.clientY - rect.top;
+              const inRightScrollStrip = count === 1 && !dragLock && relX >= rect.width - 30;
 
               const fingers = Array.from(pointersRef.current.values());
-              if (fingers.length === 1) {
-                gesture.current.mode = 'pending';
+              if (count === 1) {
+                maxFingersRef.current = 1;
                 if (padRafRef.current !== null) cancelAnimationFrame(padRafRef.current);
                 padRafRef.current = null;
-              }
-              if (fingers.length === 2) {
-                const [a, b] = fingers;
-                gesture.current = {
-                  mode: 'pending',
-                  span: Math.hypot(a.x - b.x, a.y - b.y),
-                  x: (a.x + b.x) / 2,
-                  y: (a.y + b.y) / 2,
-                };
-              }
-              if (fingers.length === 3) {
-                gesture.current.mode = 'spaces';
-                gesture.current.x = fingers.reduce((sum, p) => sum + p.x, 0) / 3;
-                padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
-              }
-              if (pointersRef.current.size >= 2) {
-                twoFingerRef.current = true;
-              } else {
-                twoFingerRef.current = false;
                 padMovedDistRef.current = 0;
                 padFilterX.current.reset();
                 padFilterY.current.reset();
@@ -341,7 +406,53 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 padEmaVelRef.current = { vx: 0, vy: 0 };
                 padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
                 padLastTsRef.current = performance.now();
+
+                // Check double-tap-and-hold drag (tap then press within 260ms)
+                const now = performance.now();
+                if (!inRightScrollStrip && now - lastSingleTapTsRef.current < 260) {
+                  tempTapDragRef.current = true;
+                  deck.sendEvent({ type: 'trackpad:drag', payload: { down: true } });
+                }
+
+                gesture.current = {
+                  mode: inRightScrollStrip ? 'edge-scroll' : 'pending',
+                  span: 0,
+                  x: e.clientX,
+                  y: e.clientY,
+                };
+              } else if (count === 2) {
+                if (tempTapDragRef.current) {
+                  tempTapDragRef.current = false;
+                  deck.sendEvent({ type: 'trackpad:drag', payload: { down: false } });
+                }
+                const [a, b] = fingers;
+                gesture.current = {
+                  mode: 'pending',
+                  span: Math.hypot(a.x - b.x, a.y - b.y),
+                  x: (a.x + b.x) / 2,
+                  y: (a.y + b.y) / 2,
+                };
+              } else if (count >= 3) {
+                gesture.current = {
+                  mode: 'spaces',
+                  span: 0,
+                  x: fingers.reduce((sum, p) => sum + p.x, 0) / fingers.length,
+                  y: fingers.reduce((sum, p) => sum + p.y, 0) / fingers.length,
+                };
+                padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
               }
+
+              setTouchVisual({
+                active: true,
+                xPct: Math.max(4, Math.min(96, Math.round((relX / Math.max(1, rect.width)) * 100))),
+                yPct: Math.max(6, Math.min(94, Math.round((relY / Math.max(1, rect.height)) * 100))),
+                mode:
+                  inRightScrollStrip || count >= 2
+                    ? 'scroll'
+                    : dragLock || tempTapDragRef.current
+                      ? 'drag'
+                      : 'move',
+              });
 
               padActiveRef.current = true;
 
@@ -367,7 +478,11 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   if (Math.abs(outX) >= 0.15 || Math.abs(outY) >= 0.15) {
                     deck.sendEvent({
                       type: 'trackpad:move',
-                      payload: { dx: outX, dy: outY, drag: dragLock },
+                      payload: {
+                        dx: outX,
+                        dy: outY,
+                        drag: dragLock || tempTapDragRef.current,
+                      },
                     });
                   }
                 }
@@ -379,38 +494,74 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const prev = pointersRef.current.get(e.pointerId);
               if (!prev) return;
 
+              const rect = e.currentTarget.getBoundingClientRect();
               const rawDx = e.clientX - prev.x;
               const rawDy = e.clientY - prev.y;
               pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
               const dist = Math.hypot(rawDx, rawDy);
               padMovedDistRef.current += dist;
 
+              setTouchVisual((v) => ({
+                ...v,
+                active: true,
+                xPct: Math.max(4, Math.min(96, Math.round(((e.clientX - rect.left) / Math.max(1, rect.width)) * 100))),
+                yPct: Math.max(6, Math.min(94, Math.round(((e.clientY - rect.top) / Math.max(1, rect.height)) * 100))),
+              }));
+
               const fingers = Array.from(pointersRef.current.values());
               const g = gesture.current;
+
+              // 3-Finger Desktop Switch (Left/Right) & Mission Control / Task View (Up)
               if (g.mode === 'spaces' || g.mode === 'done') {
-                if (fingers.length === 3 && g.mode === 'spaces') {
-                  const distance = fingers.reduce((sum, p) => sum + p.x, 0) / 3 - g.x;
-                  if (Math.abs(distance) > 55) {
+                if (fingers.length >= 3 && g.mode === 'spaces') {
+                  const avgX = fingers.reduce((sum, p) => sum + p.x, 0) / fingers.length;
+                  const avgY = fingers.reduce((sum, p) => sum + p.y, 0) / fingers.length;
+                  const dx3 = avgX - g.x;
+                  const dy3 = avgY - g.y;
+                  if (dy3 < -52 && Math.abs(dy3) > Math.abs(dx3)) {
+                    soundEngine.playDetent();
                     deck.sendEvent({
                       type: 'shortcut:trigger',
-                      payload: { shortcutId: distance < 0 ? 'space.next' : 'space.prev' },
+                      payload: { shortcutId: 'nav.missionControl' },
+                    });
+                    g.mode = 'done';
+                  } else if (Math.abs(dx3) > 52) {
+                    soundEngine.playDetent();
+                    deck.sendEvent({
+                      type: 'shortcut:trigger',
+                      payload: { shortcutId: dx3 < 0 ? 'space.next' : 'space.prev' },
                     });
                     g.mode = 'done';
                   }
                 }
                 return;
               }
+
+              // Right-edge 1-finger precision scroll strip
+              if (g.mode === 'edge-scroll') {
+                const sdy = -rawDy * 2.1;
+                padPendingRef.current.sy += sdy;
+                padScrollVelRef.current = {
+                  vx: 0,
+                  vy: padScrollVelRef.current.vy * 0.45 + sdy * 0.55,
+                };
+                return;
+              }
+
+              // 2-Finger Scroll & Pinch Zoom
               if (fingers.length === 2) {
                 const [a, b] = fingers;
-                const span = Math.hypot(a.x - b.x, a.y - b.y),
-                  delta = span - g.span;
+                const span = Math.hypot(a.x - b.x, a.y - b.y);
+                const delta = span - g.span;
                 if (g.mode === 'pending') {
-                  if (Math.abs(delta) > 15) g.mode = 'zoom';
-                  else if (Math.hypot((a.x + b.x) / 2 - g.x, (a.y + b.y) / 2 - g.y) > 9) g.mode = 'scroll';
-                  else return;
+                  if (Math.abs(delta) > 16) g.mode = 'zoom';
+                  else if (Math.hypot((a.x + b.x) / 2 - g.x, (a.y + b.y) / 2 - g.y) > 8) {
+                    g.mode = 'scroll';
+                    setTouchVisual((v) => ({ ...v, mode: 'scroll' }));
+                  } else return;
                 }
                 if (g.mode === 'zoom') {
-                  if (Math.abs(delta) > 23) {
+                  if (Math.abs(delta) > 22) {
                     deck.sendEvent({
                       type: 'shortcut:trigger',
                       payload: { shortcutId: delta > 0 ? 'zoom.in' : 'zoom.out' },
@@ -419,11 +570,13 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   }
                   return;
                 }
-              } else if (twoFingerRef.current) return;
-              // Two-finger smooth scroll with momentum velocity capture
+              } else if (maxFingersRef.current >= 2) {
+                return;
+              }
+
               if (pointersRef.current.size >= 2) {
                 const sdx = rawDx * 1.45;
-                const sdy = rawDy * 1.7;
+                const sdy = rawDy * 1.75;
                 padPendingRef.current.sx += sdx;
                 padPendingRef.current.sy += sdy;
                 padScrollVelRef.current = {
@@ -440,28 +593,24 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const dt = Math.max(0.004, Math.min(0.05, (now - padLastTsRef.current) / 1000));
               padLastTsRef.current = now;
 
-              // Stage 1: Outlier digitizer spike clamp (prevents sudden cursor jumps)
-              const maxJump = 68;
+              const maxJump = 72;
               const clampedDx = Math.max(-maxJump, Math.min(maxJump, rawDx));
               const clampedDy = Math.max(-maxJump, Math.min(maxJump, rawDy));
 
-              // Stage 2: One-Euro Adaptive Filter (faster, silkier laptop-grade response)
               const cfg =
                 padPreset === 'smooth'
                   ? { minCutoff: 1.5, beta: 0.065, baseGain: 1.45, accel: 0.58, maxGain: 5.2, ema: 0.58 }
                   : padPreset === 'turbo'
-                    ? { minCutoff: 4.2, beta: 0.22, baseGain: 2.35, accel: 0.95, maxGain: 9.5, ema: 0.82 }
-                    : { minCutoff: 2.8, beta: 0.14, baseGain: 1.85, accel: 0.78, maxGain: 7.4, ema: 0.72 };
+                    ? { minCutoff: 4.2, beta: 0.22, baseGain: 2.4, accel: 0.96, maxGain: 9.8, ema: 0.84 }
+                    : { minCutoff: 2.8, beta: 0.14, baseGain: 1.9, accel: 0.8, maxGain: 7.6, ema: 0.74 };
 
               const fx = padFilterX.current.filter(clampedDx, dt, cfg.minCutoff, cfg.beta);
               const fy = padFilterY.current.filter(clampedDy, dt, cfg.minCutoff, cfg.beta);
 
-              // Stage 3: Velocity-Adaptive EMA Polish (removes 60Hz stair-stepping)
               const px = cfg.ema * fx + (1 - cfg.ema) * padEmaVelRef.current.vx;
               const py = cfg.ema * fy + (1 - cfg.ema) * padEmaVelRef.current.vy;
               padEmaVelRef.current = { vx: px, vy: py };
 
-              // Stage 4: MacBook Pro ballistic velocity acceleration curve
               const velocityPxPerSec = Math.hypot(px, py) / dt;
               const speedNorm = Math.min(30, velocityPxPerSec / 90);
               const gain = Math.min(cfg.maxGain, cfg.baseGain + Math.pow(speedNorm, 1.2) * cfg.accel);
@@ -473,38 +622,56 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               pointersRef.current.delete(e.pointerId);
               if (pointersRef.current.size === 0) {
                 padActiveRef.current = false;
+                airPausedByTouchRef.current = false;
                 if (padRafRef.current) {
                   cancelAnimationFrame(padRafRef.current);
                   padRafRef.current = null;
                 }
-                if (padMovedDistRef.current < 8 && gesture.current.mode === 'pending') {
-                  soundEngine.playClick();
-                  deck.sendEvent({
-                    type: 'trackpad:click',
-                    payload: { button: twoFingerRef.current ? 'right' : 'left' },
-                  });
-                } else if (gesture.current.mode === 'scroll') {
-                  // Smooth MacBook-style 2-finger inertia scroll glide on release
-                  let { vx, vy } = padScrollVelRef.current;
-                  const glide = () => {
-                    if (padActiveRef.current || (Math.abs(vx) < 0.7 && Math.abs(vy) < 0.7)) {
-                      padRafRef.current = null;
-                      return;
+
+                if (tempTapDragRef.current) {
+                  tempTapDragRef.current = false;
+                  deck.sendEvent({ type: 'trackpad:drag', payload: { down: false } });
+                } else {
+                  const wasTwoFinger = maxFingersRef.current === 2;
+                  const tapThreshold = wasTwoFinger ? 18 : 9;
+                  if (
+                    maxFingersRef.current <= 2 &&
+                    padMovedDistRef.current < tapThreshold &&
+                    gesture.current.mode === 'pending'
+                  ) {
+                    if (!wasTwoFinger) {
+                      lastSingleTapTsRef.current = performance.now();
                     }
-                    deck.sendEvent({
-                      type: 'trackpad:scroll',
-                      payload: { dx: Math.round(vx), dy: Math.round(vy) },
-                    });
-                    vx *= 0.84;
-                    vy *= 0.84;
-                    padRafRef.current = requestAnimationFrame(glide);
-                  };
-                  if (Math.abs(vx) >= 1.5 || Math.abs(vy) >= 1.5) {
-                    padRafRef.current = requestAnimationFrame(glide);
+                    performStabilizedClick(wasTwoFinger ? 'right' : 'left');
+                  } else if (
+                    gesture.current.mode === 'scroll' ||
+                    gesture.current.mode === 'edge-scroll'
+                  ) {
+                    let { vx, vy } = padScrollVelRef.current;
+                    const glide = () => {
+                      if (padActiveRef.current || (Math.abs(vx) < 0.7 && Math.abs(vy) < 0.7)) {
+                        padRafRef.current = null;
+                        return;
+                      }
+                      deck.sendEvent({
+                        type: 'trackpad:scroll',
+                        payload: { dx: Math.round(vx), dy: Math.round(vy) },
+                      });
+                      vx *= 0.85;
+                      vy *= 0.85;
+                      padRafRef.current = requestAnimationFrame(glide);
+                    };
+                    if (Math.abs(vx) >= 1.5 || Math.abs(vy) >= 1.5) {
+                      padRafRef.current = requestAnimationFrame(glide);
+                    }
                   }
                 }
+
+                if (!airMouseActive) {
+                  setTouchVisual((v) => ({ ...v, active: false }));
+                }
                 padScrollVelRef.current = { vx: 0, vy: 0 };
-                twoFingerRef.current = false;
+                maxFingersRef.current = 1;
               }
             }}
             onPointerCancel={(e) => {
@@ -512,84 +679,150 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               pointersRef.current.delete(e.pointerId);
               if (pointersRef.current.size === 0) {
                 padActiveRef.current = false;
+                airPausedByTouchRef.current = false;
+                if (tempTapDragRef.current) {
+                  tempTapDragRef.current = false;
+                  deck.sendEvent({ type: 'trackpad:drag', payload: { down: false } });
+                }
+                if (!airMouseActive) setTouchVisual((v) => ({ ...v, active: false }));
+                maxFingersRef.current = 1;
               }
             }}
-            className="grid flex-1 touch-none place-items-center rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.09),rgba(0,0,0,0.88))]"
+            className="relative grid min-h-[120px] flex-1 touch-none select-none place-items-center overflow-hidden rounded-2xl border transition-colors"
+            style={{
+              borderColor: airMouseActive
+                ? '#88f1d188'
+                : dragLock
+                  ? '#fbbf2488'
+                  : '#98c8ce2e',
+              background:
+                'radial-gradient(ellipse at 50% 35%, rgba(35,85,85,0.34), rgba(9,19,25,0.96) 72%)',
+            }}
           >
-            <div className="pointer-events-none text-center">
-              <div className="sub">
-                Move & tap · Two fingers to scroll, pinch or right-click · Three to switch desktops
+            {/* Subtle Precision Corner Reticle Marks */}
+            <span className="pointer-events-none absolute top-2.5 left-2.5 h-3 w-3 border-t border-l border-[#88f1d1]/30" />
+            <span className="pointer-events-none absolute top-2.5 right-9 h-3 w-3 border-t border-r border-[#88f1d1]/30" />
+            <span className="pointer-events-none absolute bottom-2.5 left-2.5 h-3 w-3 border-b border-l border-[#88f1d1]/30" />
+            <span className="pointer-events-none absolute right-9 bottom-2.5 h-3 w-3 border-r border-b border-[#88f1d1]/30" />
+
+            {/* Live Touch / Air-Gyro Halo Reticle */}
+            {touchVisual.active && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150"
+                style={{
+                  left: `${touchVisual.xPct}%`,
+                  top: `${touchVisual.yPct}%`,
+                  width: touchVisual.mode === 'scroll' ? 38 : 30,
+                  height: touchVisual.mode === 'scroll' ? 38 : 30,
+                  border: `1.5px solid ${
+                    touchVisual.mode === 'drag'
+                      ? '#fbbf24'
+                      : touchVisual.mode === 'scroll'
+                        ? '#7dd3fc'
+                        : '#88f1d1'
+                  }`,
+                  background:
+                    touchVisual.mode === 'drag'
+                      ? 'rgba(251,191,36,0.14)'
+                      : 'rgba(136,241,209,0.12)',
+                  boxShadow: `0 0 18px ${
+                    touchVisual.mode === 'drag' ? 'rgba(251,191,36,0.35)' : 'rgba(136,241,209,0.35)'
+                  }`,
+                }}
+              />
+            )}
+
+            {/* Center Watermark Guidance */}
+            <div className="pointer-events-none px-8 text-center">
+              <div className="text-[10.5px] font-bold tracking-wide text-[#effaf7]/75 uppercase">
+                {airMouseActive
+                  ? 'Air Mouse Live · Wave iPhone to move · Tap pad to click'
+                  : dragLock
+                    ? 'Drag Lock Active · Slide to move window or select text'
+                    : '1-Finger Move & Tap · Double-Tap Hold to Drag · 2-Finger Scroll / Right-Click'}
               </div>
-              <div className="mt-0.5 text-console-caption text-[#22d3ee]/70">
-                One-Euro Filter · 120Hz Native CoreGraphics Interpolation
+              <div className="mt-0.5 font-mono-tech text-[9px] text-[#9cb4bb]/80">
+                3-Finger Swipe: Spaces &amp; Mission Control · Right Edge: 1-Thumb Scroll
               </div>
+            </div>
+
+            {/* Dedicated Right-Edge 1-Finger Scroll Strip */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute top-2 right-1.5 bottom-2 flex w-5 flex-col items-center justify-between rounded-full border border-[#98c8ce24] bg-[#0d1d25]/80 py-2"
+            >
+              <span className="text-[7px] font-bold text-[#88f1d1]/70">▲</span>
+              <div className="flex flex-col gap-1.5">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <span key={i} className="h-[1px] w-2 bg-[#9cb4bb]/40" />
+                ))}
+              </div>
+              <span className="text-[7px] font-bold text-[#88f1d1]/70">▼</span>
             </div>
           </div>
 
+          {/* Ergonomic Tactile Mouse Buttons (Stabilized for Air Mouse!) */}
           <div className="grid grid-cols-3 gap-2">
             <motion.button
               type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({ type: 'trackpad:click', payload: { button: 'left' } });
-              }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-console-caption font-extrabold text-white"
+              whileTap={{ scale: 0.96 }}
+              onClick={() => performStabilizedClick('left')}
+              className="min-h-[38px] rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] py-2 text-console-caption font-extrabold text-[#effaf7]"
             >
               LEFT CLICK
             </motion.button>
             <motion.button
               type="button"
-              whileTap={{ scale: 0.95 }}
+              whileTap={{ scale: 0.96 }}
+              aria-pressed={dragLock}
               onClick={() => {
                 soundEngine.playClick();
                 const next = !dragLock;
                 setDragLock(next);
                 deck.sendEvent({ type: 'trackpad:drag', payload: { down: next } });
               }}
-              className="rounded-xl border py-2 text-console-caption font-extrabold"
+              className="min-h-[38px] rounded-xl border py-2 text-console-caption font-extrabold"
               style={{
-                background: dragLock ? 'rgba(52,211,153,0.22)' : 'rgba(255,255,255,0.06)',
-                borderColor: dragLock ? '#34d399' : 'rgba(255,255,255,0.1)',
-                color: dragLock ? '#34d399' : '#fbbf24',
+                background: dragLock ? 'rgba(251,191,36,0.2)' : '#bcfff20d',
+                borderColor: dragLock ? '#fbbf24' : '#b3e5df36',
+                color: dragLock ? '#fbbf24' : '#9cb4bb',
               }}
             >
-              {dragLock ? 'DRAGGING…' : 'DRAG HOLD'}
+              {dragLock ? 'DRAGGING…' : 'DRAG LOCK'}
             </motion.button>
             <motion.button
               type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                soundEngine.playClick();
-                deck.sendEvent({ type: 'trackpad:click', payload: { button: 'right' } });
-              }}
-              className="rounded-xl border border-white/10 bg-white/[0.06] py-2 text-console-caption font-extrabold text-[#22d3ee]"
+              whileTap={{ scale: 0.96 }}
+              onClick={() => performStabilizedClick('right')}
+              className="min-h-[38px] rounded-xl border border-[#b3e5df36] bg-[#bcfff20d] py-2 text-console-caption font-extrabold text-[#88f1d1]"
             >
               RIGHT CLICK
             </motion.button>
           </div>
         </div>
 
-        {/* Right: Game-Controller Action Pad & Slide Clicker */}
+        {/* Right: Game-Controller Action Pad & Slide Clicker (Hidden when Full-Pad Expanded) */}
+        {!padExpanded && (
         <div className="tile flex min-h-0 flex-col justify-between gap-2 p-3">
-          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-gradient-to-r from-[#a78bfa] to-[#34d399]" />
+          <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#88f1d1]" />
 
           {/* Header Switcher: Controller vs Slide Clicker */}
           <div className="flex items-center justify-between gap-1.5">
-            <div className="flex rounded-full bg-black/75 p-0.5">
+            <div className="flex rounded-xl border border-[#98c8ce29] bg-[#0a151c] p-0.5">
               <button
                 type="button"
                 onClick={() => {
                   soundEngine.playClick();
                   setRemoteRightTab('controller');
                 }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
-                  background: remoteRightTab === 'controller' ? '#1f222c' : 'transparent',
-                  color: remoteRightTab === 'controller' ? '#a78bfa' : '#7c8190',
+                  background: remoteRightTab === 'controller' ? '#153137' : 'transparent',
+                  color: remoteRightTab === 'controller' ? '#88f1d1' : '#9cb4bb',
                 }}
               >
-                <Gamepad2 className="h-3 w-3" />
+                <Gamepad2 aria-hidden="true" className="h-3 w-3" />
                 Controller
               </button>
               <button
@@ -598,17 +831,17 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setRemoteRightTab('slides');
                 }}
-                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
-                  background: remoteRightTab === 'slides' ? '#1f222c' : 'transparent',
-                  color: remoteRightTab === 'slides' ? '#34d399' : '#7c8190',
+                  background: remoteRightTab === 'slides' ? '#153137' : 'transparent',
+                  color: remoteRightTab === 'slides' ? '#88f1d1' : '#9cb4bb',
                 }}
               >
-                <Presentation className="h-3 w-3" />
+                <Presentation aria-hidden="true" className="h-3 w-3" />
                 Slides
               </button>
             </div>
-            <span className="font-mono-tech text-console-micro text-zinc-500 uppercase">L1 / D-PAD</span>
+            <span className="font-mono-tech text-console-micro text-[#9cb4bb] uppercase">L1 / D-PAD</span>
           </div>
 
           {remoteRightTab === 'controller' ? (
@@ -831,6 +1064,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             </>
           )}
         </div>
+        )}
       </div>
     );
   }
