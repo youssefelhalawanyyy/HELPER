@@ -121,6 +121,46 @@ int main(void) {
                     CFRelease(scroll);
                 }
             }
+        } else if (cmd == 'A') {
+            // Instant <0.1ms absolute normalized position on primary display: A <nx> <ny> <action: M|L|R|D>
+            double nx = 0.5, ny = 0.5;
+            char act = 'M';
+            if (sscanf(line + 1, "%lf %lf %c", &nx, &ny, &act) >= 2) {
+                CGRect mainB = CGDisplayBounds(CGMainDisplayID());
+                double tx = CGRectGetMinX(mainB) + clamp_d(nx, 0.0, 1.0) * (CGRectGetWidth(mainB) - 1.0);
+                double ty = CGRectGetMinY(mainB) + clamp_d(ny, 0.0, 1.0) * (CGRectGetHeight(mainB) - 1.0);
+                CGPoint pt = CGPointMake(tx, ty);
+                curX = tx;
+                curY = ty;
+                lastMoveTs = now_ms();
+
+                CGEventRef mv = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, pt, kCGMouseButtonLeft);
+                if (mv) { CGEventPost(kCGHIDEventTap, mv); CFRelease(mv); }
+
+                if (act == 'L' || act == 'D') {
+                    int clicks = (act == 'D') ? 2 : 1;
+                    for (int c = 1; c <= clicks; c++) {
+                        CGEventRef down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, pt, kCGMouseButtonLeft);
+                        CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, pt, kCGMouseButtonLeft);
+                        if (down) {
+                            CGEventSetIntegerValueField(down, kCGMouseEventClickState, c);
+                            CGEventPost(kCGHIDEventTap, down);
+                            CFRelease(down);
+                        }
+                        if (up) {
+                            CGEventSetIntegerValueField(up, kCGMouseEventClickState, c);
+                            CGEventPost(kCGHIDEventTap, up);
+                            CFRelease(up);
+                        }
+                        if (c < clicks) usleep(18000);
+                    }
+                } else if (act == 'R') {
+                    CGEventRef down = CGEventCreateMouseEvent(NULL, kCGEventRightMouseDown, pt, kCGMouseButtonRight);
+                    CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventRightMouseUp, pt, kCGMouseButtonRight);
+                    if (down) { CGEventPost(kCGHIDEventTap, down); CFRelease(down); }
+                    if (up) { CGEventPost(kCGHIDEventTap, up); CFRelease(up); }
+                }
+            }
         } else if (cmd == 'K') {
             // Instant <0.1ms native CoreGraphics key press: K <keyCode> <modMask>
             // modMask: 1=Cmd, 2=Shift, 4=Alt/Option, 8=Ctrl

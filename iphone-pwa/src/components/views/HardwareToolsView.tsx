@@ -1,6 +1,7 @@
 'use client';
 
 import { TrackpadAccessories } from './TrackpadAccessories';
+import { LiveScreenPreview } from './LiveScreenPreview';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -120,7 +121,7 @@ const SNAP_OPTIONS: Array<{ id: WindowSnapPosition; label: string }> = [
 
 export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const [subTab, setSubTab] = useState<HardwareTab>('remote');
-  const [remoteRightTab, setRemoteRightTab] = useState<'controller' | 'slides'>('controller');
+  const [remoteRightTab, setRemoteRightTab] = useState<'controller' | 'slides' | 'preview'>('controller');
   const [dialMode, setDialMode] = useState<DialMode>('volume');
   const [dialVal, setDialVal] = useState(deck.mediaState.volume);
   const [uploadingScan, setUploadingScan] = useState(false);
@@ -146,8 +147,6 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   useEffect(() => {
     if (!screenPeekOn || deck.status !== 'connected') return;
     setScreenPeekTick(Date.now());
-    const id = window.setInterval(() => setScreenPeekTick(Date.now()), 850);
-    return () => window.clearInterval(id);
   }, [screenPeekOn, deck.status]);
 
   const sendSpecialKey = (
@@ -849,13 +848,13 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 'radial-gradient(ellipse at 50% 35%, rgba(35,85,85,0.34), rgba(9,19,25,0.96) 72%)',
             }}
           >
-            {/* Live Mini Screen Peek Overlay inside Trackpad Glass */}
+            {/* Live Mini Screen Peek Overlay inside Trackpad Glass (Hardware MJPEG Stream) */}
             {screenPeekOn && deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token && (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
-                src={`${deck.bridgeBaseUrl}/api/screen/peek?w=720&token=${encodeURIComponent(deck.pairing.token)}&t=${screenPeekTick}`}
+                src={`${deck.bridgeBaseUrl}/api/screen/stream?q=turbo&token=${encodeURIComponent(deck.pairing.token)}&s=${screenPeekTick}`}
                 alt="Live desktop screen peek"
-                className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-60"
+                className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-65"
               />
             )}
 
@@ -967,7 +966,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
         <div className="tile flex min-h-0 flex-col justify-between gap-2 p-3">
           <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#88f1d1]" />
 
-          {/* Header Switcher: Controller vs Slide Clicker */}
+          {/* Header Switcher: Controller vs Slides vs Live Screen Preview */}
           <div className="flex items-center justify-between gap-1.5">
             <div className="flex rounded-xl border border-[#98c8ce29] bg-[#0a151c] p-0.5">
               <button
@@ -976,7 +975,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setRemoteRightTab('controller');
                 }}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
                   background: remoteRightTab === 'controller' ? '#153137' : 'transparent',
                   color: remoteRightTab === 'controller' ? '#88f1d1' : '#9cb4bb',
@@ -991,7 +990,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   soundEngine.playClick();
                   setRemoteRightTab('slides');
                 }}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-console-micro font-extrabold uppercase"
+                className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-console-micro font-extrabold uppercase"
                 style={{
                   background: remoteRightTab === 'slides' ? '#153137' : 'transparent',
                   color: remoteRightTab === 'slides' ? '#88f1d1' : '#9cb4bb',
@@ -1000,11 +999,30 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 <Presentation aria-hidden="true" className="h-3 w-3" />
                 Slides
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setRemoteRightTab('preview');
+                }}
+                className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-console-micro font-extrabold uppercase"
+                style={{
+                  background: remoteRightTab === 'preview' ? '#153137' : 'transparent',
+                  color: remoteRightTab === 'preview' ? '#88f1d1' : '#9cb4bb',
+                }}
+              >
+                <Monitor aria-hidden="true" className="h-3 w-3" />
+                Preview
+              </button>
             </div>
-            <span className="font-mono-tech text-console-micro text-[#9cb4bb] uppercase">L1 / D-PAD</span>
+            <span className="font-mono-tech text-console-micro text-[#9cb4bb] uppercase">
+              {remoteRightTab === 'preview' ? 'LIVE HD' : remoteRightTab === 'slides' ? 'DECK' : 'L1 / D-PAD'}
+            </span>
           </div>
 
-          {remoteRightTab === 'controller' ? (
+          {remoteRightTab === 'preview' ? (
+            <LiveScreenPreview deck={deck} onShortcut={fireShortcut} />
+          ) : remoteRightTab === 'controller' ? (
             <div className="flex min-h-0 flex-1 flex-col justify-between gap-1.5">
               {/* Top Shoulder Bumpers (Back / Forward / Switch App / Mission Control) */}
               <div className="grid grid-cols-4 gap-1">

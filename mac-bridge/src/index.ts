@@ -36,6 +36,7 @@ import {
   clickMacCursor,
   focusMacApp,
   moveMacCursor,
+  moveMacCursorAbsolute,
   scrollMacSmooth,
   sendPresentationKey,
   setMacMouseDrag,
@@ -810,6 +811,11 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
 
     case 'trackpad:move': {
       void moveMacCursor(msg.payload.dx, msg.payload.dy, msg.payload.drag);
+      return;
+    }
+
+    case 'trackpad:abs': {
+      void moveMacCursorAbsolute(msg.payload.nx, msg.payload.ny, msg.payload.action || 'move');
       return;
     }
 

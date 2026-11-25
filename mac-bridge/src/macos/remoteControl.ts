@@ -281,6 +281,45 @@ export async function scrollMacSmooth(dx: number, dy: number): Promise<void> {
   }
 }
 
+export async function moveMacCursorAbsolute(
+  nx: number,
+  ny: number,
+  action: 'move' | 'left' | 'right' | 'double' = 'move',
+): Promise<void> {
+  const cx = Math.max(0, Math.min(1, Number(nx) || 0));
+  const cy = Math.max(0, Math.min(1, Number(ny) || 0));
+  const code = action === 'left' ? 'L' : action === 'right' ? 'R' : action === 'double' ? 'D' : 'M';
+
+  if (IS_WIN) {
+    const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$x = [int]([Math]::Round($b.X + ${cx.toFixed(4)} * ($b.Width - 1)))
+$y = [int]([Math]::Round($b.Y + ${cy.toFixed(4)} * ($b.Height - 1)))
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+${
+  code !== 'M'
+    ? `Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern void mouse_event(int f, int dx, int dy, int d, int i);' -Name U32 -Namespace Win32
+${
+  code === 'R'
+    ? '[Win32.U32]::mouse_event(0x08,0,0,0,0); [Win32.U32]::mouse_event(0x10,0,0,0,0)'
+    : code === 'D'
+      ? '[Win32.U32]::mouse_event(0x02,0,0,0,0); [Win32.U32]::mouse_event(0x04,0,0,0,0); Start-Sleep -Milliseconds 30; [Win32.U32]::mouse_event(0x02,0,0,0,0); [Win32.U32]::mouse_event(0x04,0,0,0,0)'
+      : '[Win32.U32]::mouse_event(0x02,0,0,0,0); [Win32.U32]::mouse_event(0x04,0,0,0,0)'
+}`
+    : ''
+}
+`;
+    await runPowerShell(ps, 1500).catch(() => {});
+    return;
+  }
+
+  const daemon = await ensureMouseDaemon();
+  if (daemon?.stdin?.writable) {
+    daemon.stdin.write(`A ${cx.toFixed(5)} ${cy.toFixed(5)} ${code}\n`);
+  }
+}
+
 /**
  * Instant (<0.1ms) native CoreGraphics keyboard event via persistent mouse_daemon.
  * modMask: 1=Cmd, 2=Shift, 4=Option, 8=Ctrl

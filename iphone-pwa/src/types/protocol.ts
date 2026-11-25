@@ -681,6 +681,7 @@ export type ClientEvent =
   | { type: 'docker:refresh'; payload: { requestId: string } }
   | { type: 'app:focus'; payload: { requestId: string; appName: string } }
   | { type: 'trackpad:move'; payload: { dx: number; dy: number; drag?: boolean } }
+  | { type: 'trackpad:abs'; payload: { nx: number; ny: number; action?: 'move' | 'left' | 'right' | 'double' } }
   | { type: 'trackpad:click'; payload: { button: 'left' | 'right' } }
   | { type: 'trackpad:drag'; payload: { down: boolean } }
   | { type: 'trackpad:scroll'; payload: { dx: number; dy: number } }

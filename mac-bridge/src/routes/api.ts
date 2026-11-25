@@ -14,6 +14,11 @@ import {
   writeClipboardImageBase64,
 } from '../macos/hardware.js';
 import {
+  attachMjpegScreenStream,
+  getLatestCachedScreenFrame,
+  type ScreenQualityPreset,
+} from '../services/screenStreamService.js';
+import {
   type FileRootKey,
   listWorkspaceFiles,
   readWorkspaceTextFile,
@@ -551,13 +556,35 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     res.json({ ok, message: ok ? 'Image copied to computer clipboard' : 'Could not write image to clipboard' });
   });
 
-  // --- Live Mini Screen Peek (for Trackpad & Snap) ---
+  // --- Ultra-Fast Live MJPEG Screen Stream (Native CoreGraphics / Zero-Disk) ---
+  router.get('/screen/stream', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).end();
+      return;
+    }
+    const qRaw = String(req.query.q || 'turbo').toLowerCase();
+    const preset: ScreenQualityPreset =
+      qRaw === 'hd' ? 'hd' : qRaw === 'balanced' ? 'balanced' : 'turbo';
+    await attachMjpegScreenStream(res, preset);
+  });
+
+  // --- Live Mini Screen Peek (instant cached frame or single snapshot) ---
   router.get('/screen/peek', async (req, res) => {
     const token =
       (typeof req.query.token === 'string' ? req.query.token : '') ||
       (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
     if (token !== deps.auth.token) {
       res.status(401).end();
+      return;
+    }
+    const cached = getLatestCachedScreenFrame();
+    if (cached) {
+      res.setHeader('content-type', 'image/jpeg');
+      res.setHeader('cache-control', 'no-store');
+      res.send(cached);
       return;
     }
     const maxW = Number(req.query.w) || 720;
