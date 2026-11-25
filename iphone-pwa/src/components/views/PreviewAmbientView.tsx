@@ -62,9 +62,7 @@ export function PreviewAmbientView({
   const [showWeather, setShowWeather] = useState(true);
   const [showClipboard, setShowClipboard] = useState(true);
   const [nightModeManual, setNightModeManual] = useState(false);
-  const [nightBrightened, setNightBrightened] = useState(false);
-  const isLateNight = now ? now.getHours() >= 0 && now.getHours() < 6 : false;
-  const nightStandActive = (nightModeManual || isLateNight) && !nightBrightened;
+  const nightStandActive = nightModeManual;
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
   useEffect(() => {
     setNow(new Date());
@@ -191,43 +189,35 @@ export function PreviewAmbientView({
       className={styles.dashboard}
       style={{
         transform: `translate3d(${oledShift.x}px, ${oledShift.y}px, 0)`,
-        transition: 'transform 1.2s ease-in-out, filter 0.35s ease',
-        ...(nightStandActive
-          ? { filter: 'brightness(0.45) sepia(1) hue-rotate(-50deg) saturate(2.6)' }
-          : {}),
-      }}
-      onClick={() => {
-        if (nightStandActive) {
-          setNightBrightened(true);
-          window.setTimeout(() => setNightBrightened(false), 8000);
-        }
+        transition: 'transform 1.2s ease-in-out, opacity 0.35s ease',
+        opacity: nightStandActive ? 0.52 : 1,
       }}
     >
       <section className={styles.hero}>
-        <header>
-          <span className={styles.eyebrow}>
-            Desk Clock · OLED Safe
-            {deck.focusState.active ? ` · Focus ${formatTimer(deck.focusState.remainingSec)}` : ''}
+        <header className="flex items-center justify-between gap-2">
+          <span className={`${styles.eyebrow} whitespace-nowrap`}>
+            Desk Clock
+            {deck.focusState.active ? ` · ${formatTimer(deck.focusState.remainingSec)}` : ''}
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => {
-                setNightModeManual((v) => !v);
-                setNightBrightened(false);
-              }}
-              title="OLED Night Stand Mode (dim red/mint night clock)"
+              onClick={() => setNightModeManual((v) => !v)}
+              title="Toggle gentle OLED dim mode"
+              className="whitespace-nowrap !px-2.5 !py-1 !text-[11px]"
               style={{
-                opacity: nightModeManual || nightStandActive ? 1 : 0.55,
-                color: nightStandActive ? '#ff6b6b' : undefined,
+                opacity: nightStandActive ? 1 : 0.6,
+                borderColor: nightStandActive ? '#88f1d1' : undefined,
+                color: nightStandActive ? '#88f1d1' : undefined,
               }}
             >
-              {nightStandActive ? 'Night ON' : 'Night'}
+              {nightStandActive ? 'Dim ON' : 'Dim'}
             </button>
             <button
               type="button"
               onClick={() => setShowWeather((v) => !v)}
               title="Toggle Weather Widget"
+              className="whitespace-nowrap !px-2.5 !py-1 !text-[11px]"
               style={{ opacity: showWeather ? 1 : 0.45 }}
             >
               Weather
@@ -236,12 +226,16 @@ export function PreviewAmbientView({
               type="button"
               onClick={() => setShowClipboard((v) => !v)}
               title="Toggle Clipboard Widget"
+              className="whitespace-nowrap !px-2.5 !py-1 !text-[11px]"
               style={{ opacity: showClipboard ? 1 : 0.45 }}
             >
               Clips
             </button>
-            <button onClick={() => setMode('preview')}>
-              <Globe size={15} />
+            <button
+              onClick={() => setMode('preview')}
+              className="whitespace-nowrap !px-2.5 !py-1 !text-[11px]"
+            >
+              <Globe size={13} />
               Preview
             </button>
           </div>
