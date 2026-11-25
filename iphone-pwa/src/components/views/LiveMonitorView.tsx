@@ -1,5 +1,7 @@
 'use client';
 
+import { InstrumentGauge } from '@/components/shell/InstrumentGauge';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -15,7 +17,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { BrushedDial, GlowRing } from '@/components/shell/HardwarePrimitives';
+import { BrushedDial } from '@/components/shell/HardwarePrimitives';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { formatSpeed, makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
@@ -78,13 +80,23 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
 
   return (
     <div className="screen-grid layout-monitor">
-      {/* Column 1: Real Mac Telemetry Rings */}
+      {/* Column 1: Live telemetry */}
       <div className="tile flex min-h-0 flex-col justify-between gap-1.5 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
         <div className="disp text-[clamp(16px,2.2cqw,24px)]">Telemetry</div>
-        <div className="telemetry-gauges flex items-center justify-around">
-          <GlowRing value={isConnected ? deck.stats.cpuPct : 0} color="#22d3ee" label="CPU %" />
-          <GlowRing value={isConnected ? deck.stats.ramPct : 0} color="#f472b6" label="RAM %" />
+        <div className="telemetry-gauges flex items-center justify-around gap-2">
+          <InstrumentGauge
+            mode="tach"
+            label="CPU"
+            value={isConnected && deck.stats.ts ? deck.stats.cpuPct : null}
+            accent="#22d3ee"
+          />
+          <InstrumentGauge
+            mode="tach"
+            label="RAM"
+            value={isConnected && deck.stats.ts ? deck.stats.ramPct : null}
+            accent="#b4adf0"
+          />
         </div>
         <div className="telemetry-readings text-console-caption">
           <div className="num flex justify-between text-zinc-300">

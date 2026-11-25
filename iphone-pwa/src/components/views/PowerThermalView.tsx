@@ -1,5 +1,7 @@
 'use client';
 
+import { InstrumentGauge, batteryHeatScale, heatBand, processorHeatScale } from '@/components/shell/InstrumentGauge';
+
 import { HealthInsights } from './HealthInsights';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -7,9 +9,7 @@ import {
   BatteryCharging,
   Bell,
   Coffee,
-  Cpu,
   Fan,
-  Flame,
   Gauge,
   Lock,
   MonitorOff,
@@ -18,7 +18,6 @@ import {
   RefreshCw,
   RotateCw,
   ShieldAlert,
-  Thermometer,
   Zap,
 } from 'lucide-react';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
@@ -26,13 +25,6 @@ import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
 import { soundEngine } from '@/lib/soundEngine';
 import type { FanMode, PowerAction, PowerProfile } from '@/types/protocol';
-
-function tempColor(c: number | null): string {
-  if (c === null) return '#9ca3af';
-  if (c >= 85) return '#ff5d6c';
-  if (c >= 72) return '#fbbf24';
-  return '#34d399';
-}
 
 function pressureColor(p: string): string {
   if (p === 'Critical') return '#ff5d6c';
@@ -101,7 +93,11 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
 
   const battColor =
     p.batteryPct <= 20 ? '#ff5d6c' : p.isCharging ? '#34d399' : p.batteryPct >= 80 ? '#22d3ee' : '#fbbf24';
-  const battPct = Math.max(0, Math.min(100, p.batteryPct || 0));
+  const hasSample = isConnected && p.updatedAt > 0;
+  const processorScale = processorHeatScale(p.overheatTempC);
+  const cpuTemp = hasSample ? p.cpuTempC : null;
+  const gpuTemp = hasSample ? p.gpuTempC : null;
+  const batteryTemp = hasSample ? p.batteryTempC : null;
 
   return (
     <div className="screen-grid layout-power">
@@ -139,23 +135,24 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
           </div>
         </div>
 
-        {/* Battery Ring + Core Telemetry Grid */}
+        {/* Battery Car Gauge + Core Telemetry Grid */}
         <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-black/65 p-2">
-          <div
-            className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full"
-            style={{
-              background: `conic-gradient(${battColor} ${battPct * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
-            }}
-          >
-            <div className="grid h-11 w-11 place-items-center rounded-full bg-[#090b10] text-center leading-none">
-              <div className="num font-mono-tech flex items-center justify-center text-[13px] font-extrabold text-white">
-                {p.hasBattery ? `${battPct}%` : 'AC'}
-              </div>
-              <div className="text-[7px] font-bold text-zinc-400">
-                {p.isCharging ? '⚡ CHG' : p.acConnected ? 'AC' : formatMins(p.timeRemainingMin)}
-              </div>
-            </div>
-          </div>
+          <InstrumentGauge
+            className="instrument-summary"
+            mode="battery"
+            label="Battery"
+            value={hasSample && p.hasBattery ? p.batteryPct : null}
+            accent={battColor}
+            status={
+              hasSample
+                ? p.isCharging
+                  ? 'Charging'
+                  : p.acConnected || !p.hasBattery
+                    ? 'AC Power'
+                    : formatMins(p.timeRemainingMin)
+                : undefined
+            }
+          />
 
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-1">
             <div className="rounded-lg bg-white/[0.04] px-1.5 py-0.5">
@@ -179,19 +176,25 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
             <div className="rounded-lg bg-white/[0.04] px-1.5 py-0.5">
               <div className="text-[7.5px] text-zinc-400">CPU TEMP</div>
               <div
-                className="num font-mono-tech text-[10px] font-extrabold"
-                style={{ color: tempColor(p.cpuTempC) }}
+                className="num font-mono-tech flex items-center gap-1 text-[10px] font-extrabold"
+                style={{ color: heatBand(cpuTemp, processorScale).color }}
               >
-                {p.cpuTempC !== null ? `${p.cpuTempC}°C` : '--'}
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: heatBand(cpuTemp, processorScale).color }}
+                />
+                {cpuTemp !== null ? `${cpuTemp}°C` : '--'}
               </div>
             </div>
             <div className="rounded-lg bg-white/[0.04] px-1.5 py-0.5">
               <div className="text-[7.5px] text-zinc-400">GPU / BATT</div>
               <div className="num font-mono-tech truncate text-[10px] font-extrabold text-[#22d3ee]">
-                {p.gpuTempC !== null ? `${p.gpuTempC}°` : '--'}
+                <span style={{ color: heatBand(gpuTemp, processorScale).color }}>
+                  {gpuTemp !== null ? `${gpuTemp}°` : '--'}
+                </span>
                 <span className="text-zinc-500"> / </span>
-                <span style={{ color: tempColor(p.batteryTempC) }}>
-                  {p.batteryTempC !== null ? `${p.batteryTempC}°` : '--'}
+                <span style={{ color: heatBand(batteryTemp, batteryHeatScale).color }}>
+                  {batteryTemp !== null ? `${batteryTemp}°` : '--'}
                 </span>
               </div>
             </div>
@@ -390,37 +393,10 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               })}
             </div>
 
-            {/* Live Thermal Sensor Bars */}
-            <div className="space-y-1.5 rounded-xl border border-white/[0.07] bg-black/60 p-2">
-              {(
-                [
-                  { label: 'CPU Package', val: p.cpuTempC, max: 105, Icon: Cpu },
-                  { label: 'GPU / SoC', val: p.gpuTempC, max: 105, Icon: Flame },
-                  { label: 'Battery Cell', val: p.batteryTempC, max: 60, Icon: Thermometer },
-                ] as const
-              ).map(({ label, val, max, Icon }) => {
-                const pct = val !== null ? Math.min(100, Math.max(4, (val / max) * 100)) : 0;
-                const col = tempColor(val);
-                return (
-                  <div key={label} className="space-y-0.5">
-                    <div className="flex items-center justify-between text-[8.5px]">
-                      <span className="flex items-center gap-1 font-bold text-zinc-300">
-                        <Icon className="h-3 w-3 text-zinc-400" />
-                        {label}
-                      </span>
-                      <span className="num font-mono-tech font-extrabold" style={{ color: col }}>
-                        {val !== null ? `${val}°C` : '--'}
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.07]">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%`, background: col }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="thermal-gauge-cluster grid grid-cols-3 place-items-center gap-1.5 rounded-xl border border-white/[0.06] bg-black/55 px-1.5 py-1.5">
+              <InstrumentGauge label="CPU Temp" value={cpuTemp} max={120} unit="°C" heat={processorScale} />
+              <InstrumentGauge label="GPU / SoC" value={gpuTemp} max={120} unit="°C" heat={processorScale} />
+              <InstrumentGauge label="Batt Temp" value={batteryTemp} max={60} unit="°C" heat={batteryHeatScale} />
             </div>
           </div>
         )}

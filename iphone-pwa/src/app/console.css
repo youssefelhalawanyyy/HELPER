@@ -570,8 +570,17 @@
     padding: 3px 2px;
   }
   .telemetry-gauges > div {
-    width: 68px !important;
-    height: 68px !important;
+    max-width: 86px;
+  }
+  .thermal-gauge-cluster > div {
+    max-width: 96px;
+  }
+  .screen-grid .instrument-summary {
+    width: clamp(76px, 8.2vw, 92px);
+  }
+  .volume-panel [role='slider'] {
+    width: 96px !important;
+    height: 96px !important;
   }
   .console-nav {
     gap: 1px;
@@ -760,7 +769,6 @@
   .telemetry-gauges > div {
     width: min(42%, 134px);
     height: auto;
-    aspect-ratio: 1;
   }
 }
 @media (max-width: 760px) and (orientation: portrait) {
@@ -776,5 +784,16 @@
 @media (max-width: 760px) {
   .console-toast {
     bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+}
+
+.screen-grid .instrument-summary {
+  width: clamp(82px, 8.8vw, 110px);
+  flex: none;
+}
+
+@media (max-height: 550px) and (orientation: landscape) {
+  .screen-grid .instrument-summary {
+    width: clamp(76px, 8.2vw, 90px);
   }
 }

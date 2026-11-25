@@ -1,5 +1,7 @@
 'use client';
 
+import { InstrumentGauge } from '@/components/shell/InstrumentGauge';
+
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -169,7 +171,7 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
     deck.sendEvent({ type: 'network:wifiPassword', payload: { requestId: makeRequestId() } });
   };
 
-  const speedPct = Math.min(100, Math.max(6, ((net.downMbps || 0) / 250) * 100));
+  const speedMax = Math.max(250, Math.ceil((net.downMbps ?? 0) / 250) * 250);
 
   return (
     <div className="screen-grid layout-network">
@@ -209,25 +211,16 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
 
         {/* Speedometer Gauge + DL/UL/Ping/Jitter */}
         <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-black/70 p-2">
-          <div
-            className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full"
-            style={{
-              background: `conic-gradient(${accent} ${speedPct * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
-            }}
-          >
-            <div className="grid h-11 w-11 place-items-center rounded-full bg-[#090b10]">
-              {net.testingSpeed ? (
-                <Loader2 className="h-5 w-5 animate-spin text-[#22d3ee]" />
-              ) : (
-                <div className="text-center leading-none">
-                  <div className="num font-mono-tech text-[13px] font-extrabold text-white">
-                    {net.downMbps !== null ? Math.round(net.downMbps) : '--'}
-                  </div>
-                  <div className="text-console-micro font-bold text-zinc-400">Mbps</div>
-                </div>
-              )}
-            </div>
-          </div>
+          <InstrumentGauge
+            className="instrument-summary"
+            mode="speed"
+            label="Download"
+            unit="Mbps"
+            value={net.downMbps}
+            max={speedMax}
+            accent="#22d3ee"
+            status={net.testingSpeed ? 'Testing…' : undefined}
+          />
 
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-1">
             <div className="rounded-lg bg-white/[0.04] px-1.5 py-0.5">

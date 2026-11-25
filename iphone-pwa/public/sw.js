@@ -1,4 +1,4 @@
-const CACHE_NAME = 'devdeck-shell-v7';
+const CACHE_NAME = 'devdeck-shell-v8';
 const PRECACHE_URLS = [
   '/manifest.json',
   '/keepawake.mp4',

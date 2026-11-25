@@ -258,3 +258,11 @@
     }
   }
 }
+
+.cluster {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(4px, 1vw, 10px);
+  margin: 12px 0;
+}
+.cluster > div { width: 100%; justify-content: flex-start; }

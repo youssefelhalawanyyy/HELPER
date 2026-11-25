@@ -1,5 +1,7 @@
 'use client';
 
+import { InstrumentGauge, processorHeatScale } from '@/components/shell/InstrumentGauge';
+
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { DeskWeather } from './DeskWeather';
@@ -180,13 +182,31 @@ export function PreviewAmbientView({
           </h2>
           {!isConnected && <button onClick={onPair}>Pair desktop</button>}
         </header>
+        <div className={styles.cluster}>
+          <InstrumentGauge
+            mode="tach"
+            label="CPU load"
+            value={isConnected && deck.stats.ts ? deck.stats.cpuPct : null}
+            accent="#22d3ee"
+          />
+          <InstrumentGauge
+            label="CPU heat"
+            unit="°C"
+            max={120}
+            value={isConnected ? deck.powerState.cpuTempC : null}
+            heat={processorHeatScale(deck.powerState.overheatTempC)}
+          />
+          <InstrumentGauge
+            mode="battery"
+            label="Battery"
+            value={isConnected ? deck.stats.batteryPct : null}
+            accent="#34d399"
+          />
+        </div>
         <dl className={styles.readings}>
           {[
-            ['CPU', deck.stats.cpuPct, '%'],
             ['Memory', deck.stats.ramUsedGb, ' GB'],
             ['Disk used', deck.stats.diskPct, '%'],
-            ['Battery', deck.stats.batteryPct, '%'],
-            ['CPU temp', deck.powerState?.cpuTempC, '°C'],
             ['Power draw', deck.powerState?.powerDrawW, ' W'],
             ['Download', deck.stats.netRxKBs, ' KB/s'],
             ['Upload', deck.stats.netTxKBs, ' KB/s'],

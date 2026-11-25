@@ -1,5 +1,7 @@
 'use client';
 
+import { InstrumentGauge } from '@/components/shell/InstrumentGauge';
+
 import { HealthInsights } from './HealthInsights';
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -12,7 +14,6 @@ import {
   HardDrive,
   HeartPulse,
   KeyRound,
-  Loader2,
   MemoryStick,
   RefreshCw,
   ShieldAlert,
@@ -164,22 +165,15 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
 
         {/* Health Score + 4 Key Metrics */}
         <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/70 p-2">
-          <div
-            className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full"
-            style={{
-              background: `conic-gradient(${accent} ${Math.max(4, doc.score) * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
-            }}
-          >
-            <div className="grid h-11 w-11 place-items-center rounded-full bg-[#090b10]">
-              {busy ? (
-                <Loader2 className="h-5 w-5 animate-spin" style={{ color: accent }} />
-              ) : (
-                <span className="num font-mono-tech text-[15px] font-extrabold text-white">
-                  {doc.scannedAt ? doc.score : '--'}
-                </span>
-              )}
-            </div>
-          </div>
+          <InstrumentGauge
+            className="instrument-summary"
+            mode="health"
+            label="Health"
+            unit="/100"
+            value={doc.scannedAt ? doc.score : null}
+            accent={accent}
+            status={busy ? (doc.repairing ? 'Repairing…' : 'Scanning…') : undefined}
+          />
 
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-1">
             <div className="rounded-lg bg-white/[0.04] px-1.5 py-0.5">
