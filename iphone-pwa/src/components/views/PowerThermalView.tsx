@@ -649,6 +649,9 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
                     onChange={(e) => setUnlockPassword(e.target.value)}
                     placeholder="Computer login password (optional)…"
                     autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className="font-mono-tech h-7 w-full rounded-lg border border-[#88f1d1]/35 bg-[#071117] pr-7 pl-7 text-[10px] text-white outline-none focus:border-[#88f1d1]"
                   />
                   <button

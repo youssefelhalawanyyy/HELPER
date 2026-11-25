@@ -304,8 +304,8 @@ export async function wakeAndUnlockComputer(password?: string): Promise<string> 
     return IS_WIN ? 'Windows PC screen woken from sleep' : 'Mac display woken from sleep';
   }
 
-  // Wait briefly for the lock screen password field to wake and receive keyboard focus
-  await new Promise((r) => setTimeout(r, 700));
+  // Wait for the lock screen password field to wake and receive keyboard focus
+  await new Promise((r) => setTimeout(r, 900));
 
   if (IS_WIN) {
     // Escape SendKeys special characters: + ^ % ~ ( ) { } [ ]
@@ -313,32 +313,40 @@ export async function wakeAndUnlockComputer(password?: string): Promise<string> 
     const b64 = Buffer.from(escaped, 'utf8').toString('base64');
     const ps = `
 Add-Type -AssemblyName System.Windows.Forms
-[System.Windows.Forms.SendKeys]::SendWait(' ')
+[System.Windows.Forms.SendKeys]::SendWait('{ESC}')
 Start-Sleep -Milliseconds 550
+[System.Windows.Forms.SendKeys]::SendWait('^a{BACKSPACE}')
+Start-Sleep -Milliseconds 80
 $p = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}'))
 [System.Windows.Forms.SendKeys]::SendWait($p)
-Start-Sleep -Milliseconds 120
+Start-Sleep -Milliseconds 150
 [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 `;
-    await runPowerShell(ps, 4500).catch(() => {});
+    await runPowerShell(ps, 5000).catch(() => {});
     return 'Windows PC woken & unlock password submitted';
   }
 
-  // macOS: Pass password safely via AppleScript argv (never interpolated into script text!)
+  // macOS: Never press spacebar (key code 49) because it types a leading space into the focused password box!
+  // Instead: clear any leftover text (Cmd+A + Delete), type each character with a short lock-screen-safe cadence, then press Return.
   const script = `
 on run argv
   set pwd to item 1 of argv
   tell application "System Events"
-    key code 49
-    delay 0.35
-    keystroke pwd
-    delay 0.12
+    keystroke "a" using {command down}
+    delay 0.06
+    key code 51
+    delay 0.14
+    repeat with ch in characters of pwd
+      keystroke (ch as text)
+      delay 0.025
+    end repeat
+    delay 0.15
     key code 36
   end tell
 end run
 `;
   try {
-    await execFileAsync('osascript', ['-e', script, pwd], { timeout: 5000 });
+    await execFileAsync('osascript', ['-e', script, pwd], { timeout: 8000 });
     return 'Mac woken & unlock password submitted';
   } catch {
     return 'Mac display woken (grant Accessibility permission to Terminal for auto-password typing)';
