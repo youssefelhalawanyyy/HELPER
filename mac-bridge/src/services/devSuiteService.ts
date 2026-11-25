@@ -836,9 +836,9 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
     return raw;
   };
 
-  // Hedged parallel race: fire primary immediately (~1.0s), hedge with secondary at 1.1s so spikes never cause 20s waits!
+  // Hedged parallel race: fire primary immediately (~1.0s), hedge at 750ms & 1400ms so cold TLS or spikes never drop Turn 1!
   const controllers = NOUR_MODELS.map(() => new AbortController());
-  const globalTimer = setTimeout(() => controllers.forEach((c) => c.abort()), 5500);
+  const globalTimer = setTimeout(() => controllers.forEach((c) => c.abort()), 9000);
   let hedgeTimer1: NodeJS.Timeout | null = null;
   let hedgeTimer2: NodeJS.Timeout | null = null;
 
@@ -847,12 +847,12 @@ ${opts.liveContext || 'الجهاز شغال تمام.'}`;
     const p1 = new Promise<string>((resolve, reject) => {
       hedgeTimer1 = setTimeout(() => {
         callOneModel(NOUR_MODELS[1], controllers[1].signal).then(resolve, reject);
-      }, 1100);
+      }, 750);
     });
     const p2 = new Promise<string>((resolve, reject) => {
       hedgeTimer2 = setTimeout(() => {
         callOneModel(NOUR_MODELS[2], controllers[2].signal).then(resolve, reject);
-      }, 1700);
+      }, 1400);
     });
 
     const raw = await Promise.any([p0, p1, p2]);
