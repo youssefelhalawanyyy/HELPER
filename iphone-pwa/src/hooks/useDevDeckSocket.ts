@@ -326,7 +326,10 @@ export function useDevDeckSocket() {
     pingMs: null,
     ts: 0,
   });
-  const [caffeineActive, setCaffeineActive] = useState(false);
+  const [caffeineActive, setCaffeineActive] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('devdeck.caffeine.v1') === '1';
+  });
   const [processes, setProcesses] = useState<HeavyProcess[]>([]);
   const [docker, setDocker] = useState<{ available: boolean; containers: DockerContainer[] }>({
     available: false,
@@ -473,9 +476,29 @@ export function useDevDeckSocket() {
             case 'speedtest:state':
               setSpeedTest(msg.payload);
               break;
-            case 'caffeine:state':
-              setCaffeineActive(msg.payload.active);
+            case 'caffeine:state': {
+              const wantSticky =
+                typeof window !== 'undefined' &&
+                window.localStorage.getItem('devdeck.caffeine.v1') === '1';
+              if (wantSticky && !msg.payload.active && ws.readyState === WebSocket.OPEN) {
+                setCaffeineActive(true);
+                ws.send(
+                  JSON.stringify({
+                    type: 'hardware:caffeine',
+                    payload: { requestId: makeRequestId(), active: true },
+                  }),
+                );
+              } else {
+                setCaffeineActive(msg.payload.active);
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem(
+                    'devdeck.caffeine.v1',
+                    msg.payload.active ? '1' : '0',
+                  );
+                }
+              }
               break;
+            }
             case 'processes:update':
               setProcesses(msg.payload.processes);
               break;
@@ -592,6 +615,13 @@ export function useDevDeckSocket() {
   );
 
   const sendEvent = useCallback((event: ClientEvent): boolean => {
+    if (event.type === 'hardware:caffeine') {
+      const nextActive = Boolean(event.payload.active);
+      setCaffeineActive(nextActive);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('devdeck.caffeine.v1', nextActive ? '1' : '0');
+      }
+    }
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       showToast(false, 'Not connected to Mac bridge');
       return false;
