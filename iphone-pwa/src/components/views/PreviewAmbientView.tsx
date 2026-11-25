@@ -64,6 +64,11 @@ export function PreviewAmbientView({
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (deck.status === 'connected' && deck.powerState.cpuTempC === null) {
+      deck.sendEvent({ type: 'power:refresh', payload: { requestId: makeRequestId() } });
+    }
+  }, [deck.status, deck.powerState.cpuTempC, deck]);
   const breakSec = Math.max(
     0,
     Math.ceil(((deskBreak?.deadline || 0) - (now?.getTime() || Date.now())) / 1000),

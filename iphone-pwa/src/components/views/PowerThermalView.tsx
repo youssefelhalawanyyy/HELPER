@@ -53,6 +53,12 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
     return () => window.clearTimeout(t);
   }, [confirmDanger]);
 
+  useEffect(() => {
+    if (isConnected && p.cpuTempC === null) {
+      deck.sendEvent({ type: 'power:refresh', payload: { requestId: makeRequestId() } });
+    }
+  }, [isConnected, p.cpuTempC, deck]);
+
   const sendPowerAction = (action: PowerAction) => {
     soundEngine.playClick();
     if (action === 'restart' || action === 'shutdown') {
@@ -93,11 +99,11 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
 
   const battColor =
     p.batteryPct <= 20 ? '#ff5d6c' : p.isCharging ? '#34d399' : p.batteryPct >= 80 ? '#22d3ee' : '#fbbf24';
-  const hasSample = isConnected && p.updatedAt > 0;
+  const hasSample = isConnected && (p.updatedAt > 0 || p.cpuTempC !== null);
   const processorScale = processorHeatScale(p.overheatTempC);
-  const cpuTemp = hasSample ? p.cpuTempC : null;
-  const gpuTemp = hasSample ? p.gpuTempC : null;
-  const batteryTemp = hasSample ? p.batteryTempC : null;
+  const cpuTemp = isConnected ? p.cpuTempC : null;
+  const gpuTemp = isConnected ? p.gpuTempC : null;
+  const batteryTemp = isConnected ? p.batteryTempC : null;
 
   return (
     <div className="screen-grid layout-power">

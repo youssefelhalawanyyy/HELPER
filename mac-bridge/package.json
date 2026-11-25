@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "live": "tsx src/live.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('node:fs');if(fs.existsSync('dist/index.js')){const t=new Date();fs.utimesSync('dist/index.js',t,t);}\"",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "mcp": "node dist/mcp/server.js",

@@ -1,6 +1,6 @@
 'use client';
 
-import { InstrumentGauge } from '@/components/shell/InstrumentGauge';
+import { InstrumentGauge, heatBand, processorHeatScale } from '@/components/shell/InstrumentGauge';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -39,6 +39,12 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   useEffect(() => {
     setDialVal(deck.mediaState.volume);
   }, [deck.mediaState.volume]);
+
+  useEffect(() => {
+    if (isConnected && deck.powerState.cpuTempC === null) {
+      deck.sendEvent({ type: 'power:refresh', payload: { requestId: makeRequestId() } });
+    }
+  }, [isConnected, deck.powerState.cpuTempC, deck]);
 
   const filteredLogs = useMemo(() => {
     const q = logFilter.trim().toLowerCase();
@@ -98,7 +104,30 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
             accent="#b4adf0"
           />
         </div>
-        <div className="telemetry-readings text-console-caption">
+        <div className="telemetry-readings space-y-0.5 text-console-caption">
+          <div className="num flex items-center justify-between text-zinc-300">
+            <span className="sub">CPU Heat</span>
+            <span
+              className="flex items-center gap-1 font-extrabold"
+              style={{
+                color: isConnected
+                  ? heatBand(
+                      deck.powerState.cpuTempC,
+                      processorHeatScale(deck.powerState.overheatTempC),
+                    ).color
+                  : '#9cb4bb',
+              }}
+            >
+              {isConnected && deck.powerState.cpuTempC !== null
+                ? `${deck.powerState.cpuTempC}°C · ${
+                    heatBand(
+                      deck.powerState.cpuTempC,
+                      processorHeatScale(deck.powerState.overheatTempC),
+                    ).label
+                  }`
+                : '--'}
+            </span>
+          </div>
           <div className="num flex justify-between text-zinc-300">
             <span className="sub">Disk</span>
             <span>

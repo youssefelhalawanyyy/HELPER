@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import si from 'systeminformation';
 import { IS_WIN, runPowerShell } from '../platform/win32.js';
 import type { DoctorIssue } from '../types/protocol.js';
+import { readMacNativeThermalSnapshot } from './powerThermalService.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -346,6 +347,13 @@ async function inspectMacDeep(): Promise<OsExtraAudit> {
         if (m) out.batteryHealthPct = Number(m[1]);
       })
       .catch(() => {}),
+
+    // Real native IOKit/SMC CPU die temperature
+    readMacNativeThermalSnapshot()
+      .then((snap) => {
+        if (snap?.cpuTempC != null) out.cpuTempC = snap.cpuTempC;
+      })
+      .catch(() => {}),
   ]);
 
   // Kernel panic logs in /Library/Logs/DiagnosticReports (last 14 days)
@@ -389,6 +397,11 @@ $avs = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusPro
 $badDisk = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.HealthStatus -ne 'Healthy' } | Select-Object -First 2 | ForEach-Object { $_.FriendlyName + ' (' + $_.HealthStatus + ')' })
 $since = (Get-Date).AddDays(-14)
 $bsods = @(Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,1001; StartTime=$since} -MaxEvents 10 -ErrorAction SilentlyContinue)
+$tz = @(Get-CimInstance -ClassName Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue)
+foreach ($z in $tz) {
+  $c = if ($z.HighPrecisionTemperature -gt 2732) { ($z.HighPrecisionTemperature / 10.0) - 273.15 } elseif ($z.Temperature -gt 273) { [double]$z.Temperature - 273.15 } else { -1 }
+  if ($c -gt 16 -and $c -lt 118) { Write-Output ("CPUTEMP=" + [Math]::Round($c, 1)); break }
+}
 Write-Output ("SAVER=" + $isSaver)
 Write-Output ("BADDRV=" + ($badDrv -join ', '))
 Write-Output ("BADDRV_CNT=" + $badDrv.Count)
@@ -410,6 +423,10 @@ Write-Output ("BSOD=" + $bsods.Count)
           .filter(Boolean);
       } else if (line.startsWith('BADDISK=')) out.unhealthyDiskNote = line.slice(8).trim();
       else if (line.startsWith('BSOD=')) out.hardwareCrashCount = Number(line.slice(5)) || 0;
+      else if (line.startsWith('CPUTEMP=')) {
+        const v = Number(line.slice(8).trim());
+        if (Number.isFinite(v) && v > 15 && v < 118) out.cpuTempC = v;
+      }
     }
   } catch {
     // Ignore
