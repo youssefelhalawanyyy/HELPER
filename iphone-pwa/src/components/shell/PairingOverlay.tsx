@@ -190,15 +190,12 @@ export function PairingOverlay({
             {/* Compact Header Row */}
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
-                <div
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10"
-                  style={{
-                    background:
-                      'linear-gradient(135deg, rgba(34,211,238,0.18), rgba(52,211,153,0.1))',
-                  }}
-                >
-                  <Laptop className="h-4 w-4 text-[#22d3ee]" />
-                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/icons/icon-192.png"
+                  alt="DevDeck logo"
+                  className="h-9 w-9 shrink-0 rounded-xl border border-[#88f1d1]/45 object-cover shadow-[0_0_12px_rgba(136,241,209,0.25)]"
+                />
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="disp text-[22px] text-[#f2f3f7] sm:text-[24px]">
                     Pair With Computer

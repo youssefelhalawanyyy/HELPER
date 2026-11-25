@@ -1,9 +1,11 @@
-const CACHE_NAME = 'devdeck-shell-v17';
+const CACHE_NAME = 'devdeck-shell-v18';
 const PRECACHE_URLS = [
   '/manifest.json',
   '/keepawake.mp4',
   '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',
+  '/icons/favicon-64.png',
 ];
 
 self.addEventListener('install', (event) => {

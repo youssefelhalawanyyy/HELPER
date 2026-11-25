@@ -9,7 +9,6 @@ import {
   BookOpen,
   Bot,
   Clock3,
-  Command,
   FolderKanban,
   Globe,
   Grid2X2,
@@ -53,7 +52,12 @@ export function Brand() {
   return (
     <span className="console-brand">
       <span aria-hidden="true">
-        <Command size={20} strokeWidth={2.4} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/icons/icon-192.png"
+          alt="DevDeck logo"
+          className="h-full w-full rounded-[inherit] object-cover"
+        />
       </span>
       DevDeck
     </span>
