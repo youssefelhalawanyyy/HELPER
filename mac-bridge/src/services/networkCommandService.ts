@@ -461,45 +461,90 @@ Write-Output ("DNS=" + (($dns | Select-Object -Unique | Select-Object -First 4) 
   }
 
   /**
-   * Active non-privileged /24 UDP neighbor sweep:
-   * Wakes OS ARP resolution for phones, laptops, TVs, and IoT devices on the local subnet in ~260ms.
+   * Active non-privileged /24 batched multi-wave neighbor sweep:
+   * Sends paced batches (avoiding macOS ENOBUFS ARP queue drops) across 2 waves + subnet broadcast ping
+   * so sleeping iPhones, Androids, TVs, and IoT devices all wake up and populate the OS ARP table.
    */
   private async sweepLocalSubnet(): Promise<void> {
-    const parts = (this.lanIp || '').split('.');
+    let localIp = this.lanIp;
+    if (!localIp || localIp.split('.').length !== 4) {
+      const ifaces = os.networkInterfaces();
+      for (const list of Object.values(ifaces)) {
+        for (const addr of list || []) {
+          if (addr.family === 'IPv4' && !addr.internal && !addr.address.startsWith('169.254.')) {
+            localIp = addr.address;
+            break;
+          }
+        }
+        if (localIp) break;
+      }
+    }
+    const parts = (localIp || '').split('.');
     if (parts.length !== 4) return;
     const prefix = `${parts[0]}.${parts[1]}.${parts[2]}.`;
     const selfHost = Number(parts[3]);
+    const broadcastIp = `${prefix}255`;
+
+    // Kick off a fast subnet broadcast ping in parallel (wakes many Linux/IoT/Mac hosts immediately)
+    if (!IS_WIN) {
+      void execFileAsync('ping', ['-c', '2', '-W', '400', broadcastIp], { timeout: 1400 }).catch(
+        () => {},
+      );
+    }
 
     await new Promise<void>((resolve) => {
       let sock: dgram.Socket | null = null;
-      try {
-        sock = dgram.createSocket('udp4');
-        sock.on('error', () => {});
-        const payload = Buffer.from([0x00]);
-        for (let i = 1; i <= 254; i += 1) {
-          if (i === selfHost) continue;
-          const ip = `${prefix}${i}`;
-          try {
-            sock.send(payload, 9, ip);
-          } catch {
-            // Ignore full send buffer
-          }
-        }
-        setTimeout(() => {
-          try {
-            sock?.close();
-          } catch {
-            // Ignore
-          }
-          resolve();
-        }, 260);
-      } catch {
+      const cleanup = () => {
         try {
           sock?.close();
         } catch {
           // Ignore
         }
         resolve();
+      };
+
+      try {
+        sock = dgram.createSocket('udp4');
+        sock.on('error', () => {});
+        const payload = Buffer.from([0x00]);
+        const ips: string[] = [];
+        for (let i = 1; i <= 254; i += 1) {
+          if (i !== selfHost) ips.push(`${prefix}${i}`);
+        }
+
+        // Send in paced batches of 24 IPs every 18ms (2 waves) so kernel ARP queue never drops entries
+        const batchSize = 24;
+        let idx = 0;
+        let wave = 0;
+
+        const sendNextBatch = () => {
+          if (!sock) return cleanup();
+          const end = Math.min(ips.length, idx + batchSize);
+          const port = wave === 0 ? 9 : 5353;
+          for (let j = idx; j < end; j += 1) {
+            try {
+              sock.send(payload, port, ips[j]);
+            } catch {
+              // Ignore transient buffer errors
+            }
+          }
+          idx = end;
+          if (idx < ips.length) {
+            setTimeout(sendNextBatch, 18);
+          } else if (wave === 0) {
+            // Second pass wakes sleeping mobile devices in Wi-Fi DTIM power-save mode
+            wave = 1;
+            idx = 0;
+            setTimeout(sendNextBatch, 90);
+          } else {
+            // Allow final ARP replies to settle
+            setTimeout(cleanup, 520);
+          }
+        };
+
+        sendNextBatch();
+      } catch {
+        cleanup();
       }
     });
   }
@@ -523,9 +568,12 @@ Write-Output ("DNS=" + (($dns | Select-Object -Unique | Select-Object -First 4) 
     }
 
     try {
-      const { stdout } = await execFileAsync('arp', ['-a'], {
-        timeout: 3000,
-        maxBuffer: 1024 * 1024,
+      // CRITICAL: Use `arp -an` on macOS/Linux (numeric, zero blocking DNS lookups!) so it completes in ~3ms
+      // instead of timing out after 3s on 200+ `(incomplete)` reverse-DNS queries!
+      const arpArgs = IS_WIN ? ['-a'] : ['-an'];
+      const { stdout } = await execFileAsync('arp', arpArgs, {
+        timeout: 4000,
+        maxBuffer: 2 * 1024 * 1024,
         windowsHide: true,
       });
       for (const raw of stdout.split(/\r?\n/)) {
@@ -593,7 +641,7 @@ Write-Output ("DNS=" + (($dns | Select-Object -Unique | Select-Object -First 4) 
         if (b.isSelf) return 1;
         return a.ip.localeCompare(b.ip, undefined, { numeric: true });
       })
-      .slice(0, 28);
+      .slice(0, 128);
 
     // Enrich missing hostnames via fast bounded reverse-DNS (350ms max)
     await Promise.all(
