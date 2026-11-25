@@ -1,5 +1,6 @@
 'use client';
 
+import { HealthInsights } from './HealthInsights';
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -269,7 +270,11 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             className="col-span-3 flex h-8 items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[#a78bfa] via-[#22d3ee] to-[#34d399] text-console-caption font-extrabold whitespace-nowrap text-[#04130c] disabled:opacity-40"
             style={{ boxShadow: '0 2px 0 #14664a' }}
           >
-            {doc.aiConfigured ? <Sparkles className="h-3.5 w-3.5 shrink-0" /> : <Wrench className="h-3.5 w-3.5 shrink-0" />}
+            {doc.aiConfigured ? (
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <Wrench className="h-3.5 w-3.5 shrink-0" />
+            )}
             {doc.aiConfigured ? 'AI AUTO-FIX' : 'FIX ALL & RESCUE'}
           </motion.button>
         </div>
@@ -329,9 +334,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             >
               <ClipboardCheck className="h-3 w-3" />
               English Report
-              {report && (
-                <span className="h-1.5 w-1.5 rounded-full bg-[#34d399]" />
-              )}
+              {report && <span className="h-1.5 w-1.5 rounded-full bg-[#34d399]" />}
             </button>
           </div>
 
@@ -343,6 +346,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
         {/* TAB 1: Issues & Plain-English Diagnosis */}
         {rightTab === 'issues' && (
           <div className="deck-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+            <HealthInsights deck={deck} />
             {doc.issues.map((issue) => {
               const color =
                 issue.severity === 'critical'
@@ -428,7 +432,8 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
               })
             ) : (
               <div className="grid h-full place-items-center text-center text-zinc-500">
-                Tap SCAN ALL or FIX ALL to watch live antivirus, SFC/DISM, diskutil & repair commands execute here.
+                Tap SCAN ALL or FIX ALL to watch live antivirus, SFC/DISM, diskutil & repair commands execute
+                here.
               </div>
             )}
           </div>
@@ -441,9 +446,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
               <>
                 <div className="flex items-center justify-between gap-2 rounded-xl border border-[#34d399]/30 bg-[#34d399]/[0.08] px-2.5 py-1.5">
                   <div>
-                    <div className="text-console-caption font-extrabold text-white">
-                      Full Rescue Report
-                    </div>
+                    <div className="text-console-caption font-extrabold text-white">Full Rescue Report</div>
                     <div className="num font-mono-tech text-console-caption font-extrabold text-[#34d399]">
                       Health Score: {report.scoreBefore} → {report.scoreAfter}/100
                     </div>
@@ -520,9 +523,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
                   <div className="space-y-1 text-console-caption text-zinc-200">
                     {report.nextSteps.map((step, i) => (
                       <div key={i} className="flex items-start gap-1.5">
-                        <span className="font-mono-tech font-extrabold text-[#a78bfa]">
-                          {i + 1}.
-                        </span>
+                        <span className="font-mono-tech font-extrabold text-[#a78bfa]">{i + 1}.</span>
                         <span>{step}</span>
                       </div>
                     ))}
@@ -566,11 +567,10 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
               <div className="grid h-full place-items-center text-center">
                 <div className="space-y-1.5">
                   <ClipboardCheck className="mx-auto h-7 w-7 text-[#34d399]/60" />
-                  <div className="text-console-body font-bold text-zinc-200">
-                    No Rescue Report Yet
-                  </div>
+                  <div className="text-console-body font-bold text-zinc-200">No Rescue Report Yet</div>
                   <div className="sub max-w-[260px]">
-                    Tap &quot;FIX ALL &amp; RESCUE&quot; to scan viruses, verify corrupted files, clean junk, and generate a complete English report.
+                    Tap &quot;FIX ALL &amp; RESCUE&quot; to scan viruses, verify corrupted files, clean junk,
+                    and generate a complete English report.
                   </div>
                 </div>
               </div>

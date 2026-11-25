@@ -18,6 +18,7 @@
     "msedge-tts": "^2.1.1",
     "qrcode-terminal": "^0.12.0",
     "systeminformation": "^5.25.11",
+    "web-push": "^4.0.0",
     "ws": "^8.18.1"
   },
   "devDependencies": {
@@ -25,6 +26,7 @@
     "@types/express": "^5.0.1",
     "@types/node": "^22.14.0",
     "@types/qrcode-terminal": "^0.12.2",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"

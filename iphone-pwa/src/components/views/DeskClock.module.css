@@ -1,0 +1,260 @@
+.dashboard {
+  --mist: #9cb4bb;
+  --mint: #88f1d1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 12px;
+  overflow: auto;
+  min-height: 0;
+  align-content: start;
+  width: 100%;
+  padding: 2px 3px 12px;
+  color: #effaf7;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard > section,
+.clipboard {
+  min-width: 0;
+  border: 1px solid #98c8ce29;
+  border-radius: 21px;
+  padding: clamp(13px, 2vw, 25px);
+  background: #101d25;
+}
+.dashboard header,
+.dashboard h2,
+.weatherLocation,
+.daylight span,
+.weather footer,
+.weather footer button,
+.hero button,
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dashboard header,
+.weather footer {
+  justify-content: space-between;
+}
+.dashboard h2 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.dashboard h2 svg,
+.eyebrow,
+.weatherLocation {
+  color: var(--mint);
+}
+.dashboard button:focus-visible,
+.dashboard a:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+.dashboard .hero {
+  background:
+    radial-gradient(ellipse at 95% 3%, #23555588, transparent 55%),
+    linear-gradient(125deg, #10292c, #101923 90%);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.19em;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.dashboard header button,
+.controls button {
+  background: #bcfff20d;
+  border: 1px solid #b3e5df36;
+  border-radius: 12px;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.face {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0;
+}
+.face p,
+.world span,
+.readings dt,
+.weatherFacts dt,
+.weather footer,
+.instrument header > span {
+  color: var(--mist);
+  font-size: 0.8rem;
+}
+.time {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-weight: 600;
+  font-size: clamp(3.8rem, 7.6vw, 8.3rem);
+  letter-spacing: -0.075em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.time small {
+  font:
+    500 clamp(1rem, 2.3vw, 2.1rem) ui-monospace,
+    monospace;
+  letter-spacing: -0.06em;
+  color: var(--mint);
+  margin-left: 0.3em;
+}
+.dial {
+  flex: none;
+  position: relative;
+  width: clamp(60px, 8vw, 104px);
+  aspect-ratio: 1;
+  border-radius: 100%;
+  background: repeating-conic-gradient(#8baea9 0deg 1deg, transparent 1deg 30deg);
+  box-shadow: 0 0 0 1px #769b9633;
+}
+.dial:before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  background: #152b30;
+  border-radius: 50%;
+}
+.dial i {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  background: #d9efea;
+  width: 2px;
+  transform-origin: 50% 100%;
+  border-radius: 2px;
+}
+.dial i:last-child {
+  width: 1px;
+  background: var(--mint);
+}
+.world,
+.readings,
+.weatherFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.world {
+  border-top: 1px solid #acdbcb30;
+  padding-top: 10px;
+}
+.world span,
+.world b {
+  display: block;
+}
+.world b,
+.readings dd,
+.weatherFacts dd {
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+.readings,
+.weatherFacts {
+  margin-top: 12px;
+  row-gap: 11px;
+}
+.temperature {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+.temperature strong {
+  font-size: clamp(2.4rem, 5vw, 4.5rem);
+  letter-spacing: -0.07em;
+}
+.temperature span {
+  color: #d1ddd9;
+}
+.daylight {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  font-size: 0.75rem;
+  margin-top: 14px;
+}
+.daylight svg {
+  color: #ffd48e;
+}
+.weather footer {
+  font-size: 0.65rem;
+  margin-top: 9px;
+}
+.controls {
+  margin: 13px 0;
+}
+.art {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.progress {
+  width: 100%;
+  height: 3px;
+  accent-color: var(--mint);
+}
+.clipboard {
+  grid-column: 1/-1;
+  max-height: 250px;
+  overflow: auto;
+}
+.clipboard :global(.sub) {
+  min-height: 24px;
+}
+@media (max-width: 630px) and (orientation: portrait) {
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .time {
+    font-size: clamp(3.9rem, 14vw, 6rem);
+  }
+  .face {
+    margin: 17px 0;
+  }
+  .dial {
+    width: 70px;
+  }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .dashboard {
+    gap: 8px;
+  }
+  .dashboard > section,
+  .clipboard {
+    padding: 12px;
+  }
+  .face {
+    margin: 4px 0;
+  }
+  .time {
+    font-size: 3.3rem;
+  }
+  .dial {
+    width: 44px;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dashboard > section {
+    animation: arrive 0.3s ease-out both;
+  }
+  .dashboard > section:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  @keyframes arrive {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

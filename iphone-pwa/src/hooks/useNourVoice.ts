@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DeckViewId } from '@/components/shell/LeftNavRail';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
+import { localNourCommand } from '@/lib/nourCommands';
+import { bridgeRequest } from '@/lib/bridgeRequest';
 import { soundEngine } from '@/lib/soundEngine';
 
 export type NourVoicePhase = 'idle' | 'wake_listening' | 'listening' | 'thinking' | 'speaking';
@@ -11,6 +13,7 @@ export type NourVoicePhase = 'idle' | 'wake_listening' | 'listening' | 'thinking
 export interface NourChatTurn {
   id: string;
   role: 'user' | 'model';
+  localOnly?: boolean;
   text: string;
   ts: number;
 }
@@ -178,6 +181,15 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const [liveTranscript, setLiveTranscript] = useState('');
   const [orbEnergy, setOrbEnergy] = useState(0);
   const [turns, setTurns] = useState<NourChatTurn[]>([]);
+  const [spokenAlerts, setSpokenAlerts] = useState(false);
+  useEffect(() => {
+    setSpokenAlerts(localStorage.getItem('devdeck.nour.alerts') === 'on');
+  }, []);
+  const toggleAlerts = () => {
+    const next = !spokenAlerts;
+    localStorage.setItem('devdeck.nour.alerts', next ? 'on' : 'off');
+    setSpokenAlerts(next);
+  };
   const [showSubtitles, setShowSubtitles] = useState(true);
 
   const recRef = useRef<SpeechRecognitionLike | null>(null);
@@ -187,6 +199,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   const activeListeningRef = useRef(false);
   const turnsRef = useRef<NourChatTurn[]>([]);
   const botNameRef = useRef('نور');
+  const nativeSpeech = useRef<SpeechSynthesisUtterance | null>(null);
   const mutedRef = useRef(false);
   const abortReqRef = useRef<AbortController | null>(null);
   const restartTimerRef = useRef<number | null>(null);
@@ -247,6 +260,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   }, []);
 
   const stopSpeaking = useCallback(() => {
+    if (nativeSpeech.current) {
+      nativeSpeech.current.onend = nativeSpeech.current.onerror = null;
+      nativeSpeech.current = null;
+      window.speechSynthesis.cancel();
+    }
     currentSpokenTextRef.current = '';
     if (orbRafRef.current) {
       cancelAnimationFrame(orbRafRef.current);
@@ -308,6 +326,21 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       replyText: string,
       afterSpeak?: () => void,
     ) => {
+      if (!mutedRef.current && !audioBuffer && 'speechSynthesis' in window && replyText) {
+        stopSpeaking();
+        const utterance = new SpeechSynthesisUtterance(replyText);
+        nativeSpeech.current = utterance;
+        utterance.lang = /[ء-ي]/.test(replyText) ? 'ar-EG' : 'en-US';
+        currentSpokenTextRef.current = replyText;
+        setPhase('speaking');
+        utterance.onend = utterance.onerror = () => {
+          nativeSpeech.current = null;
+          setPhase('idle');
+          afterSpeak?.();
+        };
+        window.speechSynthesis.speak(utterance);
+        return;
+      }
       if (mutedRef.current || !audioBuffer || audioBuffer.byteLength < 128) {
         setPhase(liveCallRef.current ? 'listening' : wakeWordRef.current ? 'wake_listening' : 'idle');
         afterSpeak?.();
@@ -470,7 +503,11 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       let action: string | null = null;
 
       try {
-        if (deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token) {
+        const local = localNourCommand(clean, deck, onNavigate);
+        if (local !== null) {
+          userTurn.localOnly = true;
+          replyText = local;
+        } else if (deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token) {
           const res = await fetch(`${deck.bridgeBaseUrl}/api/devsuite/nour/chat`, {
             method: 'POST',
             signal: ctrl.signal,
@@ -480,7 +517,10 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
             },
             body: JSON.stringify({
               message: clean,
-              history: nextHistory.slice(-16).map((t) => ({ role: t.role, text: t.text })),
+              history: nextHistory
+                .filter((t) => !t.localOnly)
+                .slice(-16)
+                .map((t) => ({ role: t.role, text: t.text })),
               botName: botNameRef.current,
               liveContext,
             }),
@@ -510,10 +550,13 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                   systemInstruction: { parts: [{ text: sys }] },
-                  contents: nextHistory.slice(-14).map((t) => ({
-                    role: t.role === 'user' ? 'user' : 'model',
-                    parts: [{ text: t.text }],
-                  })),
+                  contents: nextHistory
+                    .filter((t) => !t.localOnly)
+                    .slice(-14)
+                    .map((t) => ({
+                      role: t.role === 'user' ? 'user' : 'model',
+                      parts: [{ text: t.text }],
+                    })),
                   generationConfig: {
                     temperature: 0.78,
                     maxOutputTokens: 80,
@@ -560,6 +603,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         id: makeRequestId(),
         role: 'model',
         text: replyText,
+        localOnly: userTurn.localOnly,
         ts: Date.now(),
       };
       setTurns((prev) => [...prev.slice(-30), modelTurn]);
@@ -580,16 +624,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         }
       });
     },
-    [
-      deck.bridgeBaseUrl,
-      deck.pairing?.token,
-      deck.status,
-      executeNourAction,
-      liveContext,
-      playReplyAudio,
-      stopRecognition,
-      stopSpeaking,
-    ],
+    [deck, onNavigate, executeNourAction, liveContext, playReplyAudio, stopRecognition, stopSpeaking],
   );
 
   const startRecognition = useCallback(
@@ -674,7 +709,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         }
 
         const nameEsc = escapeRegExp(botNameRef.current.trim() || 'نور');
-        const wakeRe = new RegExp(`(?:يا\\s*)?(?:${nameEsc}|نور|nour|noor)\\b[,،:\\s]*(.*)`, 'i');
+        const wakeRe = new RegExp(`(?:يا\\s*)?(?:${nameEsc}|نور|nour|noor)(?=$|[,،:\\s])[,،:\\s]*(.*)`, 'i');
         const m = trimmed.match(wakeRe);
         if (m) {
           const afterWake = (m[1] || '').trim();
@@ -826,8 +861,68 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
     return () => window.clearInterval(id);
   }, [liveCallOn, wakeWordOn]);
 
+  const spokenEvent = useRef('');
+  const allowAlert = useRef(false);
+  useEffect(() => {
+    allowAlert.current = spokenAlerts && !muted;
+    return () => {
+      allowAlert.current = false;
+    };
+  }, [spokenAlerts, muted]);
+  useEffect(() => {
+    const alert = deck.alertFlash;
+    if (!alert || alert.id === spokenEvent.current || !spokenAlerts || muted) return;
+    const message = alert.message;
+    const percent = message.match(/(\d+)%/)?.[1];
+    const text =
+      /battery/i.test(message) && percent
+        ? 'البطارية وصلت ' + percent + ' في المية.'
+        : /^Website /i.test(message)
+          ? message.includes('recovered')
+            ? 'الموقع رجع يشتغل.'
+            : message.includes('certificate')
+              ? 'شهادة الموقع قربت تنتهي.'
+              : 'الموقع مش بيرد.'
+          : /build|compiled|built in/i.test(message)
+            ? alert.kind === 'error'
+              ? 'البيلد فشل.'
+              : 'البيلد خلص.'
+            : '';
+    if (!text) return;
+    spokenEvent.current = alert.id;
+    const idle = () =>
+      !liveCallRef.current && !wakeWordRef.current && phaseRef.current === 'idle' && !mutedRef.current;
+    if (!idle()) return;
+    const sequence = requestSeqRef.current;
+    const bridge = { bridgeBaseUrl: deck.bridgeBaseUrl, pairing: deck.pairing };
+    void (async () => {
+      let buffer: ArrayBuffer | null = null;
+      let mime = 'audio/wav';
+      try {
+        const audio = await bridgeRequest<{ audioBase64?: string; audioMime?: string }>(
+          bridge,
+          'nour/speak',
+          { text },
+          AbortSignal.timeout(3500),
+        );
+        if (audio.audioBase64) {
+          buffer = base64ToArrayBuffer(audio.audioBase64);
+          mime = audio.audioMime || mime;
+        }
+      } catch {}
+      if (
+        allowAlert.current &&
+        spokenEvent.current === alert.id &&
+        sequence === requestSeqRef.current &&
+        idle()
+      )
+        await playReplyAudio(buffer, mime, text);
+    })();
+  }, [deck.alertFlash, spokenAlerts, muted, playReplyAudio, deck.bridgeBaseUrl, deck.pairing?.token]);
   return {
     botName,
+    spokenAlerts,
+    toggleAlerts,
     setBotName,
     phase,
     liveCallOn,

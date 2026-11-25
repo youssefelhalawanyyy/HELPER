@@ -1,5 +1,6 @@
 'use client';
 
+import { HealthInsights } from './HealthInsights';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -84,6 +85,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
   };
 
   const updateGuard = (patch: {
+    autoPilot?: boolean;
     chargeGuardEnabled?: boolean;
     chargeGuardPct?: number;
     overheatGuardEnabled?: boolean;
@@ -426,6 +428,15 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
         {/* TAB 2: SMART GUARDS (80% Charge Chime + Overheat Alert) */}
         {rightTab === 'guards' && (
           <div className="deck-scroll flex min-h-0 flex-1 flex-col justify-between gap-2 overflow-y-auto pr-0.5">
+            <button
+              className="rounded-xl border border-white/10 p-3 text-left"
+              aria-pressed={!!p.autoPilot}
+              onClick={() => updateGuard({ autoPilot: !p.autoPilot })}
+            >
+              <strong>Auto-pilot · {p.autoPilot ? 'On' : 'Off'}</strong>
+              <small className="block">Alert on swap spikes and enable Eco below 25% on battery.</small>
+            </button>
+            <HealthInsights deck={deck} />
             {/* Charge Guard */}
             <div className="rounded-xl border border-[#34d399]/25 bg-black/65 p-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -472,9 +483,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <ShieldAlert className="h-3.5 w-3.5 text-[#ff5d6c]" />
-                  <span className="text-[9.5px] font-extrabold text-white">
-                    Overheat Guard Chime
-                  </span>
+                  <span className="text-[9.5px] font-extrabold text-white">Overheat Guard Chime</span>
                 </div>
                 <button
                   type="button"
@@ -568,10 +577,8 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               onClick={() => sendPowerAction('restart')}
               className="flex flex-col items-center justify-center gap-1 rounded-xl border text-[#fbbf24]"
               style={{
-                background:
-                  confirmDanger === 'restart' ? 'rgba(251,191,36,0.28)' : 'rgba(251,191,36,0.1)',
-                borderColor:
-                  confirmDanger === 'restart' ? '#fbbf24' : 'rgba(251,191,36,0.3)',
+                background: confirmDanger === 'restart' ? 'rgba(251,191,36,0.28)' : 'rgba(251,191,36,0.1)',
+                borderColor: confirmDanger === 'restart' ? '#fbbf24' : 'rgba(251,191,36,0.3)',
               }}
             >
               <RotateCw className="h-5 w-5" />
@@ -587,10 +594,8 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               onClick={() => sendPowerAction('shutdown')}
               className="flex flex-col items-center justify-center gap-1 rounded-xl border text-[#ff5d6c]"
               style={{
-                background:
-                  confirmDanger === 'shutdown' ? 'rgba(255,93,108,0.28)' : 'rgba(255,93,108,0.1)',
-                borderColor:
-                  confirmDanger === 'shutdown' ? '#ff5d6c' : 'rgba(255,93,108,0.3)',
+                background: confirmDanger === 'shutdown' ? 'rgba(255,93,108,0.28)' : 'rgba(255,93,108,0.1)',
+                borderColor: confirmDanger === 'shutdown' ? '#ff5d6c' : 'rgba(255,93,108,0.3)',
               }}
             >
               <Power className="h-5 w-5" />

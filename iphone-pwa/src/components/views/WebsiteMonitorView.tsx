@@ -1,5 +1,6 @@
 'use client';
 
+import { bridgeRequest } from '@/lib/bridgeRequest';
 import { useEffect, useState } from 'react';
 import {
   Activity,
@@ -33,6 +34,27 @@ interface MonitoredSite {
 
 const STORAGE_KEY = 'devdeck.webmonitor.sites.v1';
 
+type SiteEdit = { id: string; action: 'add' | 'remove'; url: string };
+const queueKey = STORAGE_KEY + '.edits';
+function pendingEdits(): SiteEdit[] {
+  try {
+    return JSON.parse(localStorage.getItem(queueKey) || '[]');
+  } catch {
+    return [];
+  }
+}
+function queueEdit(action: SiteEdit['action'], url: string) {
+  localStorage.setItem(
+    queueKey,
+    JSON.stringify([...pendingEdits(), { id: String(Date.now()) + Math.random(), action, url }]),
+  );
+}
+function cacheSites(rows: MonitoredSite[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+  } catch {}
+}
+
 const DEFAULT_SITES: MonitoredSite[] = [
   {
     id: 'vercel-app',
@@ -64,6 +86,25 @@ const DEFAULT_SITES: MonitoredSite[] = [
   },
 ];
 
+type WatchList = {
+  initialized: boolean;
+  sites: {
+    url: string;
+    result?: Partial<MonitoredSite> & { checkedAt: number };
+    history: MonitoredSite['history'];
+  }[];
+};
+function watchRows(list: WatchList) {
+  return list.sites.map((s) => ({
+    ...DEFAULT_SITES[0],
+    up: null,
+    ...s.result,
+    id: s.url,
+    url: s.url,
+    history: s.history,
+    lastCheckedAt: s.result?.checkedAt || 0,
+  }));
+}
 export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
   const [sites, setSites] = useState<MonitoredSite[]>(DEFAULT_SITES);
   const [selectedId, setSelectedId] = useState<string>(DEFAULT_SITES[0].id);
@@ -75,9 +116,9 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as MonitoredSite[];
-        if (parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setSites(parsed);
-          setSelectedId(parsed[0].id);
+          setSelectedId(parsed[0]?.id || '');
         }
       }
     } catch {
@@ -85,13 +126,87 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
     }
   }, []);
 
+  const [notifications, setNotifications] = useState(false);
+  const { bridgeBaseUrl, pairing } = deck;
+  const connected = deck.status === 'connected';
+  useEffect(() => {
+    if (!connected) return;
+    let live = true;
+    const bridge = { bridgeBaseUrl, pairing };
+    const refresh = async () => {
+      let list = await bridgeRequest<WatchList>(bridge, 'watch');
+      if (!live) return;
+      if (!list.initialized) {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        const rows: MonitoredSite[] = saved ? JSON.parse(saved) : DEFAULT_SITES;
+        list = await bridgeRequest<WatchList>(bridge, 'watch', {
+          action: 'initialize',
+          urls: rows.map((s) => s.url),
+        });
+      }
+      for (const edit of pendingEdits()) {
+        if (!live) return;
+        list = await bridgeRequest<WatchList>(bridge, 'watch', { action: edit.action, urls: [edit.url] });
+        localStorage.setItem(queueKey, JSON.stringify(pendingEdits().filter((item) => item.id !== edit.id)));
+      }
+      if (live) {
+        const rows = watchRows(list);
+        setSites(rows);
+        cacheSites(rows);
+      }
+    };
+    void refresh().catch((err) => {
+      if (live) deck.showToast(false, err.message);
+    });
+    const timer = setInterval(() => void refresh().catch(() => {}), 15000);
+    navigator.serviceWorker
+      ?.getRegistration()
+      .then((reg) => reg?.pushManager?.getSubscription())
+      .then((s) => {
+        if (live) setNotifications(!!s);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [bridgeBaseUrl, pairing, connected]);
+  const editWatch = async (action: string, urls?: string[]) => {
+    const list = await bridgeRequest<WatchList>(deck, 'watch', { action, urls });
+    const rows = watchRows(list);
+    setSites(rows);
+    cacheSites(rows);
+    return list;
+  };
+  const toggleNotifications = async () => {
+    try {
+      if (!('PushManager' in window) || !('Notification' in window))
+        throw Error('Open DevDeck from your Home Screen to enable notifications');
+      if (!notifications && (await Notification.requestPermission()) !== 'granted')
+        throw Error('Notifications need permission in Settings');
+      const reg = await navigator.serviceWorker.ready;
+      let subscription = await reg.pushManager.getSubscription();
+      if (notifications && subscription) {
+        await bridgeRequest(deck, 'push-subscription', { subscription, remove: true });
+        await subscription.unsubscribe();
+        setNotifications(false);
+        return;
+      }
+      const { key } = await bridgeRequest<{ key: string }>(deck, 'push-key');
+      const bytes = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      subscription ||= await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: bytes,
+      });
+      await bridgeRequest(deck, 'push-subscription', { subscription });
+      setNotifications(true);
+    } catch (e) {
+      deck.showToast(false, (e as Error).message);
+    }
+  };
   const persist = (next: MonitoredSite[]) => {
     setSites(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore
-    }
+    cacheSites(next);
   };
 
   const checkOne = async (site: MonitoredSite): Promise<MonitoredSite> => {
@@ -167,6 +282,16 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
   const checkAll = async () => {
     soundEngine.playClick();
     setChecking(true);
+    if (connected) {
+      try {
+        await editWatch('check');
+      } catch (e) {
+        deck.showToast(false, (e as Error).message);
+      } finally {
+        setChecking(false);
+      }
+      return;
+    }
     const updated = await Promise.all(sites.map((s) => checkOne(s)));
     persist(updated);
     setChecking(false);
@@ -183,6 +308,13 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
     if (!raw) return;
     soundEngine.playClick();
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw Error();
+    } catch {
+      deck.showToast(false, 'Enter a valid website address');
+      return;
+    }
     const item: MonitoredSite = {
       id: String(Date.now()),
       url,
@@ -197,7 +329,17 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
       history: [],
       lastCheckedAt: 0,
     };
-    const next = [item, ...sites];
+    if (connected) {
+      void editWatch('add', [url])
+        .then(() => {
+          setSelectedId(new URL(url).href);
+          setNewUrl('');
+        })
+        .catch((err) => deck.showToast(false, err.message));
+      return;
+    }
+    queueEdit('add', url);
+    const next = [item, ...sites.filter((site) => site.url !== url)];
     persist(next);
     setSelectedId(item.id);
     setNewUrl('');
@@ -215,6 +357,12 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
       <div className="tile flex min-h-0 flex-col gap-2">
         <div className="absolute top-0 left-0 h-[3px] w-2/3 rounded-r-full bg-gradient-to-r from-[#34d399] to-[#22d3ee]" />
 
+        <div className="flex items-center justify-between text-console-caption">
+          <span>{connected ? 'Bridge checks every 60s' : 'Phone checks on demand'}</span>
+          <button disabled={!connected} onClick={toggleNotifications}>
+            Phone alerts · {notifications ? 'On' : 'Off'}
+          </button>
+        </div>
         <div className="flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5">
             <Activity className="h-4 w-4 text-[#34d399]" />
@@ -292,6 +440,11 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
                   aria-label="Remove site"
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (connected) {
+                      void editWatch('remove', [site.url]).catch((err) => deck.showToast(false, err.message));
+                      return;
+                    }
+                    queueEdit('remove', site.url);
                     const next = sites.filter((s) => s.id !== site.id);
                     persist(next);
                   }}
@@ -329,8 +482,7 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
                       : selected.up
                         ? 'rgba(52,211,153,0.2)'
                         : 'rgba(255,93,108,0.2)',
-                  color:
-                    selected.up === null ? '#a1a1aa' : selected.up ? '#34d399' : '#ff5d6c',
+                  color: selected.up === null ? '#a1a1aa' : selected.up ? '#34d399' : '#ff5d6c',
                 }}
               >
                 {selected.up === null ? 'PENDING' : selected.up ? `UP · ${selected.status}` : 'DOWN'}

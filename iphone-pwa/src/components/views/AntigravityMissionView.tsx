@@ -1,5 +1,6 @@
 'use client';
 
+import { bridgeRequest } from '@/lib/bridgeRequest';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -580,9 +581,57 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   const [listening, setListening] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [language, setLanguage] = useState('ar-EG');
+  const [snapshot, setSnapshot] = useState('');
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
+  const capture = async () => {
+    setBusy(true);
+    try {
+      setSnapshot((await bridgeRequest<{ image: string }>(deck, 'snapshot', {})).image);
+    } catch (e) {
+      deck.showToast(false, (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const review = async (action: 'accept' | 'revert') => {
+    const diff = deck.antigravityDiff;
+    if (!diff?.revision || diff.file !== selectedDiffFile) return;
+    if (action === 'revert' && !window.confirm('Discard the displayed changes to ' + diff.file + '?')) return;
+    setBusy(true);
+    try {
+      await bridgeRequest(deck, 'review-file', { file: diff.file, revision: diff.revision, action });
+      setSelectedDiffFile(null);
+      setMainMode('chat');
+      deck.showToast(true, action === 'accept' ? 'File staged' : 'Changes reverted');
+    } catch (e) {
+      deck.showToast(false, (e as Error).message);
+      openFileDiff(diff.file);
+    } finally {
+      setBusy(false);
+    }
+  };
   const voiceRef = useRef<SpeechRecLike | null>(null);
 
+  useEffect(
+    () => () => {
+      generation.current++;
+      if (voiceRef.current) {
+        voiceRef.current.onresult = null;
+        voiceRef.current.stop();
+      }
+    },
+    [],
+  );
   const ag = deck.antigravityState;
+  const filesByFolder = new Map<string, typeof ag.diffFiles>();
+  for (const item of ag.diffFiles) {
+    const folder = item.file.split('/').slice(0, -1).join('/') || '.';
+    const siblings = filesByFolder.get(folder);
+    if (siblings) siblings.push(item);
+    else filesByFolder.set(folder, [item]);
+  }
   const prog = deck.agentProgress;
   const isWindowsHost = deck.hello?.platform === 'win32';
   const modKey = isWindowsHost ? 'Ctrl+' : '⌘';
@@ -643,11 +692,12 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
     const text = (overrideText ?? promptText).trim();
     if (!text) return;
     soundEngine.playClick();
-    deck.sendEvent({
+    const sent = deck.sendEvent({
       type: 'antigravity:prompt',
       payload: { requestId: makeRequestId(), text, submit: true },
     });
-    setPromptText('');
+    if (sent) setPromptText('');
+    else deck.showToast(false, 'Pair your desktop to submit');
   };
 
   const toggleVoice = () => {
@@ -668,25 +718,56 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
     soundEngine.playClick();
     const rec = new Ctor();
     rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = 'en-US';
-    rec.onresult = (ev) => {
+    rec.interimResults = false;
+    const seq = ++generation.current;
+    rec.lang = language;
+    rec.onresult = async (ev) => {
       let full = '';
       for (let i = 0; i < ev.results.length; i += 1) {
         full += ev.results[i][0].transcript;
       }
+      if (seq !== generation.current) return;
+      rec.onresult = null;
       setPromptText(full);
+      try {
+        const result = await bridgeRequest<{ prompt: string }>(deck, 'format-prompt', { text: full });
+        if (seq === generation.current) {
+          setPromptText(result.prompt);
+          sendPrompt(result.prompt);
+        }
+      } catch (e) {
+        if (seq === generation.current) deck.showToast(false, (e as Error).message);
+      }
     };
     rec.onerror = () => setListening(false);
     rec.onend = () => setListening(false);
     voiceRef.current = rec;
     setListening(true);
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      deck.showToast(false, 'Microphone unavailable. Check microphone permission or type your prompt.');
+    }
   };
 
   return (
     <div className="screen-grid layout-mission">
       {/* LEFT / MAIN: Live Chat Mirror | Agent Terminal | Color Git Diff Inspector */}
+      {snapshot && (
+        <div
+          role="dialog"
+          aria-label="Desktop snapshot"
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-black/95 p-3"
+        >
+          <button onClick={() => setSnapshot('')}>Close snapshot</button>
+          <img
+            src={snapshot}
+            alt="Primary desktop display at capture time"
+            className="max-h-[80dvh] max-w-full object-contain"
+          />
+        </div>
+      )}
       <div className="tile relative flex min-h-0 flex-col p-2.5">
         <div className="absolute top-0 left-0 h-[3px] w-3/4 rounded-r-full bg-gradient-to-r from-[#2563eb] via-[#22d3ee] to-[#34d399]" />
 
@@ -711,9 +792,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                 <History className="h-2.5 w-2.5" />
               ) : (
                 <span className="relative h-2 w-2">
-                  {isWorking && (
-                    <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />
-                  )}
+                  {isWorking && <i className="anim-ping absolute inset-0 rounded-full bg-[#34d399]" />}
                   <i
                     className="absolute inset-0 rounded-full"
                     style={{ background: isWorking ? '#34d399' : '#22d3ee' }}
@@ -844,23 +923,17 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                       }}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-console-caption font-bold text-zinc-100">
-                          {s.title}
-                        </div>
+                        <div className="truncate text-console-caption font-bold text-zinc-100">{s.title}</div>
                         <div className="font-mono-tech flex items-center gap-1.5 text-console-micro text-zinc-500">
                           <span>{s.id.slice(0, 8)}</span>
                           <span>·</span>
                           <span>{formatRelativeAge(s.lastActivityTs)}</span>
                           {s.hasPlan && (
-                            <span className="rounded bg-[#a78bfa]/20 px-1 text-[#a78bfa]">
-                              PLAN
-                            </span>
+                            <span className="rounded bg-[#a78bfa]/20 px-1 text-[#a78bfa]">PLAN</span>
                           )}
                         </div>
                       </div>
-                      {isCurrent && (
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#22d3ee]" />
-                      )}
+                      {isCurrent && <span className="h-2 w-2 shrink-0 rounded-full bg-[#22d3ee]" />}
                     </button>
                   );
                 })}
@@ -896,9 +969,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                     <div className="text-console-body font-bold text-zinc-300">
                       Waiting for live Antigravity session
                     </div>
-                    <div className="sub">
-                      Restart npm run live on Mac to stream chat, terminal & diffs
-                    </div>
+                    <div className="sub">Restart npm run live on Mac to stream chat, terminal & diffs</div>
                   </div>
                 </div>
               )}
@@ -930,6 +1001,21 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
 
         {mainMode === 'diff' && (
           <div className="min-h-0 flex-1">
+            {deck.antigravityDiff?.revision && deck.antigravityDiff.file === selectedDiffFile && (
+              <div className="flex justify-end gap-4 text-sm">
+                <button disabled={busy} onClick={() => void review('accept')}>
+                  Accept · stage
+                </button>
+                <button disabled={busy} onClick={() => void review('revert')}>
+                  Revert file
+                </button>
+              </div>
+            )}
+            {deck.antigravityDiff?.file === selectedDiffFile && !deck.antigravityDiff?.revision && (
+              <p className="text-xs text-zinc-400">
+                Preview only. Large, binary and metadata-only changes need desktop review.
+              </p>
+            )}
             <ColorDiffInspector
               diff={deck.antigravityDiff}
               loadingFile={selectedDiffFile}
@@ -943,10 +1029,23 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           data-no-swipe="true"
           onSubmit={(e) => {
             e.preventDefault();
+            generation.current++;
             sendPrompt();
           }}
           className="mt-1.5 flex items-center gap-1.5 border-t border-white/[0.06] pt-1.5"
         >
+          <button type="button" disabled={busy} onClick={() => void capture()} className="text-xs">
+            Snapshot
+          </button>
+          <select
+            aria-label="Dictation language"
+            className="bg-black text-xs"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            <option value="ar-EG">عربي</option>
+            <option value="en-US">EN</option>
+          </select>
           <motion.button
             type="button"
             whileTap={{ scale: 0.9 }}
@@ -965,7 +1064,10 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           <input
             type="text"
             value={promptText}
-            onChange={(e) => setPromptText(e.target.value)}
+            onChange={(e) => {
+              generation.current++;
+              setPromptText(e.target.value);
+            }}
             placeholder={listening ? 'Listening…' : 'Send prompt to Antigravity IDE…'}
             className="h-7 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/75 px-2.5 text-console-caption text-white outline-none placeholder:text-zinc-500 focus:border-[#22d3ee]"
           />
@@ -1080,31 +1182,40 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
                   </span>
                 </div>
                 <div className="space-y-1">
-                  {ag.diffFiles.map((f) => {
-                    const active = mainMode === 'diff' && selectedDiffFile === f.file;
-                    return (
-                      <button
-                        key={f.file}
-                        type="button"
-                        onClick={() => openFileDiff(f.file)}
-                        className="flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-console-caption transition-colors"
-                        style={{
-                          background: active ? '#34d3991c' : 'rgba(255,255,255,0.04)',
-                          borderColor: active ? '#34d39966' : 'rgba(255,255,255,0.05)',
-                        }}
-                      >
-                        <span className="font-mono-tech min-w-0 flex-1 truncate text-zinc-200">
-                          {f.file}
-                        </span>
-                        <span className="num shrink-0 font-bold">
-                          <span className="text-[#34d399]">+{f.added}</span>{' '}
-                          <span className="text-[#ff5d6c]">-{f.removed}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {Array.from(filesByFolder.keys())
+                    .sort()
+                    .map((folder) => (
+                      <details open key={folder}>
+                        <summary className="cursor-pointer py-1 text-xs text-zinc-400">
+                          {folder === '.' ? 'Project root' : folder}
+                        </summary>
+                        {filesByFolder.get(folder)!.map((f) => {
+                          const active = mainMode === 'diff' && selectedDiffFile === f.file;
+                          return (
+                            <button
+                              key={f.file}
+                              type="button"
+                              onClick={() => openFileDiff(f.file)}
+                              className="flex w-full items-center justify-between gap-1.5 rounded-lg border px-2 py-1.5 text-left text-console-caption transition-colors"
+                              style={{
+                                background: active ? '#34d3991c' : 'rgba(255,255,255,0.04)',
+                                borderColor: active ? '#34d39966' : 'rgba(255,255,255,0.05)',
+                              }}
+                            >
+                              <span className="font-mono-tech min-w-0 flex-1 truncate text-zinc-200">
+                                {f.file.split('/').pop()}
+                              </span>
+                              <span className="num shrink-0 font-bold">
+                                <span className="text-[#34d399]">+{f.added}</span>{' '}
+                                <span className="text-[#ff5d6c]">-{f.removed}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </details>
+                    ))}
                   {ag.diffFiles.length === 0 && (
-                    <div className="sub py-3 text-center">Working tree clean</div>
+                    <div className="sub py-3 text-center">No unstaged files to review</div>
                   )}
                 </div>
               </div>

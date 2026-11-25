@@ -1,3 +1,4 @@
+import { loadLocal, saveLocal } from './localStore.js';
 import { execFile } from 'node:child_process';
 import dns from 'node:dns/promises';
 import os from 'node:os';
@@ -474,6 +475,32 @@ Write-Output ("DNS=" + ($dns -join ','))
       ]);
 
       const devices = await this.scanArpDevices(gwDns.gatewayIp);
+      const gateway = devices.find((d) => d.isGateway);
+      if (gwDns.gatewayIp && (gateway || wifi.ssid !== 'Connected Wi-Fi')) {
+        const networks = loadLocal<Record<string, string[]>>('networks.json', {});
+        const key = JSON.stringify([wifi.ssid, gateway?.mac || gwDns.gatewayIp]);
+        const previous = networks[key];
+        const known = new Set(previous);
+        for (const device of devices) {
+          if (device.isSelf || device.isGateway) continue;
+          const mac = device.mac
+            .toLowerCase()
+            .replace(/-/g, ':')
+            .split(':')
+            .map((part) => part.padStart(2, '0'))
+            .join(':');
+          if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac) || parseInt(mac.slice(0, 2), 16) & 1) continue;
+          device.isNew = !!previous && !known.has(mac);
+          known.add(mac);
+        }
+        if (gateway || known.size) {
+          networks[key] = [...known];
+          saveLocal('networks.json', networks);
+          const count = devices.filter((d) => d.isNew).length;
+          if (count)
+            this.onAlert?.('warning', count + ' newly observed Wi-Fi device' + (count > 1 ? 's' : ''));
+        }
+      }
 
       this.state = {
         ...this.state,

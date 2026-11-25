@@ -137,6 +137,11 @@ export function DeckShell() {
   const overlayOpen = pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion);
   const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
 
+  useEffect(() => {
+    const view = new URLSearchParams(window.location.search).get('view');
+    const idx = PAGES.findIndex((p) => p.id === view);
+    if (idx >= 0) setPageIdx(idx);
+  }, []);
   const activePage = PAGES[pageIdx];
   const activeView = activePage.id;
 

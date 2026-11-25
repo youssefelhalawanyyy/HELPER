@@ -11,3 +11,4 @@ iphone-pwa/.next/
 iphone-pwa/out/
 .env
 .env.local
+mac-bridge/data/metrics/

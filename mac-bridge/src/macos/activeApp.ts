@@ -9,7 +9,7 @@ export async function getFrontmostAppName(): Promise<string> {
   if (IS_WIN) {
     try {
       const out = await runPowerShell(
-        `Add-Type 'using System; using System.Runtime.InteropServices; public class Fg { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p); }'; $h=[Fg]::GetForegroundWindow(); $pid=0; [Fg]::GetWindowThreadProcessId($h, [ref]$pid) | Out-Null; (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName`,
+        `Add-Type 'using System; using System.Runtime.InteropServices; public class Fg { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p); }'; $h=[Fg]::GetForegroundWindow(); $foregroundPid=0; [Fg]::GetWindowThreadProcessId($h, [ref]$foregroundPid) | Out-Null; (Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue).ProcessName`,
         1800,
       );
       return out.trim() || 'Windows';
@@ -31,7 +31,17 @@ export async function getFrontmostAppName(): Promise<string> {
 }
 
 export function resolveProfileForApp(appName: string, profiles: DeckProfile[]): ProfileId {
-  const lower = appName.toLowerCase();
+  const lower =
+    (
+      {
+        chrome: 'google chrome',
+        msedge: 'google chrome',
+        windowsterminal: 'terminal',
+        pwsh: 'terminal',
+        powershell: 'terminal',
+        cmd: 'terminal',
+      } as Record<string, string>
+    )[appName.toLowerCase()] || appName.toLowerCase();
   for (const profile of profiles) {
     if (profile.id === 'general') continue;
     for (const candidate of profile.matchApps) {

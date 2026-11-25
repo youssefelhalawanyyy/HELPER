@@ -1,5 +1,6 @@
 'use client';
 
+import { TrackpadAccessories } from './TrackpadAccessories';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -131,6 +132,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   // Trackpad pro filtering (One-Euro filter + Apple ballistic curve + 2-finger inertia scroll + drag lock)
   const [padPreset, setPadPreset] = useState<TrackpadPreset>('macbook');
   const [dragLock, setDragLock] = useState(false);
+  const gesture = useRef({ mode: 'pending', span: 0, x: 0, y: 0 });
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const twoFingerRef = useRef(false);
   const padFilterX = useRef(new OneEuro1D());
@@ -301,12 +303,33 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             </div>
           </div>
 
+          <TrackpadAccessories deck={deck} />
           <div
             data-no-swipe="true"
             onPointerDown={(e) => {
               e.currentTarget.setPointerCapture(e.pointerId);
               pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+              const fingers = Array.from(pointersRef.current.values());
+              if (fingers.length === 1) {
+                gesture.current.mode = 'pending';
+                if (padRafRef.current !== null) cancelAnimationFrame(padRafRef.current);
+                padRafRef.current = null;
+              }
+              if (fingers.length === 2) {
+                const [a, b] = fingers;
+                gesture.current = {
+                  mode: 'pending',
+                  span: Math.hypot(a.x - b.x, a.y - b.y),
+                  x: (a.x + b.x) / 2,
+                  y: (a.y + b.y) / 2,
+                };
+              }
+              if (fingers.length === 3) {
+                gesture.current.mode = 'spaces';
+                gesture.current.x = fingers.reduce((sum, p) => sum + p.x, 0) / 3;
+                padPendingRef.current = { dx: 0, dy: 0, sx: 0, sy: 0 };
+              }
               if (pointersRef.current.size >= 2) {
                 twoFingerRef.current = true;
               } else {
@@ -362,6 +385,41 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const dist = Math.hypot(rawDx, rawDy);
               padMovedDistRef.current += dist;
 
+              const fingers = Array.from(pointersRef.current.values());
+              const g = gesture.current;
+              if (g.mode === 'spaces' || g.mode === 'done') {
+                if (fingers.length === 3 && g.mode === 'spaces') {
+                  const distance = fingers.reduce((sum, p) => sum + p.x, 0) / 3 - g.x;
+                  if (Math.abs(distance) > 55) {
+                    deck.sendEvent({
+                      type: 'shortcut:trigger',
+                      payload: { shortcutId: distance < 0 ? 'space.next' : 'space.prev' },
+                    });
+                    g.mode = 'done';
+                  }
+                }
+                return;
+              }
+              if (fingers.length === 2) {
+                const [a, b] = fingers;
+                const span = Math.hypot(a.x - b.x, a.y - b.y),
+                  delta = span - g.span;
+                if (g.mode === 'pending') {
+                  if (Math.abs(delta) > 15) g.mode = 'zoom';
+                  else if (Math.hypot((a.x + b.x) / 2 - g.x, (a.y + b.y) / 2 - g.y) > 9) g.mode = 'scroll';
+                  else return;
+                }
+                if (g.mode === 'zoom') {
+                  if (Math.abs(delta) > 23) {
+                    deck.sendEvent({
+                      type: 'shortcut:trigger',
+                      payload: { shortcutId: delta > 0 ? 'zoom.in' : 'zoom.out' },
+                    });
+                    g.span = span;
+                  }
+                  return;
+                }
+              } else if (twoFingerRef.current) return;
               // Two-finger smooth scroll with momentum velocity capture
               if (pointersRef.current.size >= 2) {
                 const sdx = rawDx * 1.45;
@@ -406,10 +464,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               // Stage 4: MacBook Pro ballistic velocity acceleration curve
               const velocityPxPerSec = Math.hypot(px, py) / dt;
               const speedNorm = Math.min(30, velocityPxPerSec / 90);
-              const gain = Math.min(
-                cfg.maxGain,
-                cfg.baseGain + Math.pow(speedNorm, 1.2) * cfg.accel,
-              );
+              const gain = Math.min(cfg.maxGain, cfg.baseGain + Math.pow(speedNorm, 1.2) * cfg.accel);
 
               padPendingRef.current.dx += px * gain;
               padPendingRef.current.dy += py * gain;
@@ -422,17 +477,18 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   cancelAnimationFrame(padRafRef.current);
                   padRafRef.current = null;
                 }
-                if (padMovedDistRef.current < 8) {
+                if (padMovedDistRef.current < 8 && gesture.current.mode === 'pending') {
                   soundEngine.playClick();
                   deck.sendEvent({
                     type: 'trackpad:click',
                     payload: { button: twoFingerRef.current ? 'right' : 'left' },
                   });
-                } else if (twoFingerRef.current) {
+                } else if (gesture.current.mode === 'scroll') {
                   // Smooth MacBook-style 2-finger inertia scroll glide on release
                   let { vx, vy } = padScrollVelRef.current;
                   const glide = () => {
                     if (padActiveRef.current || (Math.abs(vx) < 0.7 && Math.abs(vy) < 0.7)) {
+                      padRafRef.current = null;
                       return;
                     }
                     deck.sendEvent({
@@ -452,6 +508,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               }
             }}
             onPointerCancel={(e) => {
+              gesture.current.mode = 'done';
               pointersRef.current.delete(e.pointerId);
               if (pointersRef.current.size === 0) {
                 padActiveRef.current = false;
@@ -460,7 +517,9 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
             className="grid flex-1 touch-none place-items-center rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.09),rgba(0,0,0,0.88))]"
           >
             <div className="pointer-events-none text-center">
-              <div className="sub">1-Finger Move &amp; Tap · 2-Finger Scroll &amp; Right-Click</div>
+              <div className="sub">
+                Move & tap · Two fingers to scroll, pinch or right-click · Three to switch desktops
+              </div>
               <div className="mt-0.5 text-console-caption text-[#22d3ee]/70">
                 One-Euro Filter · 120Hz Native CoreGraphics Interpolation
               </div>

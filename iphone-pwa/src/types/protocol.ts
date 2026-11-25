@@ -1,6 +1,6 @@
-export type ProfileId = 'antigravity' | 'vscode' | 'chrome' | 'terminal' | 'general';
+export type ProfileId = 'antigravity' | 'vscode' | 'chrome' | 'terminal' | 'music' | 'general';
 
-export type MacroActionType = 'shortcut' | 'shell' | 'snippet' | 'terminal' | 'stream' | 'voice';
+export type MacroActionType = 'shortcut' | 'shell' | 'snippet' | 'terminal' | 'stream' | 'voice' | 'chain';
 
 export interface MacroButton {
   id: string;
@@ -190,6 +190,9 @@ export interface MediaState {
   track: string;
   artist: string;
   player: string;
+  artworkUrl?: string;
+  positionSec?: number;
+  durationSec?: number;
 }
 
 export interface BridgeHello {
@@ -281,6 +284,7 @@ export interface AntigravitySessionSummary {
 }
 
 export interface AntigravityFileDiff {
+  revision?: string;
   file: string;
   patch: string;
   added: number;
@@ -394,6 +398,7 @@ export interface NetworkDevice {
   mac: string;
   hostname: string;
   vendor: string;
+  isNew?: boolean;
   isGateway?: boolean;
   isSelf?: boolean;
 }
@@ -466,6 +471,7 @@ export interface PowerThermalState {
   fanControlSupported: boolean;
   fanMode: FanMode;
   fanNote: string;
+  autoPilot?: boolean;
   lowPowerMode: boolean;
   powerProfile: PowerProfile;
   chargeGuardEnabled: boolean;
@@ -522,15 +528,24 @@ export type ClientEvent =
   | { type: 'git:deploy'; payload: { requestId: string; action: 'push' | 'deploy' } }
   | { type: 'webhook:replay'; payload: { requestId: string; eventId: string; targetBaseUrl?: string } }
   | { type: 'webhook:copy'; payload: { requestId: string; eventId: string } }
-  | { type: 'hardware:dial'; payload: { mode: 'volume' | 'brightness' | 'scroll'; delta: number; value?: number } }
+  | {
+      type: 'hardware:dial';
+      payload: { mode: 'volume' | 'brightness' | 'scroll'; delta: number; value?: number };
+    }
   | { type: 'hardware:mute'; payload: { requestId: string; muted: boolean } }
   | { type: 'hardware:lock'; payload: { requestId: string } }
   | { type: 'hardware:wake'; payload: { requestId: string } }
   | { type: 'hardware:caffeine'; payload: { requestId: string; active: boolean } }
   | { type: 'window:snap'; payload: { requestId: string; position: WindowSnapPosition } }
-  | { type: 'process:kill'; payload: { requestId: string; pid: number } }
+  | {
+      type: 'process:kill';
+      payload: { requestId: string; pid: number; force?: boolean; expectedName?: string };
+    }
   | { type: 'processes:refresh'; payload: { requestId: string } }
-  | { type: 'docker:action'; payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' } }
+  | {
+      type: 'docker:action';
+      payload: { requestId: string; id: string; action: 'start' | 'stop' | 'restart' };
+    }
   | { type: 'docker:refresh'; payload: { requestId: string } }
   | { type: 'app:focus'; payload: { requestId: string; appName: string } }
   | { type: 'trackpad:move'; payload: { dx: number; dy: number; drag?: boolean } }
@@ -569,6 +584,7 @@ export type ClientEvent =
       type: 'power:guardConfig';
       payload: {
         requestId: string;
+        autoPilot?: boolean;
         chargeGuardEnabled?: boolean;
         chargeGuardPct?: number;
         overheatGuardEnabled?: boolean;

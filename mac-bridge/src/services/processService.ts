@@ -110,19 +110,28 @@ export class ProcessAndDockerService {
     }
   }
 
-  async killProcess(pid: number): Promise<{ ok: boolean; message: string }> {
+  async killProcess(
+    pid: number,
+    force = false,
+    expectedName?: string,
+  ): Promise<{ ok: boolean; message: string }> {
     if (pid === process.pid) {
       return { ok: false, message: 'Cannot terminate DevDeck bridge itself' };
     }
     const found = this.latestProcesses.find((p) => p.pid === pid);
-    if (!found) {
+    if (!found || (expectedName && found.name !== expectedName)) {
       return { ok: false, message: `Process PID ${pid} is not in the active hog list` };
     }
     try {
+      const live = IS_WIN
+        ? (await si.processes()).list.find((p) => p.pid === pid)?.name.replace(/\.exe$/i, '')
+        : path.basename((await execFileAsync('ps', ['-p', String(pid), '-o', 'comm='])).stdout.trim());
+      if (!live || live !== found.name || PROTECTED_PROCESSES.has(live))
+        throw Error('Process changed. Refresh the list.');
       if (IS_WIN) {
-        await execFileAsync('taskkill', ['/PID', String(pid), '/F'], { timeout: 3000 });
+        await execFileAsync('taskkill', ['/PID', String(pid), ...(force ? ['/F'] : [])], { timeout: 3000 });
       } else {
-        process.kill(pid, 'SIGTERM');
+        process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
       }
       await new Promise((r) => setTimeout(r, 300));
       await this.scanProcesses();

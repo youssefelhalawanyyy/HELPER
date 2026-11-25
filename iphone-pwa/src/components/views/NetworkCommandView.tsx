@@ -427,7 +427,7 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-console-caption font-extrabold text-white">
-                          {dev.hostname}
+                          {dev.hostname} {dev.isNew && <strong className="text-amber-300">New device</strong>}
                         </span>
                         {dev.isGateway && (
                           <span className="rounded bg-[#fbbf24]/20 px-1 text-console-micro font-extrabold text-[#fbbf24]">

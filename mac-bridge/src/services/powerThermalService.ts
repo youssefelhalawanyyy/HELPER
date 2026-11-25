@@ -1,3 +1,4 @@
+import { loadLocal, saveLocal } from './localStore.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,6 +36,8 @@ export class PowerThermalService {
   private smcBin: string | null = findSmcBinary();
 
   // Alert hysteresis flags so chimes fire once per crossing instead of spamming
+  private ecoAttempted = false;
+  private swapSample?: { used: number; ts: number };
   private chargeAlertFired = false;
   private overheatAlertFired = false;
   private lowBattAlertFired = false;
@@ -67,6 +70,7 @@ export class PowerThermalService {
     fanNote: 'Detecting cooling hardware…',
     lowPowerMode: false,
     powerProfile: 'balanced',
+    autoPilot: loadLocal('autopilot.json', false),
     chargeGuardEnabled: true,
     chargeGuardPct: 80,
     overheatGuardEnabled: true,
@@ -117,10 +121,7 @@ export class PowerThermalService {
     if (this.state.hardwareModel) return;
     if (IS_WIN) {
       try {
-        const out = await runPowerShell(
-          '(Get-CimInstance Win32_ComputerSystem).Model',
-          2500,
-        );
+        const out = await runPowerShell('(Get-CimInstance Win32_ComputerSystem).Model', 2500);
         this.state.hardwareModel = out.trim() || 'Windows PC';
       } catch {
         this.state.hardwareModel = 'Windows PC';
@@ -134,7 +135,9 @@ export class PowerThermalService {
       this.state.hardwareModel = 'Mac';
     }
     // Apple Silicon MacBook Air models (MacBookAir10,1, Mac14,2, Mac14,15, Mac15,12, Mac15,13, Mac16,12, Mac16,13) are fanless
-    if (/MacBookAir10,1|Mac14,2|Mac14,15|Mac15,12|Mac15,13|Mac16,12|Mac16,13/i.test(this.state.hardwareModel)) {
+    if (
+      /MacBookAir10,1|Mac14,2|Mac14,15|Mac15,12|Mac15,13|Mac16,12|Mac16,13/i.test(this.state.hardwareModel)
+    ) {
       this.state.fanless = true;
     }
   }
@@ -339,7 +342,10 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
         ['--query-gpu=temperature.gpu,fan.speed,power.draw', '--format=csv,noheader,nounits'],
         { timeout: 2000 },
       );
-      const parts = stdout.trim().split(',').map((s) => Number(s.trim()));
+      const parts = stdout
+        .trim()
+        .split(',')
+        .map((s) => Number(s.trim()));
       if (Number.isFinite(parts[0])) this.state.gpuTempC = parts[0];
       if (Number.isFinite(parts[2]) && parts[2] > 0 && this.state.powerDrawW === null) {
         this.state.powerDrawW = Number(parts[2].toFixed(1));
@@ -422,10 +428,7 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
         if (batt.designedCapacity && batt.maxCapacity && batt.designedCapacity > 0) {
           this.state.designCapacityMah = Math.round(batt.designedCapacity);
           this.state.maxCapacityMah = Math.round(batt.maxCapacity);
-          this.state.healthPct = Math.min(
-            100,
-            Math.round((batt.maxCapacity / batt.designedCapacity) * 100),
-          );
+          this.state.healthPct = Math.min(100, Math.round((batt.maxCapacity / batt.designedCapacity) * 100));
         }
       }
 
@@ -448,6 +451,27 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
         else if (peak >= 72) this.state.thermalPressure = 'Moderate';
       }
 
+      if (this.state.autoPilot) {
+        const s = this.state;
+        if (batt?.hasBattery && !s.acConnected && !s.isCharging && s.batteryPct < 25) {
+          if (!this.ecoAttempted && !s.lowPowerMode) {
+            this.ecoAttempted = true;
+            try {
+              this.onAlert?.('success', await this.setPowerProfile('eco'));
+            } catch (err) {
+              this.onAlert?.('warning', (err as Error).message);
+            }
+          }
+        } else this.ecoAttempted = false;
+        const memory = await si.mem().catch(() => null);
+        if (memory) {
+          const previous = this.swapSample;
+          const spike = previous && memory.swapused - previous.used >= 512 * 1024 ** 2;
+          if (spike) this.onAlert?.('warning', 'Swap usage grew by at least 512 MB within one minute');
+          if (!previous || spike || Date.now() - previous.ts >= 60000)
+            this.swapSample = { used: memory.swapused, ts: Date.now() };
+        }
+      }
       this.state.updatedAt = Date.now();
       this.evaluateAlerts();
       this.emit();
@@ -458,12 +482,19 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
   }
 
   updateGuardConfig(cfg: {
+    autoPilot?: boolean;
     chargeGuardEnabled?: boolean;
     chargeGuardPct?: number;
     overheatGuardEnabled?: boolean;
     overheatTempC?: number;
     lowBatteryGuardEnabled?: boolean;
   }): string {
+    if (typeof cfg.autoPilot === 'boolean') {
+      saveLocal('autopilot.json', cfg.autoPilot);
+      this.state.autoPilot = cfg.autoPilot;
+      this.ecoAttempted = false;
+      this.swapSample = undefined;
+    }
     if (typeof cfg.chargeGuardEnabled === 'boolean') {
       this.state.chargeGuardEnabled = cfg.chargeGuardEnabled;
       this.chargeAlertFired = false;
@@ -490,7 +521,6 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
   }
 
   async setPowerProfile(profile: PowerProfile): Promise<string> {
-    this.state.powerProfile = profile;
     if (IS_WIN) {
       const guid =
         profile === 'eco'
@@ -500,12 +530,13 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
             : '381b4222-f694-41f0-9685-ff5bb260df2e';
       try {
         await execFileAsync('powercfg', ['/setactive', guid], { timeout: 3000 });
+        this.state.powerProfile = profile;
         this.state.lowPowerMode = profile === 'eco';
         this.emit();
         return `Windows Power Plan → ${profile.toUpperCase()}`;
       } catch {
         this.emit();
-        return `Switched preference to ${profile.toUpperCase()} (some Windows plans require Admin)`;
+        throw Error('Windows could not activate the power plan. Check available plans and permissions.');
       }
     }
 
@@ -515,20 +546,23 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
       await execFileAsync('pmset', ['-a', 'lowpowermode', wantLowPower ? '1' : '0'], {
         timeout: 2500,
       });
+      this.state.powerProfile = profile;
       this.state.lowPowerMode = wantLowPower;
       this.emit();
       return `macOS Power Profile → ${wantLowPower ? 'ECO (Low Power ON)' : profile.toUpperCase()}`;
     } catch {
       // pmset -a requires sudo on macOS; open Battery settings pane or use osascript admin prompt?
       // Better: keep non-blocking and inform cleanly
-      this.state.lowPowerMode = wantLowPower;
-      this.emit();
-      return `macOS ${profile.toUpperCase()} requested (Low Power Mode toggle needs Admin / Battery Settings)`;
+      throw Error('macOS could not change Low Power Mode. Check power management permissions.');
     }
   }
 
   async setFanMode(mode: FanMode): Promise<string> {
-    this.state.fanMode = mode;
+    const applied = (message: string) => {
+      this.state.fanMode = mode;
+      this.emit();
+      return message;
+    };
 
     if (IS_WIN) {
       // Windows System Cooling Policy: 0 = Passive (Quiet), 1 = Active (Balanced/Max)
@@ -539,46 +573,47 @@ if ($fans.Count -gt 0) { Write-Output ("FANS=" + ($fans -join ',')) }
           ['/setacvalueindex', 'SCHEME_CURRENT', 'SUB_PROCESSOR', 'SYSCOOLPOL', coolVal],
           { timeout: 2500 },
         );
+        await execFileAsync(
+          'powercfg',
+          ['/setdcvalueindex', 'SCHEME_CURRENT', 'SUB_PROCESSOR', 'SYSCOOLPOL', coolVal],
+          { timeout: 2500 },
+        );
         await execFileAsync('powercfg', ['/setactive', 'SCHEME_CURRENT'], { timeout: 2000 });
-        this.emit();
-        return `Windows Cooling Policy → ${mode.toUpperCase()} (${coolVal === '1' ? 'Active Fan' : 'Passive Quiet'})`;
+        return applied(
+          `Windows Cooling Policy → ${mode.toUpperCase()} (${coolVal === '1' ? 'Active Fan' : 'Passive Quiet'})`,
+        );
       } catch {
-        this.emit();
-        return `Fan profile set to ${mode.toUpperCase()} (Run as Admin for Windows cooling policy)`;
+        throw Error(
+          'Windows could not apply the cooling policy. Check hardware support and administrator permissions.',
+        );
       }
     }
 
     if (this.state.fanless) {
-      this.emit();
       if (mode === 'max' || mode === 'quiet') {
         await this.setPowerProfile('eco');
-        return 'MacBook Air is fanless — switched to Eco cooling profile';
+        return applied('Fanless Mac switched to the Eco power profile');
       }
-      return 'MacBook Air uses passive fanless cooling (no physical fan)';
+      return applied('This Mac uses passive cooling');
     }
 
     if (this.smcBin) {
       try {
         if (mode === 'auto') {
           await execFileAsync(this.smcBin, ['-k', 'FS! ', '-w', '0000'], { timeout: 2000 });
-          this.emit();
-          return 'Mac Fans → Automatic macOS Control';
+          return applied('Mac fans returned to automatic control');
         }
         const max = this.state.fanMaxRpm || 5500;
-        const targetRpm =
-          mode === 'quiet' ? 2000 : mode === 'balanced' ? Math.round(max * 0.6) : max;
+        const targetRpm = mode === 'quiet' ? 2000 : mode === 'balanced' ? Math.round(max * 0.6) : max;
         const hex = (targetRpm << 2).toString(16).padStart(4, '0');
         await execFileAsync(this.smcBin, ['-k', 'F0Mn', '-w', hex], { timeout: 2000 });
-        this.emit();
-        return `Mac Fan Target → ${targetRpm} RPM (${mode.toUpperCase()})`;
+        return applied(`Mac fan target → ${targetRpm} RPM (${mode.toUpperCase()})`);
       } catch {
-        this.emit();
-        return `SMC fan write needs sudo/root permissions (${mode.toUpperCase()})`;
+        throw Error('The Mac could not apply the fan setting. Check SMC access.');
       }
     }
 
-    this.emit();
-    return `Fan Mode → ${mode.toUpperCase()} (install smcFanControl for direct Mac RPM control)`;
+    throw Error('Direct RPM control requires a compatible Mac and an installed SMC utility.');
   }
 
   async runPowerAction(action: PowerAction): Promise<string> {

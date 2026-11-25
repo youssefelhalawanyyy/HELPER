@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { DeskWeather } from './DeskWeather';
+import styles from './DeskClock.module.css';
 import {
-  BatteryCharging,
-  CloudSun,
   Cpu,
   ExternalLink,
   Globe,
@@ -45,6 +45,8 @@ export interface DeskBreakController {
 
 export function PreviewAmbientView({
   deck,
+  deskBreak,
+  onPair,
 }: {
   deck: DevDeckState;
   deskBreak?: DeskBreakController;
@@ -52,77 +54,27 @@ export function PreviewAmbientView({
 }) {
   const [mode, setMode] = useState<'ambient' | 'preview'>('ambient');
   const [urlInput, setUrlInput] = useState(deck.previewUrl);
-  const [now, setNow] = useState(() => new Date());
-  const [weather, setWeather] = useState<{ tempC: number; label: string } | null>(null);
-  const [breakSec, setBreakSec] = useState<number>(0);
-
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
-
   useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(t);
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
-
-  // Quick 5m / 10m / 15m break countdown with Web Audio chime
-  useEffect(() => {
-    if (breakSec <= 0) return;
-    const t = window.setInterval(() => {
-      setBreakSec((prev) => {
-        if (prev <= 1) {
-          soundEngine.playSuccessChime();
-          deck.triggerFlash('success', 'Break timer complete!');
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(t);
-  }, [breakSec, deck]);
-
-  // Free keyless live local weather via Open-Meteo
-  useEffect(() => {
-    let cancelled = false;
-    const fetchWeather = async (lat: number, lon: number) => {
-      try {
-        const res = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`,
-        );
-        const data = (await res.json()) as {
-          current?: { temperature_2m?: number; weather_code?: number };
-        };
-        if (cancelled || data.current?.temperature_2m === undefined) return;
-        const code = data.current.weather_code ?? 0;
-        const label =
-          code === 0 ? 'Clear' : code <= 3 ? 'Cloudy' : code < 70 ? 'Rain' : 'Storm';
-        setWeather({ tempC: Math.round(data.current.temperature_2m), label });
-      } catch {
-        // Ignore offline weather fetch
-      }
-    };
-
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => void fetchWeather(pos.coords.latitude, pos.coords.longitude),
-        () => void fetchWeather(30.0444, 31.2357), // Fallback Cairo
-        { timeout: 3000 },
-      );
-    } else {
-      void fetchWeather(30.0444, 31.2357);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const breakSec = Math.max(
+    0,
+    Math.ceil(((deskBreak?.deadline || 0) - (now?.getTime() || Date.now())) / 1000),
+  );
   const resolvedUrl = useMemo(() => {
     const raw = deck.previewUrl || 'http://localhost:3000';
     if (!deck.hello?.lanIp) return raw;
     return raw.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/i, `//${deck.hello.lanIp}`);
   }, [deck.previewUrl, deck.hello?.lanIp]);
 
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-  const secStr = String(now.getSeconds()).padStart(2, '0');
-  const dateStr = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const timeStr = now?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) || '––:––';
+  const secStr = now ? String(now.getSeconds()).padStart(2, '0') : '––';
+  const dateStr =
+    now?.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) || 'Local time';
   const isConnected = deck.status === 'connected';
 
   if (mode === 'preview') {
@@ -179,105 +131,109 @@ export function PreviewAmbientView({
   }
 
   return (
-    <div className="screen-grid layout-clock">
-      {/* Left: OLED Desk Clock + Weather + World Clocks + Quick Break Timers + Mac Stats */}
-      <div className="tile flex flex-col justify-between p-3.5">
-        <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#60a5fa]" />
-
-        {/* Header: Date + Live Weather + Preview Switch */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="sub">{dateStr}</span>
-            {weather && (
-              <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-console-caption font-bold text-[#fbbf24]">
-                <CloudSun className="h-3 w-3" />
-                {weather.tempC}°C · {weather.label}
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              soundEngine.playClick();
-              setMode('preview');
-            }}
-            className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-0.5 text-console-caption font-bold text-[#34d399]"
-          >
-            <Globe className="h-3 w-3" />
-            PREVIEW
+    <div className={styles.dashboard}>
+      <section className={styles.hero}>
+        <header>
+          <span className={styles.eyebrow}>Desk Clock</span>
+          <button onClick={() => setMode('preview')}>
+            <Globe size={15} />
+            Preview
           </button>
-        </div>
-
-        {/* Giant OLED Clock + 3 World Clocks */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="num flex items-baseline gap-1">
-            <span className="disp text-[58px] tracking-tight">{timeStr}</span>
-            <span className="text-[18px] font-extrabold text-[#60a5fa]">:{secStr}</span>
+        </header>
+        <div className={styles.face}>
+          <div>
+            <p>{dateStr}</p>
+            <div className={styles.time}>
+              {timeStr}
+              <small>{secStr}</small>
+            </div>
           </div>
-
-          <div className="num space-y-1 text-right text-console-caption">
+          <div className={styles.dial} aria-hidden="true">
             {[
-              ['CAI', 'Africa/Cairo'],
-              ['LON', 'Europe/London'],
-              ['NYC', 'America/New_York'],
-            ].map(([code, tz]) => (
-              <div key={code} className="flex items-center justify-end gap-1.5">
-                <span className="sub !text-console-micro">{code}</span>
-                <span className="font-bold text-zinc-200">{formatWorldClock(now, tz)}</span>
-              </div>
+              [(now?.getHours() || 0) * 30 + (now?.getMinutes() || 0) / 2, 26],
+              [(now?.getMinutes() || 0) * 6, 37],
+              [(now?.getSeconds() || 0) * 6, 41],
+            ].map(([angle, length], i) => (
+              <i key={i} style={{ height: length + '%', transform: 'rotate(' + angle + 'deg)' }} />
             ))}
           </div>
         </div>
-
-        {/* Quick 5m / 10m / 15m Break Timers + Live Mac Health Strip */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            <Timer className="h-3.5 w-3.5 text-[#fbbf24]" />
-            {breakSec > 0 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setBreakSec(0);
-                }}
-                className="num rounded-full bg-[#fbbf24] px-2.5 py-0.5 text-console-caption font-extrabold text-black"
-              >
-                {formatTimer(breakSec)} · STOP
-              </button>
-            ) : (
-              [5, 10, 15].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    setBreakSec(m * 60);
-                  }}
-                  className="rounded-full bg-white/[0.07] px-2 py-0.5 text-console-caption font-bold text-zinc-200 hover:bg-[#fbbf24]/20 hover:text-[#fbbf24]"
-                >
-                  {m}m
-                </button>
-              ))
-            )}
-          </div>
-
-          <div className="num flex items-center gap-2 text-console-caption font-bold text-zinc-300">
-            <span className="flex items-center gap-0.5 text-[#22d3ee]">
-              <Cpu className="h-3 w-3" />
-              {isConnected ? `${deck.stats.cpuPct}%` : '--'}
-            </span>
-            <span className="flex items-center gap-0.5 text-[#34d399]">
-              <BatteryCharging className="h-3 w-3" />
-              {isConnected && deck.stats.batteryPct !== null ? `${deck.stats.batteryPct}%` : '--'}
-            </span>
-          </div>
+        <div className={styles.world}>
+          {[
+            ['Cairo', 'Africa/Cairo'],
+            ['London', 'Europe/London'],
+            ['New York', 'America/New_York'],
+          ].map(([city, zone]) => (
+            <div key={zone}>
+              <span>{city}</span>
+              <b>{now ? formatWorldClock(now, zone) : '––:––'}</b>
+            </div>
+          ))}
         </div>
-
+      </section>
+      <DeskWeather />
+      <section className={styles.instrument}>
+        <header>
+          <h2>
+            <Cpu size={17} />
+            Computer
+          </h2>
+          {!isConnected && <button onClick={onPair}>Pair desktop</button>}
+        </header>
+        <dl className={styles.readings}>
+          {[
+            ['CPU', deck.stats.cpuPct, '%'],
+            ['Memory', deck.stats.ramUsedGb, ' GB'],
+            ['Disk used', deck.stats.diskPct, '%'],
+            ['Battery', deck.stats.batteryPct, '%'],
+            ['CPU temp', deck.powerState?.cpuTempC, '°C'],
+            ['Power draw', deck.powerState?.powerDrawW, ' W'],
+            ['Download', deck.stats.netRxKBs, ' KB/s'],
+            ['Upload', deck.stats.netTxKBs, ' KB/s'],
+            ['Battery health', deck.powerState?.healthPct, '%'],
+          ].map(([label, value, unit]) => (
+            <div key={String(label)}>
+              <dt>{label}</dt>
+              <dd>{isConnected && value != null ? Number(Number(value).toFixed(1)) + String(unit) : '—'}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+      <section className={styles.instrument}>
+        <header>
+          <h2>
+            <Timer size={17} />
+            Break timer
+          </h2>
+          <span>{breakSec ? formatTimer(breakSec) : 'Ready'}</span>
+        </header>
+        <div className={styles.controls}>
+          {breakSec ? (
+            <button onClick={() => deskBreak?.changeDeadline(null)}>Stop timer</button>
+          ) : (
+            [5, 10, 15].map((m) => (
+              <button key={m} onClick={() => deskBreak?.changeDeadline(Date.now() + m * 60000)}>
+                {m} min
+              </button>
+            ))
+          )}
+        </div>
         {/* Mac Media Controls */}
         <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-2">
-          <div className="min-w-0">
+          {deck.mediaState.artworkUrl && (
+            <img className={styles.art} src={deck.mediaState.artworkUrl} alt="" />
+          )}
+          <div className="min-w-0 flex-1">
             <div className="truncate text-console-body font-bold">{deck.mediaState.track}</div>
             <div className="sub truncate !text-console-micro">{deck.mediaState.artist}</div>
+            {Boolean(deck.mediaState.durationSec) && (
+              <progress
+                aria-label="Track progress"
+                className={styles.progress}
+                value={deck.mediaState.positionSec || 0}
+                max={deck.mediaState.durationSec}
+              />
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {(['prev', 'playpause', 'next'] as const).map((action) => (
@@ -313,11 +269,10 @@ export function PreviewAmbientView({
             ))}
           </div>
         </div>
-      </div>
+      </section>
 
       {/* Right: Mac Clipboard History + Automatic "Open on iPhone" URL Detection */}
-      <div className="tile flex min-h-0 flex-col p-3.5">
-        <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#a78bfa]" />
+      <div className={styles.clipboard}>
         <div className="mb-2 flex items-center justify-between">
           <div className="disp text-[24px]">Clipboard</div>
           <span className="sub">{deck.clipboard.history.length} items</span>
@@ -364,7 +319,7 @@ export function PreviewAmbientView({
 
           {deck.clipboard.history.length === 0 && (
             <div className="sub grid h-full place-items-center text-center">
-              Copy any text or link on your Mac — links get a 1-tap Open on iPhone button
+              Copy text or a link on your computer to see it here.
             </div>
           )}
         </div>

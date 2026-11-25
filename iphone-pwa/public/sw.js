@@ -1,4 +1,4 @@
-const CACHE_NAME = 'devdeck-shell-v6';
+const CACHE_NAME = 'devdeck-shell-v7';
 const PRECACHE_URLS = [
   '/manifest.json',
   '/keepawake.mp4',
@@ -27,7 +27,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   // Never intercept cross-origin bridge/tunnel API or WebSocket calls
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || req.headers.has('authorization')) return;
 
   // Network-first for HTML page navigations so deployments apply immediately on refresh!
   if (req.mode === 'navigate') {
@@ -60,4 +60,15 @@ self.addEventListener('fetch', (event) => {
       return cached || networkPromise;
     }),
   );
+});
+
+self.addEventListener('push', event => {
+  const message = event.data?.json()?.message || 'Website status changed';
+  event.waitUntil(self.registration.showNotification('DevDeck • Website Monitor', {
+    body: message, icon: '/icons/icon-192.png',
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow('/?view=webmonitor'));
 });

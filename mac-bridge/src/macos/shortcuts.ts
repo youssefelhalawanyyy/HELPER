@@ -1,6 +1,7 @@
+import { controlMacMedia } from './media.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { IS_WIN, sendWinKeystroke, sendWinVirtualKey } from '../platform/win32.js';
+import { IS_WIN, runPowerShell, sendWinKeystroke, sendWinVirtualKey } from '../platform/win32.js';
 import { captureSelectionToClipboard, lockMacScreen, toggleMacMute } from './hardware.js';
 import { sendNativeMacKey } from './remoteControl.js';
 
@@ -26,18 +27,25 @@ const MAC_NATIVE_KEYS: Record<string, [number, number]> = {
 };
 
 const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
+  'zoom.in': 'tell application "System Events" to keystroke "=" using command down',
+  'zoom.out': 'tell application "System Events" to keystroke "-" using command down',
+  'space.next': 'tell application "System Events" to key code 124 using control down',
+  'space.prev': 'tell application "System Events" to key code 123 using control down',
   // Antigravity IDE
   'antigravity.agentChat': 'tell application "System Events" to keystroke "l" using {command down}',
-  'antigravity.newAgent': 'tell application "System Events" to keystroke "l" using {shift down, command down}',
+  'antigravity.newAgent':
+    'tell application "System Events" to keystroke "l" using {shift down, command down}',
   'antigravity.acceptChanges': 'tell application "System Events" to key code 36 using {command down}',
   'antigravity.rejectChanges': 'tell application "System Events" to key code 51 using {command down}',
   'antigravity.toggleTerminal': 'tell application "System Events" to keystroke "`" using {control down}',
-  'antigravity.commandPalette': 'tell application "System Events" to keystroke "p" using {shift down, command down}',
+  'antigravity.commandPalette':
+    'tell application "System Events" to keystroke "p" using {shift down, command down}',
 
   // VS Code / Cursor
   'vscode.format': 'tell application "System Events" to keystroke "f" using {shift down, option down}',
   'vscode.toggleTerminal': 'tell application "System Events" to keystroke "`" using {control down}',
-  'vscode.commandPalette': 'tell application "System Events" to keystroke "p" using {shift down, command down}',
+  'vscode.commandPalette':
+    'tell application "System Events" to keystroke "p" using {shift down, command down}',
   'vscode.saveAll': 'tell application "System Events" to keystroke "s" using {option down, command down}',
   'vscode.quickOpen': 'tell application "System Events" to keystroke "p" using {command down}',
   'vscode.toggleSidebar': 'tell application "System Events" to keystroke "b" using {command down}',
@@ -45,7 +53,8 @@ const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
   // Chrome / Browser
   'chrome.hardReload': 'tell application "System Events" to keystroke "r" using {shift down, command down}',
   'chrome.devTools': 'tell application "System Events" to keystroke "i" using {option down, command down}',
-  'chrome.responsiveToggle': 'tell application "System Events" to keystroke "m" using {shift down, command down}',
+  'chrome.responsiveToggle':
+    'tell application "System Events" to keystroke "m" using {shift down, command down}',
   'chrome.newTab': 'tell application "System Events" to keystroke "t" using {command down}',
   'chrome.closeTab': 'tell application "System Events" to keystroke "w" using {command down}',
   'chrome.console': 'tell application "System Events" to keystroke "j" using {option down, command down}',
@@ -81,6 +90,8 @@ const APPLESCRIPT_SHORTCUTS: Record<string, string> = {
 };
 
 const WINDOWS_SHORTCUTS: Record<string, string> = {
+  'zoom.in': '^=',
+  'zoom.out': '^-',
   // Antigravity IDE (Windows uses Ctrl)
   'antigravity.agentChat': '^l',
   'antigravity.newAgent': '^+l',
@@ -133,13 +144,28 @@ const WINDOWS_SHORTCUTS: Record<string, string> = {
 
 export function isKnownShortcut(shortcutId: string): boolean {
   return (
-    shortcutId in APPLESCRIPT_SHORTCUTS ||
+    ['media.prev', 'media.next', 'media.playpause'].includes(shortcutId) ||
+    Object.hasOwn(APPLESCRIPT_SHORTCUTS, shortcutId) ||
     shortcutId === 'system.toggleMute' ||
     shortcutId === 'system.lockScreen'
   );
 }
 
 export async function runShortcut(shortcutId: string): Promise<string> {
+  if (shortcutId === 'media.prev' || shortcutId === 'media.next' || shortcutId === 'media.playpause')
+    return controlMacMedia(
+      shortcutId === 'media.prev' ? 'prev' : shortcutId === 'media.next' ? 'next' : 'playpause',
+    );
+  if (IS_WIN && (shortcutId === 'space.next' || shortcutId === 'space.prev')) {
+    const arrow = shortcutId === 'space.next' ? 39 : 37;
+    const result =
+      await runPowerShell(`Add-Type -Name Keys -Namespace Deck -MemberDefinition '[DllImport("user32.dll")] public static extern void keybd_event(byte k,byte s,uint flags,UIntPtr extra);'
+foreach($k in 17,91,${arrow}){[Deck.Keys]::keybd_event($k,0,0,[UIntPtr]::Zero)}
+foreach($k in ${arrow},91,17){[Deck.Keys]::keybd_event($k,0,2,[UIntPtr]::Zero)}
+'OK'`);
+    if (!result.includes('OK')) throw Error('Desktop switch failed');
+    return 'Switched desktop';
+  }
   if (shortcutId === 'system.screenshotSelection') {
     captureSelectionToClipboard();
     return IS_WIN

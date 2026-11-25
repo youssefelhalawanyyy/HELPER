@@ -179,12 +179,7 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
               onClick={() => void handleOrbTap()}
               whileTap={{ scale: 0.92 }}
               animate={{
-                scale:
-                  phase === 'speaking'
-                    ? 1 + orbEnergy * 0.16
-                    : phase === 'listening'
-                      ? [1, 1.05, 1]
-                      : 1,
+                scale: phase === 'speaking' ? 1 + orbEnergy * 0.16 : phase === 'listening' ? [1, 1.05, 1] : 1,
               }}
               transition={{
                 duration: phase === 'speaking' ? 0.08 : 1.4,
@@ -230,6 +225,9 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
             {muted ? 'Muted' : 'Voice ON'}
           </button>
 
+          <button aria-pressed={nour.spokenAlerts} onClick={nour.toggleAlerts} className="text-xs">
+            Spoken alerts {nour.spokenAlerts ? 'on' : 'off'}
+          </button>
           {/* Animated Mini Sound Bars */}
           <div className="flex h-3.5 items-center gap-0.5" aria-hidden="true">
             {[0.4, 0.9, 0.65, 1, 0.5].map((mult, idx) => (

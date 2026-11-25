@@ -151,6 +151,9 @@ const COLOR_ORDER: MacroButton['color'][] = [
 ];
 
 const SHORTCUT_OPTIONS = [
+  'media.prev',
+  'media.playpause',
+  'media.next',
   'antigravity.agentChat',
   'antigravity.acceptChanges',
   'antigravity.rejectChanges',
@@ -192,6 +195,14 @@ const ACTION_META: Record<
     example: string;
   }
 > = {
+  chain: {
+    label: 'Chain',
+    name: 'Macro sequence',
+    icon: Clock,
+    color: 'amber',
+    hint: 'Run comma-separated steps in order: wake, antigravity, chrome, dev-server, caffeine, or a shortcut ID.',
+    example: 'wake, antigravity, chrome, dev-server, caffeine',
+  },
   shortcut: {
     label: 'Shortcut',
     icon: Clock,
@@ -455,6 +466,7 @@ export function SmartDeckView({
     { id: 'vscode', name: 'VS Code', matchApps: [], accent: 'violet' },
     { id: 'chrome', name: 'Browser', matchApps: [], accent: 'amber' },
     { id: 'terminal', name: 'Terminal', matchApps: [], accent: 'emerald' },
+    { id: 'music', name: 'Music', matchApps: [], accent: 'emerald' },
     { id: 'general', name: 'General', matchApps: [], accent: 'violet' },
   ];
 
@@ -652,13 +664,15 @@ export function SmartDeckView({
       ...editingMacro,
       actionType: nextType,
       payload:
-        nextType === 'shortcut'
-          ? SHORTCUT_OPTIONS[0]
-          : nextType === 'stream'
-            ? (logPresets[0]?.id ?? '')
-            : nextType === 'voice'
-              ? 'autoPaste'
-              : '',
+        nextType === 'chain'
+          ? 'wake, antigravity, chrome, dev-server, caffeine'
+          : nextType === 'shortcut'
+            ? SHORTCUT_OPTIONS[0]
+            : nextType === 'stream'
+              ? (logPresets[0]?.id ?? '')
+              : nextType === 'voice'
+                ? 'autoPaste'
+                : '',
     });
   };
 
@@ -703,7 +717,8 @@ export function SmartDeckView({
               <Clock size={16} /> {new Date().toLocaleTimeString(undefined, { hour12: false })}
             </div>
             <div className={styles.dateDisplay}>
-              <Calendar size={14} /> {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+              <Calendar size={14} />{' '}
+              {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
             </div>
           </div>
           <div className={styles.quickActions}>
@@ -787,20 +802,14 @@ export function SmartDeckView({
               </div>
             )}
             {isConnected && voiceActiveId && (
-              <button
-                className={styles.dictation}
-                type="button"
-                onClick={() => voiceRecRef.current?.stop()}
-              >
+              <button className={styles.dictation} type="button" onClick={() => voiceRecRef.current?.stop()}>
                 <Mic size={14} />
                 <span>{liveTranscript || 'Listening…'}</span>
                 <strong>Finish dictation</strong>
               </button>
             )}
             {editMode && isConnected && (
-              <p className={styles.editHint}>
-                Select a macro to edit its action, appearance, or profile.
-              </p>
+              <p className={styles.editHint}>Select a macro to edit its action, appearance, or profile.</p>
             )}
             <div className={`${styles.keys} deck-scroll`} data-preview={!isConnected}>
               {!isConnected &&
@@ -857,9 +866,7 @@ export function SmartDeckView({
               {(isConnected ? !visibleMacros.length : !visibleTypes.length) && (
                 <div className={styles.empty}>
                   {searchTerm ? <Search /> : <Layers3 />}
-                  <strong>
-                    {searchTerm ? 'No matching actions' : 'This profile has no macros yet'}
-                  </strong>
+                  <strong>{searchTerm ? 'No matching actions' : 'This profile has no macros yet'}</strong>
                   <button
                     className={styles.tool}
                     type="button"
@@ -892,11 +899,7 @@ export function SmartDeckView({
                     Git branch
                   </dt>
                   <dd>
-                    {isConnected
-                      ? deck.gitStatus.isGitRepo
-                        ? deck.gitStatus.branch
-                        : 'No repository'
-                      : '—'}
+                    {isConnected ? (deck.gitStatus.isGitRepo ? deck.gitStatus.branch : 'No repository') : '—'}
                   </dd>
                 </div>
               </dl>
@@ -1008,9 +1011,7 @@ export function SmartDeckView({
               <div className={styles.key} style={accentStyle(ACCENT_HEX[editingMacro.color])}>
                 <KeycapFace
                   label={editingMacro.label}
-                  sublabel={
-                    editingMacro.sublabel || ACTION_META[editingMacro.actionType]?.label || ''
-                  }
+                  sublabel={editingMacro.sublabel || ACTION_META[editingMacro.actionType]?.label || ''}
                   Icon={ICON_MAP[editingMacro.icon] || Clock}
                 />
               </div>
@@ -1079,7 +1080,9 @@ export function SmartDeckView({
                         ? 'After dictation'
                         : editingMacro.actionType === 'snippet'
                           ? 'Text to paste'
-                          : 'Command'}
+                          : editingMacro.actionType === 'chain'
+                            ? 'Steps in order'
+                            : 'Command'}
                 </span>
                 {editingMacro.actionType === 'shortcut' ? (
                   <select
@@ -1130,7 +1133,9 @@ export function SmartDeckView({
                     required
                     value={editingMacro.payload}
                     onChange={(e) => setEditingMacro({ ...editingMacro, payload: e.target.value })}
-                    placeholder="npm run dev"
+                    placeholder={
+                      editingMacro.actionType === 'chain' ? 'wake, chrome, caffeine' : 'npm run dev'
+                    }
                     className={`font-mono-tech ${FIELD} text-[#d1bfff]`}
                   />
                 )}
@@ -1153,9 +1158,7 @@ export function SmartDeckView({
                         style={{
                           background: ACCENT_HEX[c],
                           transform: on ? 'scale(1.15)' : 'scale(1)',
-                          boxShadow: on
-                            ? `0 0 0 2px #0b0c10, 0 0 0 3.5px ${ACCENT_HEX[c]}`
-                            : 'none',
+                          boxShadow: on ? `0 0 0 2px #0b0c10, 0 0 0 3.5px ${ACCENT_HEX[c]}` : 'none',
                         }}
                       />
                     );
@@ -1200,9 +1203,7 @@ export function SmartDeckView({
                         style={{
                           background: on ? `${ACCENT_HEX[editingMacro.color]}26` : 'transparent',
                           color: on ? ACCENT_HEX[editingMacro.color] : '#7c8190',
-                          boxShadow: on
-                            ? `inset 0 0 0 1px ${ACCENT_HEX[editingMacro.color]}66`
-                            : 'none',
+                          boxShadow: on ? `inset 0 0 0 1px ${ACCENT_HEX[editingMacro.color]}66` : 'none',
                         }}
                       >
                         <Ico className="h-3.5 w-3.5" />
@@ -1234,9 +1235,7 @@ export function SmartDeckView({
                 <button
                   type="submit"
                   className={`rounded-full bg-[#c6b4ff] px-4 py-1.5 text-xs font-bold text-[#241c30] disabled:opacity-50 ${FOCUS}`}
-                  disabled={
-                    !isConnected || !editingMacro.label.trim() || !editingMacro.payload.trim()
-                  }
+                  disabled={!isConnected || !editingMacro.label.trim() || !editingMacro.payload.trim()}
                 >
                   {existingMacro ? 'Save changes' : 'Create macro'}
                 </button>

@@ -737,7 +737,7 @@ async function callSingleAoedeModel(
   }
 }
 
-async function synthesizeNourSpeech(
+export async function synthesizeNourSpeech(
   text: string,
   apiKey: string,
 ): Promise<{ audioBase64: string; audioMime: string } | null> {

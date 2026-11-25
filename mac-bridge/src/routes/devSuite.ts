@@ -1,3 +1,9 @@
+import { loadDoctorAiKey } from '../services/doctorAiAgent.js';
+import { synthesizeNourSpeech } from '../services/devSuiteService.js';
+import { applyReviewedFile } from '../services/fileReview.js';
+import { publicPushKey, subscribeDevice } from '../services/watchPush.js';
+import { editSites, healthDays, watchList, checkWatched } from '../services/deskMonitor.js';
+import { desktopSnapshot, formatPrompt, typeIntoHost } from '../services/missionTools.js';
 import { Router } from 'express';
 import {
   chatWithNour,
@@ -13,10 +19,7 @@ import {
   type SshConnectionInput,
 } from '../services/devSuiteService.js';
 
-export function createDevSuiteRouter(opts: {
-  expectedToken: string;
-  getProjectDir: () => string;
-}): Router {
+export function createDevSuiteRouter(opts: { expectedToken: string; getProjectDir: () => string }): Router {
   const router = Router();
 
   // Require Bearer token (same auth model as /api/scans)
@@ -100,6 +103,19 @@ export function createDevSuiteRouter(opts: {
     res.json(result);
   });
 
+  router.post('/nour/speak', async (req, res) => {
+    const text = req.body.text;
+    if (typeof text !== 'string' || !text || text.length > 160) {
+      res.status(400).json({ error: 'Invalid announcement' });
+      return;
+    }
+    const key = loadDoctorAiKey();
+    try {
+      res.json(key ? (await synthesizeNourSpeech(text, key)) || {} : {});
+    } catch {
+      res.json({});
+    }
+  });
   router.post('/nour/chat', async (req, res) => {
     const { message, history, botName, voiceName, liveContext } = req.body as {
       message?: string;
@@ -122,5 +138,55 @@ export function createDevSuiteRouter(opts: {
     res.json(result);
   });
 
+  router.get('/push-key', (_req, res) => res.json({ key: publicPushKey() }));
+  router.post('/push-subscription', (req, res) => {
+    try {
+      subscribeDevice(req.body.subscription, req.body.remove === true);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  router.get('/watch', (_req, res) => res.json(watchList()));
+  router.get('/health-history', (_req, res) => res.json(healthDays));
+  router.post('/watch', async (req, res) => {
+    try {
+      if (req.body.action === 'check') await checkWatched();
+      else editSites(req.body.action, req.body.urls);
+      res.json(watchList());
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  router.post('/review-file', async (req, res) => {
+    try {
+      await applyReviewedFile(opts.getProjectDir(), req.body.file, req.body.revision, req.body.action);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(409).json({ error: (e as Error).message });
+    }
+  });
+  router.post('/snapshot', async (_req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store').json(await desktopSnapshot());
+    } catch {
+      res.status(503).json({ error: 'Capture unavailable. Check desktop Screen Recording permission.' });
+    }
+  });
+  router.post('/format-prompt', async (req, res) => {
+    try {
+      res.json(await formatPrompt(req.body.text));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+  router.post('/type', async (req, res) => {
+    try {
+      await typeIntoHost(req.body.text);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
   return router;
 }

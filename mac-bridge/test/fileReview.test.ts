@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { applyReviewedFile, changedFiles, inspectFile } from '../src/services/fileReview.js';
+
+test('review only applies the displayed worktree change to the chosen file', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'devdeck-review-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+  git('init', '--quiet');
+  const cwd = path.join(root, 'app');
+  await mkdir(cwd);
+  const file = 'main file.txt';
+  const target = path.join(cwd, file);
+  await writeFile(target, 'base\n');
+  git('add', '.');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'base');
+  await writeFile(target, 'staged\n');
+  git('add', '.');
+  await writeFile(target, 'staged\nworking\n');
+  const extra = 'second file.txt';
+  await writeFile(path.join(cwd, extra), 'untouched\n');
+  assert.deepEqual((await changedFiles(cwd)).diffFiles.map((f) => f.file).sort(), [file, extra]);
+  const old = await inspectFile(cwd, file);
+  await writeFile(target, 'staged\nnewer\n');
+  await assert.rejects(applyReviewedFile(cwd, file, old.revision!, 'revert'), /changed/);
+  assert.equal(await readFile(target, 'utf8'), 'staged\nnewer\n');
+  await applyReviewedFile(cwd, file, (await inspectFile(cwd, file)).revision!, 'revert');
+  assert.equal(await readFile(target, 'utf8'), 'staged\n');
+  assert.equal(git('show', ':app/' + file), 'staged\n');
+  await applyReviewedFile(cwd, extra, (await inspectFile(cwd, extra)).revision!, 'accept');
+  assert.equal(git('show', ':app/' + extra), 'untouched\n');
+  assert.equal(await readFile(path.join(cwd, extra), 'utf8'), 'untouched\n');
+  await assert.rejects(inspectFile(cwd, '../outside'));
+});

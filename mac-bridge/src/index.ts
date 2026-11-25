@@ -40,6 +40,8 @@ import { isKnownShortcut, runShortcut } from './macos/shortcuts.js';
 import { sendToActiveMacTerminal } from './macos/terminal.js';
 import { snapFrontmostWindow } from './macos/windowSnap.js';
 import { createApiRouter } from './routes/api.js';
+import { pushWatch } from './services/watchPush.js';
+import { startWatch, recordHealth } from './services/deskMonitor.js';
 import { createDevSuiteRouter } from './routes/devSuite.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
@@ -158,8 +160,21 @@ const antigravityService = new AntigravityService(
   (state) => broadcast({ type: 'antigravity:state', payload: state }),
   (alert) => broadcast({ type: 'alert:flash', payload: alert }),
 );
+let recordedScan = 0;
+let recordedRepair = 0;
 const systemDoctorService = new SystemDoctorService(
-  (report) => broadcast({ type: 'doctor:state', payload: report }),
+  (report) => {
+    if (report.scannedAt && report.scannedAt !== recordedScan && !report.scanning && !report.repairing) {
+      recordHealth({ score: report.score }, report.scannedAt);
+      recordedScan = report.scannedAt;
+    }
+    const repair = report.postReport;
+    if (repair && repair.generatedAt !== recordedRepair) {
+      recordHealth({ before: repair.scoreBefore, score: repair.scoreAfter }, repair.generatedAt);
+      recordedRepair = repair.generatedAt;
+    }
+    broadcast({ type: 'doctor:state', payload: report });
+  },
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
 const networkCommandService = new NetworkCommandService(
@@ -168,7 +183,10 @@ const networkCommandService = new NetworkCommandService(
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
 const powerThermalService = new PowerThermalService(
-  (state) => broadcast({ type: 'power:state', payload: state }),
+  (state) => {
+    if (state.hasBattery && state.healthPct != null) recordHealth({ battery: state.healthPct });
+    broadcast({ type: 'power:state', payload: state });
+  },
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
 
@@ -190,6 +208,22 @@ let latestSpeedTest: SpeedTestState = {
 };
 
 // Stagger background pollers so bridge boots & prints QR in <150ms with zero CPU spike
+startWatch((issue, message) => {
+  broadcast({ type: 'alert:flash', payload: { kind: issue ? 'error' : 'success', message } });
+  void pushWatch(message).catch(() => {});
+});
+let readingMedia = false;
+setInterval(async () => {
+  if (!clients.size || readingMedia) return;
+  readingMedia = true;
+  try {
+    broadcast({ type: 'media:state', payload: await getMediaState() });
+  } catch {
+    /* A player may close while reading its track. */
+  } finally {
+    readingMedia = false;
+  }
+}, 5000).unref();
 statsService.start(2000);
 activeAppPoller.start(1500);
 antigravityService.start(1200);
@@ -287,7 +321,41 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       }
 
       try {
-        if (macro.actionType === 'shortcut') {
+        if (macro.actionType === 'chain') {
+          const steps = macro.payload.split(',').map((s) => s.trim());
+          const supported = ['wake', 'antigravity', 'chrome', 'dev-server', 'caffeine'];
+          if (
+            !steps.length ||
+            steps.length > 12 ||
+            steps.some((s) => !supported.includes(s) && !isKnownShortcut(s))
+          )
+            throw Error('Choose up to 12 supported steps or shortcut IDs');
+          for (const step of steps) {
+            if (step === 'wake') await wakeMacDisplay();
+            else if (step === 'antigravity' || step === 'chrome')
+              await focusMacApp(
+                step === 'chrome' ? 'Google Chrome' : 'Antigravity IDE',
+                deepTelemetry.getLatest().runningApps,
+              );
+            else if (step === 'caffeine') caffeineManager.setActive(true);
+            else if (step === 'dev-server') {
+              const status = logStreamer.getStatus();
+              if (status.running && status.presetId !== 'deck-dev-server')
+                throw Error('Another log preset is running');
+              if (!status.running)
+                logStreamer.startPreset(
+                  {
+                    id: 'deck-dev-server',
+                    label: 'Project dev server',
+                    command: 'npm',
+                    args: ['run', 'dev'],
+                  },
+                  configStore.getAll().projectDir,
+                );
+            } else await runShortcut(step);
+          }
+          reply(requestId, true, macro.label + ' completed');
+        } else if (macro.actionType === 'shortcut') {
           if (!isKnownShortcut(macro.payload)) {
             reply(requestId, false, `Shortcut "${macro.payload}" is not whitelisted`);
             return;
@@ -302,7 +370,10 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
           reply(requestId, res.ok, res.output);
           broadcast({
             type: 'alert:flash',
-            payload: { kind: res.ok ? 'success' : 'error', message: `${macro.label}: ${res.output.slice(0, 70)}` },
+            payload: {
+              kind: res.ok ? 'success' : 'error',
+              message: `${macro.label}: ${res.output.slice(0, 70)}`,
+            },
           });
         } else if (macro.actionType === 'terminal') {
           const resultMsg = await sendToActiveMacTerminal(macro.payload);
@@ -536,7 +607,11 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     }
 
     case 'process:kill': {
-      const res = await processService.killProcess(msg.payload.pid);
+      const res = await processService.killProcess(
+        msg.payload.pid,
+        msg.payload.force,
+        msg.payload.expectedName,
+      );
       reply(msg.payload.requestId, res.ok, res.message);
       if (res.ok) {
         broadcast({ type: 'alert:flash', payload: { kind: 'warning', message: res.message } });
@@ -990,7 +1065,16 @@ wss.on('connection', (ws, req) => {
     try {
       const msg = JSON.parse(raw.toString()) as ClientEvent;
       if (!msg || typeof msg.type !== 'string') return;
-      void handleClientEvent(ws, msg);
+      void handleClientEvent(ws, msg).catch((error) =>
+        sendTo(ws, {
+          type: 'action:result',
+          payload: {
+            requestId: 'requestId' in msg.payload ? msg.payload.requestId : '',
+            ok: false,
+            message: error.message || 'Bridge action failed',
+          },
+        }),
+      );
     } catch {
       // Ignore malformed JSON frames
     }

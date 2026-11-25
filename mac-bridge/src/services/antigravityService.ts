@@ -1,3 +1,4 @@
+import { changedFiles, inspectFile } from './fileReview.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -588,71 +589,14 @@ export class AntigravityService {
     totalRemoved: number;
   }> {
     try {
-      const { stdout } = await execFileAsync('git', ['diff', '--numstat'], {
-        cwd: this.getProjectDir(),
-        timeout: 2000,
-      });
-      const diffFiles: GitDiffFile[] = [];
-      let totalAdded = 0;
-      let totalRemoved = 0;
-      for (const line of stdout.split('\n')) {
-        const parts = line.trim().split('\t');
-        if (parts.length < 3) continue;
-        const added = Number(parts[0]) || 0;
-        const removed = Number(parts[1]) || 0;
-        const file = parts[2];
-        totalAdded += added;
-        totalRemoved += removed;
-        diffFiles.push({ file, added, removed });
-      }
-      return { diffFiles: diffFiles.slice(0, 16), totalAdded, totalRemoved };
+      return await changedFiles(this.getProjectDir());
     } catch {
       return { diffFiles: [], totalAdded: 0, totalRemoved: 0 };
     }
   }
 
   async getFileDiff(rawFile: string): Promise<AntigravityFileDiff> {
-    const projectDir = this.getProjectDir();
-    const cleaned = rawFile.replace(/^\/+/, '').trim();
-    const resolved = path.resolve(projectDir, cleaned);
-    if (!resolved.startsWith(path.resolve(projectDir))) {
-      throw new Error('Invalid file path outside workspace');
-    }
-
-    let patch = '';
-    try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['diff', '--no-color', '--unified=3', '--', cleaned],
-        { cwd: projectDir, timeout: 3000, maxBuffer: 2 * 1024 * 1024 },
-      );
-      patch = stdout;
-      if (!patch.trim()) {
-        const staged = await execFileAsync(
-          'git',
-          ['diff', '--cached', '--no-color', '--unified=3', '--', cleaned],
-          { cwd: projectDir, timeout: 3000, maxBuffer: 2 * 1024 * 1024 },
-        );
-        patch = staged.stdout;
-      }
-    } catch {
-      patch = '';
-    }
-
-    let added = 0;
-    let removed = 0;
-    for (const line of patch.split('\n')) {
-      if (line.startsWith('+') && !line.startsWith('+++')) added += 1;
-      else if (line.startsWith('-') && !line.startsWith('---')) removed += 1;
-    }
-
-    return {
-      file: cleaned,
-      patch: patch.slice(0, 16_000),
-      added,
-      removed,
-      ts: Date.now(),
-    };
+    return inspectFile(this.getProjectDir(), rawFile);
   }
 
   async refresh(): Promise<AntigravityLiveState> {
@@ -661,7 +605,7 @@ export class AntigravityService {
     const next: AntigravityLiveState = { ...brain, ...diff };
 
     const topTerm = next.terminalRuns[0];
-    const digest = `${next.conversationId}|${next.pinnedSessionId || 'auto'}|${next.sessions.length}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.terminalRuns.length}|${topTerm?.status || ''}|${topTerm?.output.length || 0}|${next.totalAdded}|${next.totalRemoved}`;
+    const digest = `${next.conversationId}|${next.pinnedSessionId || 'auto'}|${next.sessions.length}|${next.stepCount}|${next.statusLabel}|${next.currentFocus}|${next.chatTurns.length}|${next.chatTurns[next.chatTurns.length - 1]?.text.length || 0}|${next.terminalRuns.length}|${topTerm?.status || ''}|${topTerm?.output.length || 0}|${next.totalAdded}|${next.totalRemoved}|${JSON.stringify(next.diffFiles)}`;
     this.latest = next;
     if (digest !== this.lastDigest) {
       this.lastDigest = digest;

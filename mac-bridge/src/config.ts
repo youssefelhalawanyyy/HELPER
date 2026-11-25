@@ -46,6 +46,7 @@ const DEFAULT_PROFILES: DeckProfile[] = [
     matchApps: ['Terminal', 'iTerm2', 'Warp', 'Ghostty', 'Alacritty', 'kitty'],
     accent: 'emerald',
   },
+  { id: 'music', name: 'Music', matchApps: ['Spotify', 'Music', 'Apple Music'], accent: 'emerald' },
   {
     id: 'general',
     name: 'General',
@@ -55,6 +56,28 @@ const DEFAULT_PROFILES: DeckProfile[] = [
 ];
 
 const DEFAULT_MACROS: MacroButton[] = [
+  {
+    id: 'morning-setup',
+    profileId: 'general',
+    label: 'Morning Setup',
+    sublabel: 'Start workspace',
+    icon: 'Sun',
+    color: 'amber',
+    actionType: 'chain',
+    payload: 'wake, antigravity, chrome, dev-server, caffeine',
+  },
+  ...(['prev', 'playpause', 'next'] as const).map(
+    (action): MacroButton => ({
+      id: 'music-' + action,
+      profileId: 'music',
+      label: { prev: 'Previous', playpause: 'Play / pause', next: 'Next' }[action],
+      sublabel: 'Playback',
+      icon: 'Music',
+      color: 'emerald',
+      actionType: 'shortcut',
+      payload: 'media.' + action,
+    }),
+  ),
   // Antigravity profile
   {
     id: 'ag-agent-chat',
@@ -519,6 +542,7 @@ export class ConfigStore {
 
         // Ensure newly added default profiles (e.g. antigravity) are merged cleanly
         const existingProfiles = parsed.profiles?.length ? [...parsed.profiles] : [];
+        const addMusic = !existingProfiles.some((p) => p.id === 'music');
         for (const defProfile of DEFAULT_PROFILES) {
           if (!existingProfiles.some((p) => p.id === defProfile.id)) {
             if (defProfile.id === 'antigravity') existingProfiles.unshift(defProfile);
@@ -528,6 +552,14 @@ export class ConfigStore {
 
         // Ensure Antigravity and new Terminal stream/AppleScript default macros exist if profile has none
         const existingMacros = parsed.macros?.length ? [...parsed.macros] : [...DEFAULT_MACROS];
+        if (addMusic)
+          existingMacros.push(
+            ...DEFAULT_MACROS.filter(
+              (m) =>
+                (m.profileId === 'music' || m.id === 'morning-setup') &&
+                !existingMacros.some((e) => e.id === m.id),
+            ),
+          );
         if (!existingMacros.some((m) => m.profileId === 'antigravity')) {
           existingMacros.unshift(...DEFAULT_MACROS.filter((m) => m.profileId === 'antigravity'));
         }
