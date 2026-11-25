@@ -2,22 +2,23 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul 2>nul
-title DevDeck Live Bridge (Windows 10/11 -^> iPhone)
+title DevDeck Autonomous Self-Healing Bridge (Windows 10/11 -^> iPhone)
 
 echo.
-echo  =======================================================
-echo   DEVDECK LIVE LAUNCHER (Windows 10/11 -^> iPhone PWA)
-echo  =======================================================
+echo  ================================================================
+echo   DEVDECK AUTONOMOUS SELF-HEALING BRIDGE (Windows 10/11 -^> iPhone)
+echo  ================================================================
 echo   Folder: %CD%
 echo.
 
-:: Ensure standard Node.js and Git install paths are in PATH even right after winget install
-set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\Programs\nodejs;%ProgramFiles%\Git\cmd"
+:: 1. Ensure standard + portable Node.js and Git paths are in PATH
+set "PORTABLE_NODE=%LOCALAPPDATA%\DevDeck\node\node-v22.14.0-win-x64"
+set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\Programs\nodejs;%PORTABLE_NODE%;%ProgramFiles%\Git\cmd"
 
-:: 1. Verify Node.js is installed (auto-install via winget if missing!)
+:: 2. Verify Node.js is installed (try winget first, then zero-admin portable Node.js ZIP fallback!)
 where node.exe >nul 2>nul
 if %errorlevel% neq 0 (
-  echo [SETUP] Node.js was not found in PATH. Attempting automatic install via Windows winget...
+  echo [AUTOPILOT] Node.js not found. Attempting automatic install via winget...
   where winget.exe >nul 2>nul
   if !errorlevel! equ 0 (
     winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
@@ -27,42 +28,35 @@ if %errorlevel% neq 0 (
 
 where node.exe >nul 2>nul
 if %errorlevel% neq 0 (
-  echo [ERROR] Node.js is not installed.
-  echo         Install Node.js LTS from https://nodejs.org and double-click start-windows.bat again.
-  echo.
-  pause
-  exit /b 1
+  echo [AUTOPILOT] Downloading standalone portable Node.js v22 LTS ^(no admin required^)...
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $z=\"$env:TEMP\node22.zip\"; $d=\"$env:LOCALAPPDATA\DevDeck\node\"; New-Item -ItemType Directory -Force -Path $d | Out-Null; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip' -OutFile $z; Expand-Archive -Path $z -DestinationPath $d -Force"
+  set "PATH=%PORTABLE_NODE%;%PATH%"
 )
 
-:: 2. Verify npm.cmd is available
-where npm.cmd >nul 2>nul
+where node.exe >nul 2>nul
 if %errorlevel% neq 0 (
-  echo [ERROR] npm.cmd was not found in PATH.
-  echo.
+  echo [ERROR] Could not install Node.js automatically. Please check your internet connection.
   pause
   exit /b 1
 )
 
-:: 3. Install workspace dependencies on first run (or if tsx is missing)
+:: 3. Free port 4747 if an old zombie process is holding it
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 4747 -ErrorAction SilentlyContinue | ForEach-Object { if ($_.OwningProcess -gt 4) { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+
+:: 4. Self-healing npm install (retries with cache clean + --legacy-peer-deps if needed)
 if not exist "node_modules\tsx\dist\cli.mjs" (
-  echo [SETUP] Installing DevDeck dependencies ^(first run^)...
-  echo.
-  call npm.cmd install
+  echo [AUTOPILOT] Installing DevDeck workspace dependencies...
+  call npm.cmd install --no-audit --no-fund
   if %errorlevel% neq 0 (
-    echo.
-    echo [WARN] Standard npm install reported an error — retrying with --legacy-peer-deps...
-    call npm.cmd install --legacy-peer-deps
-    if %errorlevel% neq 0 (
-      echo [ERROR] npm install failed. Check your internet connection and try again.
-      pause
-      exit /b 1
-    )
+    echo [AUTOPILOT] Self-healing npm cache and retrying with --legacy-peer-deps...
+    call npm.cmd cache clean --force >nul 2>nul
+    call npm.cmd install --no-audit --no-fund --legacy-peer-deps
   )
 )
 
-:: 4. Pre-build mac-bridge if dist/index.js is missing for instant startup
+:: 5. Pre-compile mac-bridge for instant startup
 if not exist "mac-bridge\dist\index.js" (
-  echo [BUILD] Compiling DevDeck Windows Bridge...
+  echo [AUTOPILOT] Compiling DevDeck Bridge...
   call npm.cmd run build -w mac-bridge >nul 2>nul
 )
 
@@ -70,8 +64,8 @@ set NODE_NO_WARNINGS=1
 
 :bridge_start
 echo.
-echo [LIVE] Starting DevDeck Windows Bridge + Free Cloudflare HTTPS Tunnel...
-echo        ^(Scan the QR code below with your iPhone Camera once it appears!^)
+echo [LIVE] Starting DevDeck Bridge + Free Cloudflare HTTPS Tunnel...
+echo        ^(Your QR Code and 6-Digit PIN will appear below AND in /setup!^)
 echo.
 
 call npm.cmd run live
@@ -79,9 +73,9 @@ set BRIDGE_EXIT_CODE=%errorlevel%
 
 if %BRIDGE_EXIT_CODE% neq 0 (
   echo.
-  echo [WARN] DevDeck Bridge exited ^(code %BRIDGE_EXIT_CODE%^). Restarting in 4 seconds...
-  echo        Press Ctrl+C to stop.
-  timeout /t 4 >nul
+  echo [AUTOPILOT] Bridge exited ^(code %BRIDGE_EXIT_CODE%^). Self-healing port 4747 and restarting in 3s...
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 4747 -ErrorAction SilentlyContinue | ForEach-Object { if ($_.OwningProcess -gt 4) { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+  timeout /t 3 >nul
   goto bridge_start
 )
 
