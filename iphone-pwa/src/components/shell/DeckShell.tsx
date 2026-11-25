@@ -82,6 +82,10 @@ const PerfStudioView = dynamic(
   () => import('@/components/views/PerfStudioView').then((m) => m.PerfStudioView),
   { loading: ViewSkeleton },
 );
+const FilesHubView = dynamic(
+  () => import('@/components/views/FilesHubView').then((m) => m.FilesHubView),
+  { loading: ViewSkeleton },
+);
 const WebsiteTesterView = dynamic(
   () => import('@/components/views/WebsiteTesterView').then((m) => m.WebsiteTesterView),
   { loading: ViewSkeleton },
@@ -134,6 +138,7 @@ export function DeckShell() {
   const [direction, setDirection] = useState(1);
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [pairingModalOpen, setPairingModalOpen] = useState(false);
+  const [pcMenuOpen, setPcMenuOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [antigravityMode, setAntigravityMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -305,44 +310,121 @@ export function DeckShell() {
               <span className="mobile-brand">
                 <Brand />
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  soundEngine.playClick();
-                  setPairingModalOpen(true);
-                }}
-                className="flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap"
-                style={{
-                  background: isConnected
-                    ? 'rgba(52,211,153,.12)'
-                    : isReconnecting
-                      ? 'rgba(251,191,36,.14)'
-                      : 'rgba(255,93,108,.14)',
-                  color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                }}
-              >
-                <span className="relative h-1.5 w-1.5">
-                  <i
-                    className="anim-ping absolute inset-0 rounded-full"
-                    style={{
-                      background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                    }}
-                  />
-                  <i
-                    className="absolute inset-0 rounded-full"
-                    style={{
-                      background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
-                    }}
-                  />
-                </span>
-                <span className="max-w-[96px] truncate">
-                  {isConnected
-                    ? deck.hello?.hostname || 'CONNECTED'
-                    : isReconnecting
-                      ? 'Reconnecting…'
-                      : 'Pair computer'}
-                </span>
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    if (deck.savedPcs.length > 0) setPcMenuOpen((v) => !v);
+                    else setPairingModalOpen(true);
+                  }}
+                  className="flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 whitespace-nowrap"
+                  style={{
+                    background: isConnected
+                      ? 'rgba(52,211,153,.12)'
+                      : isReconnecting
+                        ? 'rgba(251,191,36,.14)'
+                        : 'rgba(255,93,108,.14)',
+                    color: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                  }}
+                >
+                  <span className="relative h-1.5 w-1.5">
+                    <i
+                      className="anim-ping absolute inset-0 rounded-full"
+                      style={{
+                        background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                      }}
+                    />
+                    <i
+                      className="absolute inset-0 rounded-full"
+                      style={{
+                        background: isConnected ? '#34d399' : isReconnecting ? '#fbbf24' : '#ff5d6c',
+                      }}
+                    />
+                  </span>
+                  <span className="max-w-[96px] truncate">
+                    {isConnected
+                      ? deck.hello?.hostname || 'CONNECTED'
+                      : isReconnecting
+                        ? 'Reconnecting…'
+                        : 'Pair computer'}
+                  </span>
+                  {deck.savedPcs.length > 1 && <span className="text-[9px] opacity-75">▾</span>}
+                </button>
+
+                {/* Multi-PC 1-Tap Switcher Popover */}
+                {pcMenuOpen && (
+                  <div className="fixed top-12 left-4 z-50 w-64 rounded-2xl border border-[#98c8ce33] bg-[#0b1820]/98 p-2 shadow-2xl backdrop-blur-xl">
+                    <div className="mb-1.5 flex items-center justify-between px-2 text-[9px] font-extrabold text-[#9cb4bb] uppercase">
+                      <span>Saved Computers ({deck.savedPcs.length})</span>
+                      <button
+                        type="button"
+                        onClick={() => setPcMenuOpen(false)}
+                        className="text-zinc-400 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {deck.savedPcs.map((pc) => {
+                        const isCurrent =
+                          deck.pairing?.host === pc.host && deck.pairing?.port === pc.port;
+                        return (
+                          <div
+                            key={`${pc.host}:${pc.port}`}
+                            className="flex items-center justify-between gap-1 rounded-xl border px-2 py-1.5"
+                            style={{
+                              borderColor: isCurrent
+                                ? 'rgba(136,241,209,0.45)'
+                                : 'rgba(255,255,255,0.06)',
+                              background: isCurrent
+                                ? 'rgba(136,241,209,0.12)'
+                                : 'rgba(255,255,255,0.03)',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                soundEngine.playClick();
+                                deck.savePairing(pc);
+                                setPcMenuOpen(false);
+                              }}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="truncate text-[11px] font-extrabold text-white">
+                                {pc.platform === 'win32' ? '🪟 ' : '🍎 '}
+                                {pc.label || pc.host}
+                              </div>
+                              <div className="font-mono-tech truncate text-[9px] text-[#9cb4bb]">
+                                {pc.host}
+                              </div>
+                            </button>
+                            {!isCurrent && (
+                              <button
+                                type="button"
+                                onClick={() => deck.removeSavedPc(pc.host, pc.port)}
+                                className="rounded px-1.5 py-0.5 text-[9px] text-zinc-500 hover:text-[#ff5d6c]"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPcMenuOpen(false);
+                        setPairingModalOpen(true);
+                      }}
+                      className="mt-2 w-full rounded-xl bg-[#88f1d1] py-1.5 text-[10px] font-extrabold text-[#061c17]"
+                    >
+                      + Pair New Mac / Windows PC
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
                 CPU{' '}
@@ -645,6 +727,7 @@ export function DeckShell() {
                 {activeView === 'network' && <NetworkCommandView deck={deck} />}
                 {activeView === 'power' && <PowerThermalView deck={deck} />}
                 {activeView === 'perf' && <PerfStudioView deck={deck} />}
+                {activeView === 'files' && <FilesHubView deck={deck} />}
                 {activeView === 'webtester' && <WebsiteTesterView deck={deck} />}
                 {activeView === 'webmonitor' && <WebsiteMonitorView deck={deck} />}
                 {activeView === 'hosting' && <HostingDashboardView deck={deck} />}

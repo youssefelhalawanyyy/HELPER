@@ -58,11 +58,28 @@ export function PreviewAmbientView({
   const [urlInput, setUrlInput] = useState(deck.previewUrl);
   const [tunneledPreviewUrl, setTunneledPreviewUrl] = useState('');
   const [now, setNow] = useState<Date | null>(null);
+  const [oledShift, setOledShift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showWeather, setShowWeather] = useState(true);
+  const [showClipboard, setShowClipboard] = useState(true);
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
   useEffect(() => {
     setNow(new Date());
     const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
+    // Subtle 2px OLED Burn-In Protection Pixel Shift every 5 minutes
+    const shiftTimer = window.setInterval(() => {
+      const steps = [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 2, y: 2 },
+        { x: 0, y: 2 },
+        { x: -2, y: 1 },
+      ];
+      setOledShift(steps[Math.floor(Date.now() / 300_000) % steps.length]);
+    }, 60_000);
+    return () => {
+      clearInterval(timer);
+      clearInterval(shiftTimer);
+    };
   }, []);
   useEffect(() => {
     if (deck.status === 'connected' && deck.powerState.cpuTempC === null) {
@@ -166,14 +183,41 @@ export function PreviewAmbientView({
   }
 
   return (
-    <div className={styles.dashboard}>
+    <div
+      className={styles.dashboard}
+      style={{
+        transform: `translate3d(${oledShift.x}px, ${oledShift.y}px, 0)`,
+        transition: 'transform 1.2s ease-in-out',
+      }}
+    >
       <section className={styles.hero}>
         <header>
-          <span className={styles.eyebrow}>Desk Clock</span>
-          <button onClick={() => setMode('preview')}>
-            <Globe size={15} />
-            Preview
-          </button>
+          <span className={styles.eyebrow}>
+            Desk Clock · OLED Safe
+            {deck.focusState.active ? ` · Focus ${formatTimer(deck.focusState.remainingSec)}` : ''}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowWeather((v) => !v)}
+              title="Toggle Weather Widget"
+              style={{ opacity: showWeather ? 1 : 0.45 }}
+            >
+              Weather
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowClipboard((v) => !v)}
+              title="Toggle Clipboard Widget"
+              style={{ opacity: showClipboard ? 1 : 0.45 }}
+            >
+              Clips
+            </button>
+            <button onClick={() => setMode('preview')}>
+              <Globe size={15} />
+              Preview
+            </button>
+          </div>
         </header>
         <div className={styles.face}>
           <div>
@@ -206,7 +250,7 @@ export function PreviewAmbientView({
           ))}
         </div>
       </section>
-      <DeskWeather />
+      {showWeather && <DeskWeather />}
       <section className={styles.instrument}>
         <header>
           <h2>
@@ -325,7 +369,7 @@ export function PreviewAmbientView({
       </section>
 
       {/* Right: Mac Clipboard History + Automatic "Open on iPhone" URL Detection */}
-      <div className={styles.clipboard}>
+      {showClipboard && <div className={styles.clipboard}>
         <div className="mb-2 flex items-center justify-between">
           <div className="disp text-[24px]">Clipboard</div>
           <span className="sub">{deck.clipboard.history.length} items</span>
@@ -376,7 +420,7 @@ export function PreviewAmbientView({
             </div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

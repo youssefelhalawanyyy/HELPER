@@ -15,11 +15,13 @@ import {
   Delete,
   Flame,
   Gamepad2,
+  Keyboard,
   LayoutGrid,
   Loader2,
   Lock,
   Maximize2,
   Minimize2,
+  Monitor,
   MousePointer2,
   Play,
   Presentation,
@@ -136,6 +138,37 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
   const [dragLock, setDragLock] = useState(false);
   const [padExpanded, setPadExpanded] = useState(false);
   const [airMouseActive, setAirMouseActive] = useState(false);
+  const [screenPeekOn, setScreenPeekOn] = useState(false);
+  const [screenPeekTick, setScreenPeekTick] = useState(0);
+  const [remoteKbdOpen, setRemoteKbdOpen] = useState(false);
+  const [kbdInput, setKbdInput] = useState('');
+
+  useEffect(() => {
+    if (!screenPeekOn || deck.status !== 'connected') return;
+    setScreenPeekTick(Date.now());
+    const id = window.setInterval(() => setScreenPeekTick(Date.now()), 850);
+    return () => window.clearInterval(id);
+  }, [screenPeekOn, deck.status]);
+
+  const sendSpecialKey = (
+    key:
+      | 'esc'
+      | 'tab'
+      | 'enter'
+      | 'backspace'
+      | 'up'
+      | 'down'
+      | 'left'
+      | 'right'
+      | 'undo'
+      | 'copy'
+      | 'paste'
+      | 'selectAll'
+      | 'spotlight',
+  ) => {
+    soundEngine.playClick();
+    deck.sendEvent({ type: 'hardware:key', payload: { requestId: makeRequestId(), key } });
+  };
   const [touchVisual, setTouchVisual] = useState<{
     active: boolean;
     xPct: number;
@@ -355,6 +388,44 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
 
               <button
                 type="button"
+                aria-label="Toggle live screen peek"
+                title="Live Screen Peek"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setScreenPeekOn((v) => !v);
+                }}
+                className="flex h-7 items-center gap-1 rounded-xl border px-2 text-[9.5px] font-extrabold uppercase"
+                style={{
+                  borderColor: screenPeekOn ? '#88f1d1' : 'rgba(179,229,223,0.22)',
+                  background: screenPeekOn ? 'rgba(136,241,209,0.2)' : 'rgba(188,255,242,0.05)',
+                  color: screenPeekOn ? '#88f1d1' : '#effaf7',
+                }}
+              >
+                <Monitor aria-hidden="true" className="h-3 w-3" />
+                Peek
+              </button>
+
+              <button
+                type="button"
+                aria-label="Toggle remote keyboard"
+                title="Remote Keyboard & Shortcuts"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setRemoteKbdOpen((v) => !v);
+                }}
+                className="flex h-7 items-center gap-1 rounded-xl border px-2 text-[9.5px] font-extrabold uppercase"
+                style={{
+                  borderColor: remoteKbdOpen ? '#7dd3fc' : 'rgba(179,229,223,0.22)',
+                  background: remoteKbdOpen ? 'rgba(125,211,252,0.2)' : 'rgba(188,255,242,0.05)',
+                  color: remoteKbdOpen ? '#7dd3fc' : '#effaf7',
+                }}
+              >
+                <Keyboard aria-hidden="true" className="h-3 w-3" />
+                Keys
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   soundEngine.playClick();
                   setSubTab('controls');
@@ -366,6 +437,85 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               </button>
             </div>
           </div>
+
+          {/* Pop-Up Remote Keyboard + Emoji / Shortcut Bar */}
+          {remoteKbdOpen && (
+            <div
+              data-no-swipe="true"
+              className="space-y-1.5 rounded-xl border border-[#7dd3fc]/35 bg-[#08151d] p-2"
+            >
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!kbdInput) return;
+                  soundEngine.playClick();
+                  deck.sendEvent({
+                    type: 'hardware:type',
+                    payload: { requestId: makeRequestId(), text: kbdInput, enter: true },
+                  });
+                  setKbdInput('');
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={kbdInput}
+                  onChange={(e) => setKbdInput(e.target.value)}
+                  placeholder="Type text or emoji to send to Mac/PC…"
+                  className="font-mono-tech h-7 min-w-0 flex-1 rounded-lg border border-white/15 bg-black/75 px-2.5 text-[11px] text-white outline-none focus:border-[#7dd3fc]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!kbdInput) return;
+                    soundEngine.playClick();
+                    deck.sendEvent({
+                      type: 'hardware:type',
+                      payload: { requestId: makeRequestId(), text: kbdInput, enter: false },
+                    });
+                    setKbdInput('');
+                  }}
+                  className="h-7 rounded-lg bg-white/[0.1] px-2 text-[9.5px] font-extrabold text-white"
+                >
+                  TYPE
+                </button>
+                <button
+                  type="submit"
+                  className="h-7 rounded-lg bg-[#7dd3fc] px-2.5 text-[9.5px] font-extrabold text-[#04141c]"
+                >
+                  SEND ↵
+                </button>
+              </form>
+              <div className="flex flex-wrap items-center gap-1">
+                {(
+                  [
+                    ['esc', 'ESC'],
+                    ['tab', 'TAB'],
+                    ['undo', 'UNDO'],
+                    ['copy', 'COPY'],
+                    ['paste', 'PASTE'],
+                    ['selectAll', 'ALL'],
+                    ['spotlight', 'SEARCH'],
+                    ['left', '←'],
+                    ['up', '↑'],
+                    ['down', '↓'],
+                    ['right', '→'],
+                    ['backspace', '⌫'],
+                    ['enter', '↵'],
+                  ] as const
+                ).map(([k, lbl]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => sendSpecialKey(k)}
+                    className="font-mono-tech rounded-md border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[9px] font-extrabold text-[#effaf7] active:bg-[#7dd3fc]/25"
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <TrackpadAccessories
             deck={deck}
@@ -699,6 +849,16 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 'radial-gradient(ellipse at 50% 35%, rgba(35,85,85,0.34), rgba(9,19,25,0.96) 72%)',
             }}
           >
+            {/* Live Mini Screen Peek Overlay inside Trackpad Glass */}
+            {screenPeekOn && deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={`${deck.bridgeBaseUrl}/api/screen/peek?w=720&token=${encodeURIComponent(deck.pairing.token)}&t=${screenPeekTick}`}
+                alt="Live desktop screen peek"
+                className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-60"
+              />
+            )}
+
             {/* Subtle Precision Corner Reticle Marks */}
             <span className="pointer-events-none absolute top-2.5 left-2.5 h-3 w-3 border-t border-l border-[#88f1d1]/30" />
             <span className="pointer-events-none absolute top-2.5 right-9 h-3 w-3 border-t border-r border-[#88f1d1]/30" />

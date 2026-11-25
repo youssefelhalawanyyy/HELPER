@@ -18,11 +18,14 @@ import {
   adjustMacBrightness,
   getMacVolumeState,
   lockMacScreen,
+  pressSpecialKeyOnHost,
   scrollMacVertical,
+  sendWakeOnLanPacket,
   setMacBrightness,
   setMacMicVolume,
   setMacMute,
   setMacVolume,
+  typeTextOnHost,
   wakeAndUnlockComputer,
   wakeMacDisplay,
 } from './macos/hardware.js';
@@ -111,6 +114,7 @@ const activeAppPoller = new ActiveAppPoller(
   () => configStore.getPublic().profiles,
   (appName, profileId) => {
     broadcast({ type: 'app:active', payload: { appName, profileId, ts: Date.now() } });
+    void perfStudioService?.handleActiveAppChange(appName).catch(() => {});
   },
 );
 
@@ -334,14 +338,19 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
 
       try {
         if (macro.actionType === 'chain') {
-          const steps = macro.payload.split(',').map((s) => s.trim());
+          const steps = macro.payload
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
           const supported = ['wake', 'antigravity', 'chrome', 'dev-server', 'caffeine'];
+          const isDynamicStep = (s: string) =>
+            /^(perf:(normal|eco|super|turbo)|brightness:\d+|volume:\d+|app:.+|shell:.+)$/i.test(s);
           if (
             !steps.length ||
             steps.length > 12 ||
-            steps.some((s) => !supported.includes(s) && !isKnownShortcut(s))
+            steps.some((s) => !supported.includes(s) && !isDynamicStep(s) && !isKnownShortcut(s))
           )
-            throw Error('Choose up to 12 supported steps or shortcut IDs');
+            throw Error('Choose up to 12 supported steps (wake, caffeine, perf:super, brightness:80, volume:50, app:Chrome, shell:...)');
           for (const step of steps) {
             if (step === 'wake') await wakeMacDisplay();
             else if (step === 'antigravity' || step === 'chrome')
@@ -350,7 +359,20 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
                 deepTelemetry.getLatest().runningApps,
               );
             else if (step === 'caffeine') caffeineManager.setActive(true);
-            else if (step === 'dev-server') {
+            else if (step.startsWith('perf:')) {
+              const mode = step.slice(5).trim().toLowerCase() as 'normal' | 'eco' | 'super' | 'turbo';
+              await perfStudioService.setMode(mode);
+            } else if (step.startsWith('brightness:')) {
+              const pct = Number(step.slice(11).trim());
+              if (Number.isFinite(pct)) await setMacBrightness(pct);
+            } else if (step.startsWith('volume:')) {
+              const pct = Number(step.slice(7).trim());
+              if (Number.isFinite(pct)) await setMacVolume(pct);
+            } else if (step.startsWith('app:')) {
+              await focusMacApp(step.slice(4).trim(), deepTelemetry.getLatest().runningApps);
+            } else if (step.startsWith('shell:')) {
+              await runConfiguredShellCommand(step.slice(6).trim(), configStore.getAll().projectDir);
+            } else if (step === 'dev-server') {
               const status = logStreamer.getStatus();
               if (status.running && status.presetId !== 'deck-dev-server')
                 throw Error('Another log preset is running');
@@ -538,6 +560,26 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'git:commitPush': {
+      const { requestId, message, push = true } = msg.payload;
+      const cleanMsg = (message || 'chore: update from DevDeck').replace(/"/g, '\\"').slice(0, 140);
+      const cmd = push
+        ? `git add -A && git commit -m "${cleanMsg}" && git push`
+        : `git add -A && git commit -m "${cleanMsg}"`;
+      const res = await runConfiguredShellCommand(cmd, configStore.getAll().projectDir);
+      await gitService.refresh();
+      await antigravityService.refresh();
+      reply(requestId, res.ok, res.ok ? `Committed${push ? ' & pushed' : ''}: ${cleanMsg}` : res.output);
+      broadcast({
+        type: 'alert:flash',
+        payload: {
+          kind: res.ok ? 'success' : 'error',
+          message: res.ok ? `Git ${push ? 'Commit & Push' : 'Commit'} OK` : res.output.slice(0, 80),
+        },
+      });
+      return;
+    }
+
     case 'webhook:replay': {
       const { requestId, eventId, targetBaseUrl } = msg.payload;
       const base = targetBaseUrl || `http://127.0.0.1:${BRIDGE_PORT}`;
@@ -623,6 +665,28 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       return;
     }
 
+    case 'hardware:wol': {
+      try {
+        const wolMsg = await sendWakeOnLanPacket(msg.payload.mac);
+        reply(msg.payload.requestId, true, wolMsg);
+      } catch (err) {
+        reply(msg.payload.requestId, false, err instanceof Error ? err.message : 'Wake-on-LAN failed');
+      }
+      return;
+    }
+
+    case 'hardware:type': {
+      await typeTextOnHost(msg.payload.text || '', Boolean(msg.payload.enter));
+      reply(msg.payload.requestId, true, 'Sent keystrokes to computer');
+      return;
+    }
+
+    case 'hardware:key': {
+      await pressSpecialKeyOnHost(msg.payload.key);
+      reply(msg.payload.requestId, true, `Pressed ${msg.payload.key.toUpperCase()}`);
+      return;
+    }
+
     case 'perf:setMode': {
       const modeMsg = await perfStudioService.setMode(msg.payload.mode);
       reply(msg.payload.requestId, true, modeMsg);
@@ -699,6 +763,31 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
           configStore.getAll().projectDir,
         );
         reply(msg.payload.requestId, true, `Streaming logs for container ${safeId.slice(0, 12)}`);
+        return;
+      }
+      if (msg.payload.action === 'compose_up' || msg.payload.action === 'compose_down') {
+        const cmd =
+          msg.payload.action === 'compose_up'
+            ? 'docker compose up -d'
+            : 'docker compose down';
+        logStreamer.startShellStream(
+          cmd,
+          msg.payload.action === 'compose_up' ? 'Docker Compose Up' : 'Docker Compose Down',
+          configStore.getAll().projectDir,
+        );
+        setTimeout(() => void processService.scanDocker(), 2500);
+        reply(msg.payload.requestId, true, `Running ${cmd} in Logs…`);
+        return;
+      }
+      if (msg.payload.action === 'exec') {
+        const safeId = msg.payload.id.replace(/[^a-zA-Z0-9_.-]/g, '');
+        const rawCmd = (msg.payload.command || 'ls -la').replace(/"/g, '\\"');
+        logStreamer.startShellStream(
+          `docker exec ${safeId} sh -c "${rawCmd}"`,
+          `Docker Exec (${safeId.slice(0, 10)})`,
+          configStore.getAll().projectDir,
+        );
+        reply(msg.payload.requestId, true, `Running exec in ${safeId.slice(0, 10)} (see Logs)`);
         return;
       }
       const res = await processService.runDockerAction(msg.payload.id, msg.payload.action);

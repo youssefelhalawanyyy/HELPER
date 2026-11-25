@@ -107,6 +107,34 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
   const gradeStyle = gradeBadgeStyle(net.grade);
   const busy = net.scanning || net.testingSpeed || net.fixing;
 
+  const [deviceLabels, setDeviceLabels] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      return JSON.parse(window.localStorage.getItem('devdeck.lanLabels.v1') || '{}') as Record<
+        string,
+        string
+      >;
+    } catch {
+      return {};
+    }
+  });
+
+  const labelDevice = (mac: string, currentName: string) => {
+    const next = window.prompt('Label this Wi-Fi device (e.g. My iPhone, PS5, TV, Router):', currentName);
+    if (next === null) return;
+    setDeviceLabels((prev) => {
+      const updated = { ...prev };
+      if (next.trim()) updated[mac] = next.trim();
+      else delete updated[mac];
+      try {
+        window.localStorage.setItem('devdeck.lanLabels.v1', JSON.stringify(updated));
+      } catch {
+        // Ignore
+      }
+      return updated;
+    });
+  };
+
   const selectTab = (id: RightTabId) => {
     soundEngine.playClick();
     setRightTab(id);
@@ -793,8 +821,28 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
             className="h-full"
           >
             <div className="deck-scroll flex h-full flex-col gap-1.5 overflow-y-auto pr-0.5">
+              {/* Live Bandwidth Throughput & Active Network Process Banner */}
+              {bridgeConnected && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-[#98c8ce24] bg-[#0d1d26] px-2.5 py-1.5 text-[9.5px]">
+                  <span className="font-mono-tech font-extrabold text-[#88f1d1]">
+                    LIVE I/O: ↓{deck.stats.netRxKBs} KB/s · ↑{deck.stats.netTxKBs} KB/s
+                  </span>
+                  <span className="truncate text-[#9cb4bb]">
+                    Top App: <b className="text-white">{deck.processes[0]?.name || 'Idle'}</b>
+                  </span>
+                </div>
+              )}
+
               {net.devices.map((dev) => {
-                const color = dev.isGateway ? '#fbbf24' : dev.isSelf ? '#88f1d1' : '#7dd3fc';
+                const customLabel = deviceLabels[dev.mac];
+                const isUnknown = !dev.isGateway && !dev.isSelf && !customLabel && dev.isNew;
+                const color = isUnknown
+                  ? '#ff5d6c'
+                  : dev.isGateway
+                    ? '#fbbf24'
+                    : dev.isSelf
+                      ? '#88f1d1'
+                      : '#7dd3fc';
                 const Icon = dev.isGateway ? Router : dev.isSelf ? Laptop : Globe;
                 return (
                   <div
@@ -807,9 +855,14 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="truncate text-console-caption font-extrabold text-[#effaf7]">
-                            {dev.hostname}
+                            {customLabel || dev.hostname}
                           </span>
-                          {dev.isNew && (
+                          {isUnknown && (
+                            <span className="rounded bg-[#ff5d6c]/20 px-1 text-[8px] font-extrabold text-[#ff5d6c]">
+                              UNKNOWN / NEW
+                            </span>
+                          )}
+                          {!isUnknown && dev.isNew && (
                             <span className="rounded bg-[#fbbf24]/20 px-1 text-[8px] font-extrabold text-[#fbbf24]">
                               NEW
                             </span>
@@ -831,7 +884,7 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
                       </div>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="flex shrink-0 items-center gap-1">
                       <div className="text-right">
                         <div className="font-mono-tech text-console-caption font-bold text-[#88f1d1]">
                           {dev.ip}
@@ -842,6 +895,13 @@ export function NetworkCommandView({ deck }: { deck: DevDeckState }) {
                           </div>
                         )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => labelDevice(dev.mac, customLabel || dev.hostname)}
+                        className="min-h-[26px] rounded-lg border border-white/10 bg-white/[0.05] px-1.5 text-[8px] font-extrabold text-[#9cb4bb] hover:text-white"
+                      >
+                        Label
+                      </button>
                       {!dev.isSelf && /^\d+\.\d+\.\d+\.\d+$/.test(dev.ip) && (
                         <button
                           type="button"

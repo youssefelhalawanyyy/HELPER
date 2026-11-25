@@ -1,5 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
+import dgram from 'node:dgram';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -355,4 +357,226 @@ export function captureSelectionToClipboard(): void {
   }
   const child = spawn('screencapture', ['-i', '-c'], { detached: true, stdio: 'ignore' });
   child.unref();
+}
+
+export async function typeTextOnHost(text: string, pressEnter = false): Promise<void> {
+  if (!text && !pressEnter) return;
+  if (IS_WIN) {
+    const escaped = text.replace(/([+^%~(){}[\]])/g, '{$1}');
+    const b64 = Buffer.from(escaped, 'utf8').toString('base64');
+    const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+$t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}'))
+if ($t.Length -gt 0) { [System.Windows.Forms.SendKeys]::SendWait($t) }
+${pressEnter ? "[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')" : ''}
+`;
+    await runPowerShell(ps, 3000).catch(() => {});
+    return;
+  }
+
+  const script = `
+on run argv
+  set txt to item 1 of argv
+  tell application "System Events"
+    if length of txt > 0 then keystroke txt
+    ${pressEnter ? 'key code 36' : ''}
+  end tell
+end run
+`;
+  await execFileAsync('osascript', ['-e', script, text], { timeout: 2500 }).catch(() => {});
+}
+
+export async function pressSpecialKeyOnHost(
+  key:
+    | 'esc'
+    | 'tab'
+    | 'enter'
+    | 'backspace'
+    | 'up'
+    | 'down'
+    | 'left'
+    | 'right'
+    | 'undo'
+    | 'copy'
+    | 'paste'
+    | 'selectAll'
+    | 'spotlight',
+): Promise<void> {
+  if (IS_WIN) {
+    const winMap: Record<typeof key, string> = {
+      esc: '{ESC}',
+      tab: '{TAB}',
+      enter: '{ENTER}',
+      backspace: '{BACKSPACE}',
+      up: '{UP}',
+      down: '{DOWN}',
+      left: '{LEFT}',
+      right: '{RIGHT}',
+      undo: '^z',
+      copy: '^c',
+      paste: '^v',
+      selectAll: '^a',
+      spotlight: '^{ESC}',
+    };
+    const seq = winMap[key];
+    await runPowerShell(
+      `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${seq}')`,
+      2000,
+    ).catch(() => {});
+    return;
+  }
+
+  const macMap: Record<typeof key, string> = {
+    esc: 'key code 53',
+    tab: 'key code 48',
+    enter: 'key code 36',
+    backspace: 'key code 51',
+    up: 'key code 126',
+    down: 'key code 125',
+    left: 'key code 123',
+    right: 'key code 124',
+    undo: 'keystroke "z" using {command down}',
+    copy: 'keystroke "c" using {command down}',
+    paste: 'keystroke "v" using {command down}',
+    selectAll: 'keystroke "a" using {command down}',
+    spotlight: 'key code 49 using {command down}',
+  };
+  await execFileAsync('osascript', ['-e', `tell application "System Events" to ${macMap[key]}`], {
+    timeout: 1800,
+  }).catch(() => {});
+}
+
+export async function captureScreenPeekJpeg(maxWidth = 720): Promise<Buffer | null> {
+  const width = Math.max(320, Math.min(1280, Math.round(maxWidth)));
+  const tmpFile = path.join(os.tmpdir(), `devdeck-peek-${process.pid}.jpg`);
+  try {
+    if (IS_WIN) {
+      const escaped = tmpFile.replace(/'/g, "''");
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height)
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$h = [int]([Math]::Round($b.Height * (${width} / [double]$b.Width)))
+$small = New-Object System.Drawing.Bitmap($bmp, ${width}, $h)
+$small.Save('${escaped}', [System.Drawing.Imaging.ImageFormat]::Jpeg)
+$g.Dispose(); $bmp.Dispose(); $small.Dispose()
+`;
+      await runPowerShell(ps, 3000);
+      return fs.existsSync(tmpFile) ? fs.readFileSync(tmpFile) : null;
+    }
+
+    await execFileAsync('screencapture', ['-x', '-t', 'jpg', tmpFile], { timeout: 2000 });
+    await execFileAsync('sips', ['-Z', String(width), '-s', 'formatOptions', '55', tmpFile], {
+      timeout: 2000,
+    }).catch(() => {});
+    return fs.existsSync(tmpFile) ? fs.readFileSync(tmpFile) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readClipboardImageBase64(): Promise<string | null> {
+  const tmpFile = path.join(os.tmpdir(), `devdeck-clip-in-${process.pid}.png`);
+  try {
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    if (IS_WIN) {
+      const escaped = tmpFile.replace(/'/g, "''");
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+  $img = [System.Windows.Forms.Clipboard]::GetImage()
+  $img.Save('${escaped}', [System.Drawing.Imaging.ImageFormat]::Png)
+  $img.Dispose()
+  Write-Output 'OK'
+}
+`;
+      await runPowerShell(ps, 2500);
+    } else {
+      const script = `
+set outPath to POSIX file "${tmpFile}"
+try
+  set imgData to the clipboard as «class PNGf»
+  set f to open for access outPath with write permission
+  set eof of f to 0
+  write imgData to f
+  close access f
+  return "OK"
+on error
+  return "NO_IMAGE"
+end try
+`;
+      await execFileAsync('osascript', ['-e', script], { timeout: 2200 });
+    }
+    if (!fs.existsSync(tmpFile)) return null;
+    const buf = fs.readFileSync(tmpFile);
+    if (buf.byteLength < 16) return null;
+    return `data:image/png;base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeClipboardImageBase64(dataUrl: string): Promise<boolean> {
+  const stripped = dataUrl.includes(',') ? dataUrl.split(',')[1] || '' : dataUrl;
+  const buf = Buffer.from(stripped, 'base64');
+  if (buf.byteLength < 16 || buf.byteLength > 15 * 1024 * 1024) return false;
+  const tmpFile = path.join(os.tmpdir(), `devdeck-clip-out-${process.pid}.png`);
+  fs.writeFileSync(tmpFile, buf);
+  try {
+    if (IS_WIN) {
+      const escaped = tmpFile.replace(/'/g, "''");
+      const ps = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$img = [System.Drawing.Image]::FromFile('${escaped}')
+[System.Windows.Forms.Clipboard]::SetImage($img)
+$img.Dispose()
+`;
+      await runPowerShell(ps, 2500);
+      return true;
+    }
+    const script = `set the clipboard to (read (POSIX file "${tmpFile}") as «class PNGf»)`;
+    await execFileAsync('osascript', ['-e', script], { timeout: 2200 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function sendWakeOnLanPacket(rawMac: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hex = rawMac.replace(/[^0-9a-fA-F]/g, '');
+    if (hex.length !== 12) {
+      reject(new Error('Invalid MAC address (use format AA:BB:CC:DD:EE:FF)'));
+      return;
+    }
+    const macBytes = Buffer.from(hex, 'hex');
+    const magic = Buffer.alloc(6 + 16 * 6, 0xff);
+    for (let i = 0; i < 16; i += 1) {
+      macBytes.copy(magic, 6 + i * 6);
+    }
+
+    const socket = dgram.createSocket('udp4');
+    socket.on('error', (err) => {
+      try {
+        socket.close();
+      } catch {
+        // Ignore
+      }
+      reject(err);
+    });
+    socket.bind(() => {
+      socket.setBroadcast(true);
+      socket.send(magic, 0, magic.length, 9, '255.255.255.255', (err) => {
+        try {
+          socket.close();
+        } catch {
+          // Ignore
+        }
+        if (err) reject(err);
+        else resolve(`Wake-on-LAN magic packet broadcast to ${rawMac.toUpperCase()}`);
+      });
+    });
+  });
 }

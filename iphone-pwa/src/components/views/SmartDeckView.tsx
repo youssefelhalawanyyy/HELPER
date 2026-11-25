@@ -575,15 +575,73 @@ export function SmartDeckView({
               </label>
 
               {isConnected && (
-                <button
-                  type="button"
-                  className={styles.tool}
-                  aria-pressed={editMode}
-                  onClick={() => setEditMode(!editMode)}
-                >
-                  <Edit3 size={14} aria-hidden="true" />
-                  {editMode ? 'Done' : 'Edit'}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className={styles.tool}
+                    title="Export Macro Deck as JSON backup"
+                    onClick={() => {
+                      soundEngine.playClick();
+                      const allMacros = deck.config?.macros ?? [];
+                      const blob = new Blob(
+                        [JSON.stringify({ macros: allMacros, exportedAt: new Date().toISOString() }, null, 2)],
+                        { type: 'application/json' },
+                      );
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'devdeck-macros-backup.json';
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(url);
+                      deck.showToast(true, `Exported ${allMacros.length} macros to JSON`);
+                    }}
+                  >
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.tool}
+                    title="Import Macro Deck JSON"
+                    onClick={() => {
+                      const inp = document.createElement('input');
+                      inp.type = 'file';
+                      inp.accept = 'application/json,.json';
+                      inp.onchange = async () => {
+                        const file = inp.files?.[0];
+                        if (!file) return;
+                        try {
+                          const parsed = JSON.parse(await file.text()) as { macros?: MacroButton[] };
+                          const list = Array.isArray(parsed.macros) ? parsed.macros : [];
+                          for (const m of list) {
+                            if (m?.id && m?.label && m?.payload) {
+                              deck.sendEvent({
+                                type: 'macro:upsert',
+                                payload: { requestId: makeRequestId(), macro: m },
+                              });
+                            }
+                          }
+                          deck.showToast(true, `Imported ${list.length} macros!`);
+                        } catch {
+                          deck.showToast(false, 'Invalid macro JSON file');
+                        }
+                      };
+                      inp.click();
+                    }}
+                  >
+                    Import
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.tool}
+                    aria-pressed={editMode}
+                    onClick={() => setEditMode(!editMode)}
+                  >
+                    <Edit3 size={14} aria-hidden="true" />
+                    {editMode ? 'Done' : 'Edit'}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -936,9 +994,36 @@ export function SmartDeckView({
                         : editingMacro.actionType === 'snippet'
                           ? 'Text to paste'
                           : editingMacro.actionType === 'chain'
-                            ? 'Steps in order'
+                            ? 'Routine Steps (perf:super, brightness:90, volume:50, caffeine, app:Chrome, shell:...)'
                             : 'Command'}
                 </span>
+                {editingMacro.actionType === 'chain' && (
+                  <div className="mb-1 flex flex-wrap gap-1">
+                    {(
+                      [
+                        ['Deep Work', 'perf:super, brightness:85, caffeine, antigravity, dev-server'],
+                        ['Turbo Render', 'perf:turbo, brightness:100, caffeine'],
+                        ['Eco Travel', 'perf:eco, brightness:50, volume:30'],
+                        ['Movie Night', 'perf:eco, brightness:40, volume:70, chrome'],
+                      ] as const
+                    ).map(([name, tpl]) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() =>
+                          setEditingMacro({
+                            ...editingMacro,
+                            label: editingMacro.label || name,
+                            payload: tpl,
+                          })
+                        }
+                        className="rounded-md border border-[#88f1d1]/35 bg-[#88f1d1]/12 px-2 py-0.5 text-[9px] font-extrabold text-[#88f1d1]"
+                      >
+                        + {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {editingMacro.actionType === 'shortcut' ? (
                   <select
                     value={editingMacro.payload}

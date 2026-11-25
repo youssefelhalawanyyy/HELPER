@@ -50,7 +50,18 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
   const [confirmDanger, setConfirmDanger] = useState<'restart' | 'shutdown' | null>(null);
   const [unlockPassword, setUnlockPassword] = useState('');
   const [showUnlockPwd, setShowUnlockPwd] = useState(false);
+  const [wolMac, setWolMac] = useState(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem('devdeck.wolMac.v1') || '' : '',
+  );
+  const [tempHistory, setTempHistory] = useState<number[]>([]);
   const p = deck.powerState;
+
+  useEffect(() => {
+    if (deck.status !== 'connected' || p.cpuTempC === null) return;
+    setTempHistory((prev) => [...prev.slice(-24), p.cpuTempC as number]);
+  }, [deck.status, p.cpuTempC, p.updatedAt]);
+
+  const topHeatCulprit = deck.processes[0] || null;
   const isConnected = deck.status === 'connected';
   const pColor = pressureColor(p.thermalPressure);
 
@@ -430,6 +441,54 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               <InstrumentGauge label="GPU / SoC" value={gpuTemp} max={120} unit="°C" heat={processorScale} />
               <InstrumentGauge label="Batt Temp" value={batteryTemp} max={60} unit="°C" heat={batteryHeatScale} />
             </div>
+
+            {/* Thermal History Sparkline + Top Heat Culprit with 1-Tap Cool Down */}
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-black/55 px-2.5 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-[8px] font-extrabold text-zinc-400 uppercase">
+                  Top Heat Culprit · Thermal Trend
+                </div>
+                <div className="font-mono-tech truncate text-[10px] font-bold text-white">
+                  {topHeatCulprit
+                    ? `${topHeatCulprit.name} (${topHeatCulprit.cpuPct}% CPU)`
+                    : 'Idle — no heavy heat culprits'}
+                </div>
+              </div>
+              {tempHistory.length >= 2 && (
+                <svg viewBox="0 0 80 20" className="h-5 w-16 shrink-0" aria-hidden="true">
+                  <polyline
+                    fill="none"
+                    stroke={heatBand(cpuTemp, processorScale).color}
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={tempHistory
+                      .map(
+                        (v, i) =>
+                          `${((i / Math.max(1, tempHistory.length - 1)) * 80).toFixed(1)},${(
+                            19 -
+                            Math.min(1, Math.max(0, v / 110)) * 17
+                          ).toFixed(1)}`,
+                      )
+                      .join(' ')}
+                  />
+                </svg>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  setProfile('eco');
+                  deck.sendEvent({
+                    type: 'perf:toggle',
+                    payload: { requestId: makeRequestId(), setting: 'throttleBg', enabled: true },
+                  });
+                }}
+                className="shrink-0 rounded-lg border border-[#34d399]/40 bg-[#34d399]/16 px-2 py-1 text-[8.5px] font-extrabold text-[#34d399]"
+              >
+                COOL DOWN
+              </button>
+            </div>
           </div>
         )}
 
@@ -677,6 +736,41 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               </span>
               <span className="text-[8px] text-zinc-400">2-tap safety confirm</span>
             </motion.button>
+
+            {/* Wake-on-LAN (Magic Packet) for Powered-Off / Deep-Sleep Desktops */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!wolMac.trim()) return;
+                soundEngine.playClick();
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem('devdeck.wolMac.v1', wolMac.trim());
+                }
+                deck.sendEvent({
+                  type: 'hardware:wol',
+                  payload: { requestId: makeRequestId(), mac: wolMac.trim() },
+                });
+              }}
+              className="col-span-2 flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-black/55 px-2.5 py-1.5"
+            >
+              <span className="font-mono-tech shrink-0 text-[8.5px] font-extrabold text-[#7dd3fc] uppercase">
+                Wake-on-LAN
+              </span>
+              <input
+                type="text"
+                value={wolMac}
+                onChange={(e) => setWolMac(e.target.value)}
+                placeholder="MAC Address (AA:BB:CC:DD:EE:FF)"
+                className="font-mono-tech h-6 min-w-0 flex-1 rounded-md border border-white/10 bg-[#071117] px-2 text-[9.5px] text-white outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!wolMac.trim()}
+                className="h-6 shrink-0 rounded-md bg-[#7dd3fc] px-2.5 text-[9px] font-extrabold text-[#04141c] disabled:opacity-40"
+              >
+                SEND MAGIC PACKET
+              </button>
+            </form>
           </div>
         )}
       </div>

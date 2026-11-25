@@ -38,6 +38,21 @@ export interface PairingConfig {
   port: number;
   token: string;
   secure?: boolean;
+  label?: string;
+  platform?: string;
+}
+
+const SAVED_PCS_KEY = 'devdeck.savedPcs.v1';
+
+function loadSavedPcs(): PairingConfig[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(SAVED_PCS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as PairingConfig[]) : [];
+    return Array.isArray(parsed) ? parsed.filter((p) => p?.host && p?.token) : [];
+  } catch {
+    return [];
+  }
 }
 
 function buildBridgeUrls(cfg: { host: string; port: number; secure?: boolean }) {
@@ -129,6 +144,7 @@ function loadSavedPairing(): PairingConfig | null {
 
 export function useDevDeckSocket() {
   const [pairing, setPairing] = useState<PairingConfig | null>(null);
+  const [savedPcs, setSavedPcs] = useState<PairingConfig[]>(() => loadSavedPcs());
   const [status, setStatus] = useState<ConnectionState>('unpaired');
   const [hello, setHello] = useState<BridgeHello | null>(null);
   const [config, setConfig] = useState<DevDeckPublicConfig | null>(null);
@@ -410,6 +426,24 @@ export function useDevDeckSocket() {
           switch (msg.type) {
             case 'hello':
               setHello(msg.payload);
+              setSavedPcs((prev) => {
+                if (!cfg.host || !cfg.token) return prev;
+                const entry: PairingConfig = {
+                  ...cfg,
+                  label: msg.payload.hostname || cfg.label || cfg.host,
+                  platform: msg.payload.platform || cfg.platform,
+                };
+                const next = [
+                  entry,
+                  ...prev.filter((p) => !(p.host === cfg.host && p.port === cfg.port)),
+                ].slice(0, 6);
+                try {
+                  window.localStorage.setItem(SAVED_PCS_KEY, JSON.stringify(next));
+                } catch {
+                  // Ignore
+                }
+                return next;
+              });
               break;
             case 'config:sync':
               setConfig(msg.payload);
@@ -584,8 +618,32 @@ export function useDevDeckSocket() {
 
   const savePairing = useCallback((next: PairingConfig) => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setSavedPcs((prev) => {
+      const merged = [
+        next,
+        ...prev.filter((p) => !(p.host === next.host && p.port === next.port)),
+      ].slice(0, 6);
+      try {
+        window.localStorage.setItem(SAVED_PCS_KEY, JSON.stringify(merged));
+      } catch {
+        // Ignore
+      }
+      return merged;
+    });
     retryCountRef.current = 0;
     setPairing(next);
+  }, []);
+
+  const removeSavedPc = useCallback((host: string, port: number) => {
+    setSavedPcs((prev) => {
+      const next = prev.filter((p) => !(p.host === host && p.port === port));
+      try {
+        window.localStorage.setItem(SAVED_PCS_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
   }, []);
 
   const clearPairing = useCallback(() => {
@@ -655,6 +713,8 @@ export function useDevDeckSocket() {
 
   return {
     pairing,
+    savedPcs,
+    removeSavedPc,
     bridgeBaseUrl,
     status,
     hello,

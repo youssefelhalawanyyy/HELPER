@@ -154,7 +154,7 @@ export function PerfStudioView({ deck }: { deck: DevDeckState }) {
   };
 
   const triggerToggle = (
-    setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg',
+    setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg' | 'autoSwitchByApp',
     enabled?: boolean,
   ) => {
     soundEngine.playClick();
@@ -354,6 +354,30 @@ export function PerfStudioView({ deck }: { deck: DevDeckState }) {
 
         {/* Direct Individual Graphics & Memory Toggles */}
         <div className="deck-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+          {/* Auto-Switch Profiles by Active App */}
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-[#88f1d1]/35 bg-[#88f1d1]/10 px-2.5 py-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[10.5px] font-extrabold text-white">
+                <Sparkles className="h-3.5 w-3.5 text-[#88f1d1]" />
+                Auto-Switch Mode by Active App
+              </div>
+              <div className="text-[8.5px] text-[#b8d0d6]">
+                SUPER for Xcode/Docker/Premiere/Antigravity · TURBO for 3D/Games · NORMAL otherwise
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => triggerToggle('autoSwitchByApp', !perf.autoSwitchByApp)}
+              className="shrink-0 rounded-full px-2.5 py-1 text-[8.5px] font-extrabold uppercase"
+              style={{
+                background: perf.autoSwitchByApp ? '#88f1d133' : 'rgba(255,255,255,0.08)',
+                color: perf.autoSwitchByApp ? '#88f1d1' : '#9ca3af',
+              }}
+            >
+              {perf.autoSwitchByApp ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
           {/* 1-Tap Free RAM / Purge Cache */}
           <div className="flex items-center justify-between gap-2 rounded-xl border border-[#a78bfa]/35 bg-[#a78bfa]/10 px-2.5 py-2">
             <div className="min-w-0">

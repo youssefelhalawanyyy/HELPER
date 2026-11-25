@@ -21,6 +21,7 @@ export class PerfStudioService {
     reduceMotion: false,
     highRamBoost: false,
     backgroundThrottled: false,
+    autoSwitchByApp: loadLocal<boolean>('perf-auto-switch.json', false),
     lastFreedRamMb: null,
     lastActionNote: 'Normal stock mode — standard laptop/PC graphics & balanced power.',
     updatedAt: 0,
@@ -279,9 +280,19 @@ Get-Process | Where-Object { $_.WorkingSet64 -gt 40MB } | ForEach-Object { try {
   }
 
   async toggleSetting(
-    setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg',
+    setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg' | 'autoSwitchByApp',
     enabled?: boolean,
   ): Promise<string> {
+    if (setting === 'autoSwitchByApp') {
+      const next = typeof enabled === 'boolean' ? enabled : !this.state.autoSwitchByApp;
+      this.state.autoSwitchByApp = next;
+      saveLocal('perf-auto-switch.json', next);
+      this.state.lastActionNote = next
+        ? 'Auto-Switch ON — switches to SUPER for Xcode/Docker/Premiere/Antigravity & TURBO for 3D/Games.'
+        : 'Auto-Switch OFF — manual mode selection active.';
+      this.emit();
+      return this.state.lastActionNote;
+    }
     if (setting === 'freeRam') {
       const res = await this.freeRamNow();
       return res.message;
@@ -311,5 +322,19 @@ Get-Process | Where-Object { $_.WorkingSet64 -gt 40MB } | ForEach-Object { try {
       : 'Background Throttle OFF — restored normal process priorities.';
     this.emit();
     return this.state.lastActionNote;
+  }
+
+  async handleActiveAppChange(appName: string): Promise<void> {
+    if (!this.state.autoSwitchByApp || !appName) return;
+    const lower = appName.toLowerCase();
+    let target: PerfStudioMode = 'normal';
+    if (/blender|unity|unreal|cinema 4d|maya|steam|valorant|fortnite|cyberpunk|league of legends|davinci|after effects/i.test(lower)) {
+      target = 'turbo';
+    } else if (/xcode|android studio|docker|premiere|final cut|antigravity|photoshop|intellij|webstorm|pycharm|cursor|visual studio/i.test(lower)) {
+      target = 'super';
+    }
+    if (target !== this.state.mode) {
+      await this.setMode(target);
+    }
   }
 }

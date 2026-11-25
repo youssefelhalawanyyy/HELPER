@@ -578,6 +578,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
   const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [promptText, setPromptText] = useState('');
+  const [commitMsg, setCommitMsg] = useState('');
   const [listening, setListening] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1138,6 +1139,58 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
 
           {sideTab === 'live' && (
             <div className="deck-scroll h-full space-y-2 overflow-y-auto pr-0.5">
+              {/* 1-Tap Git Commit & Push Bar */}
+              {ag.diffFiles.length > 0 && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    soundEngine.playClick();
+                    const msg =
+                      commitMsg.trim() ||
+                      `feat: update ${ag.diffFiles.length} file${ag.diffFiles.length === 1 ? '' : 's'} (${ag.diffFiles[0]?.file.split('/').pop() || 'workspace'})`;
+                    deck.sendEvent({
+                      type: 'git:commitPush',
+                      payload: { requestId: makeRequestId(), message: msg, push: true },
+                    });
+                    setCommitMsg('');
+                  }}
+                  className="space-y-1 rounded-xl border border-[#34d399]/35 bg-[#34d399]/10 p-2"
+                >
+                  <div className="flex items-center justify-between text-[8.5px] font-extrabold text-[#34d399] uppercase">
+                    <span>1-Tap Commit &amp; Push ({ag.diffFiles.length} changed)</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCommitMsg(
+                          `feat: update ${ag.diffFiles
+                            .slice(0, 2)
+                            .map((f) => f.file.split('/').pop())
+                            .join(', ')}`,
+                        )
+                      }
+                      className="text-[#88f1d1] underline"
+                    >
+                      Auto Msg
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={commitMsg}
+                      onChange={(e) => setCommitMsg(e.target.value)}
+                      placeholder="Commit message (or tap Auto Msg)…"
+                      className="font-mono-tech h-6 min-w-0 flex-1 rounded-md border border-white/15 bg-black/75 px-2 text-[9.5px] text-white outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="h-6 shrink-0 rounded-md bg-[#34d399] px-2 text-[9px] font-extrabold text-[#041811]"
+                    >
+                      COMMIT &amp; PUSH
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {ag.steps.length > 0 && (
                 <div className="rounded-xl border border-white/[0.06] bg-black/60 p-2">
                   <div className="mb-1 flex items-center justify-between">

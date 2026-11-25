@@ -519,6 +519,7 @@ export interface PerfStudioState {
   reduceMotion: boolean;
   highRamBoost: boolean;
   backgroundThrottled: boolean;
+  autoSwitchByApp?: boolean;
   lastFreedRamMb: number | null;
   lastActionNote: string;
   updatedAt: number;
@@ -607,6 +608,7 @@ export type ClientEvent =
   | { type: 'logs:stop'; payload: { requestId: string } }
   | { type: 'git:refresh'; payload: { requestId: string } }
   | { type: 'git:deploy'; payload: { requestId: string; action: 'push' | 'deploy' } }
+  | { type: 'git:commitPush'; payload: { requestId: string; message: string; push?: boolean } }
   | { type: 'webhook:replay'; payload: { requestId: string; eventId: string; targetBaseUrl?: string } }
   | { type: 'webhook:copy'; payload: { requestId: string; eventId: string } }
   | {
@@ -616,13 +618,35 @@ export type ClientEvent =
   | { type: 'hardware:mute'; payload: { requestId: string; muted: boolean } }
   | { type: 'hardware:lock'; payload: { requestId: string } }
   | { type: 'hardware:wake'; payload: { requestId: string; password?: string } }
+  | { type: 'hardware:wol'; payload: { requestId: string; mac: string } }
+  | { type: 'hardware:type'; payload: { requestId: string; text: string; enter?: boolean } }
+  | {
+      type: 'hardware:key';
+      payload: {
+        requestId: string;
+        key:
+          | 'esc'
+          | 'tab'
+          | 'enter'
+          | 'backspace'
+          | 'up'
+          | 'down'
+          | 'left'
+          | 'right'
+          | 'undo'
+          | 'copy'
+          | 'paste'
+          | 'selectAll'
+          | 'spotlight';
+      };
+    }
   | { type: 'hardware:caffeine'; payload: { requestId: string; active: boolean } }
   | { type: 'perf:setMode'; payload: { requestId: string; mode: PerfStudioMode } }
   | {
       type: 'perf:toggle';
       payload: {
         requestId: string;
-        setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg';
+        setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg' | 'autoSwitchByApp';
         enabled?: boolean;
       };
     }
@@ -638,6 +662,7 @@ export type ClientEvent =
       payload: {
         requestId: string;
         id: string;
+        command?: string;
         action:
           | 'start'
           | 'stop'
@@ -647,7 +672,10 @@ export type ClientEvent =
           | 'prune'
           | 'launch_daemon'
           | 'start_all'
-          | 'stop_all';
+          | 'stop_all'
+          | 'compose_up'
+          | 'compose_down'
+          | 'exec';
       };
     }
   | { type: 'docker:refresh'; payload: { requestId: string } }

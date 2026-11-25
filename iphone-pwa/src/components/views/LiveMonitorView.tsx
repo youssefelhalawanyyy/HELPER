@@ -84,6 +84,38 @@ function formatLogTime(ts: number): string {
   }
 }
 
+function MiniSparkline({
+  values,
+  color,
+  maxOverride,
+}: {
+  values: number[];
+  color: string;
+  maxOverride?: number;
+}) {
+  if (values.length < 2) return null;
+  const max = maxOverride ?? Math.max(10, ...values);
+  const pts = values
+    .map((v, i) => {
+      const x = (i / Math.max(1, values.length - 1)) * 100;
+      const y = 20 - Math.min(1, Math.max(0, v / max)) * 18;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  return (
+    <svg viewBox="0 0 100 22" className="h-4 w-full overflow-visible" aria-hidden="true">
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={pts}
+      />
+    </svg>
+  );
+}
+
 export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   const [tab, setTab] = useState<MonitorTab>('logs');
   const [selectedPreset, setSelectedPreset] = useState('');
@@ -96,6 +128,32 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
   const [hogSort, setHogSort] = useState<HogSort>('cpu');
   const [hogQuery, setHogQuery] = useState('');
   const [dockerQuery, setDockerQuery] = useState('');
+
+  // 60-second rolling telemetry history for sparklines (30 samples at 2s)
+  const [history, setHistory] = useState<{
+    cpu: number[];
+    heat: number[];
+    ram: number[];
+    net: number[];
+  }>({ cpu: [], heat: [], ram: [], net: [] });
+
+  useEffect(() => {
+    if (deck.status !== 'connected' || !deck.stats.ts) return;
+    setHistory((prev) => ({
+      cpu: [...prev.cpu.slice(-29), deck.stats.cpuPct],
+      heat: [...prev.heat.slice(-29), deck.powerState.cpuTempC ?? 0],
+      ram: [...prev.ram.slice(-29), deck.stats.ramPct],
+      net: [...prev.net.slice(-29), deck.stats.netRxKBs + deck.stats.netTxKBs],
+    }));
+  }, [
+    deck.status,
+    deck.stats.ts,
+    deck.stats.cpuPct,
+    deck.stats.ramPct,
+    deck.stats.netRxKBs,
+    deck.stats.netTxKBs,
+    deck.powerState.cpuTempC,
+  ]);
 
   // 3-Channel Hardware Potentiometer State (Volume / Brightness / Mic Gain)
   const mt = deck.macTelemetry;
@@ -335,6 +393,25 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* 60-Second Rolling Sparkline Charts (CPU, Heat, RAM, Net) */}
+        {isConnected && history.cpu.length >= 2 && (
+          <div className="grid grid-cols-4 gap-1 rounded-lg border border-white/[0.06] bg-black/50 px-1.5 py-1">
+            {(
+              [
+                ['CPU', history.cpu, '#22d3ee', 100],
+                ['HEAT', history.heat, cpuHeatBand.color, 110],
+                ['RAM', history.ram, '#b4adf0', 100],
+                ['NET', history.net, '#88f1d1', undefined],
+              ] as const
+            ).map(([lbl, arr, col, maxVal]) => (
+              <div key={lbl} className="min-w-0">
+                <div className="font-mono-tech text-[7px] font-extrabold text-zinc-400">{lbl}</div>
+                <MiniSparkline values={arr} color={col} maxOverride={maxVal} />
+              </div>
+            ))}
           </div>
         )}
 
@@ -885,6 +962,42 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                           type: 'docker:action',
                           payload: {
                             requestId: makeRequestId(),
+                            id: '__compose__',
+                            action: 'compose_up',
+                          },
+                        });
+                        setTab('logs');
+                      }}
+                      className="rounded-lg border border-[#22d3ee]/35 bg-[#22d3ee]/15 px-2 py-0.5 text-[8.5px] font-extrabold text-[#22d3ee]"
+                    >
+                      COMPOSE UP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playClick();
+                        deck.sendEvent({
+                          type: 'docker:action',
+                          payload: {
+                            requestId: makeRequestId(),
+                            id: '__compose__',
+                            action: 'compose_down',
+                          },
+                        });
+                        setTab('logs');
+                      }}
+                      className="rounded-lg border border-white/15 bg-white/[0.07] px-2 py-0.5 text-[8.5px] font-extrabold text-zinc-300"
+                    >
+                      DOWN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playClick();
+                        deck.sendEvent({
+                          type: 'docker:action',
+                          payload: {
+                            requestId: makeRequestId(),
                             id: '__all__',
                             action: 'start_all',
                           },
@@ -1007,6 +1120,30 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
                           <FileText className="h-2.5 w-2.5" />
                           LOGS
                         </button>
+                        {running && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cmd = window.prompt(`Run command inside ${c.name}:`, 'ls -la');
+                              if (!cmd) return;
+                              soundEngine.playClick();
+                              deck.sendEvent({
+                                type: 'docker:action',
+                                payload: {
+                                  requestId: makeRequestId(),
+                                  id: c.id,
+                                  action: 'exec',
+                                  command: cmd,
+                                },
+                              });
+                              setTab('logs');
+                            }}
+                            title={`Exec shell command in ${c.name}`}
+                            className="flex h-6 items-center gap-1 rounded-lg border border-[#a78bfa]/35 bg-[#a78bfa]/15 px-2 text-[8.5px] font-extrabold text-[#c4b5fd]"
+                          >
+                            EXEC
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {

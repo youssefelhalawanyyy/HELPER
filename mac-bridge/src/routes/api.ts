@@ -8,6 +8,20 @@ import { Router } from 'express';
 import type { AuthManager } from '../auth.js';
 import type { ConfigStore } from '../config.js';
 import { spawnCloudflaredQuickTunnel } from '../platform/cloudflared.js';
+import {
+  captureScreenPeekJpeg,
+  readClipboardImageBase64,
+  writeClipboardImageBase64,
+} from '../macos/hardware.js';
+import {
+  type FileRootKey,
+  listWorkspaceFiles,
+  readWorkspaceTextFile,
+  resolveRootDir,
+  resolveSafePath,
+  saveUploadedFile,
+  writeWorkspaceTextFile,
+} from '../services/workspaceFilesService.js';
 import type {
   AgentNotification,
   AgentNotificationStatus,
@@ -448,6 +462,113 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     };
     const deliveredTo = deps.onAgentNotify ? deps.onAgentNotify(notification) : 0;
     res.json({ ok: true, id: notification.id, deliveredTo });
+  });
+
+  // --- Remote File Explorer, Code Editor & 2-Way AirDrop File/Photo Drop ---
+  const parseRoot = (val: unknown): FileRootKey =>
+    val === 'desktop' || val === 'downloads' ? val : 'project';
+
+  router.get('/files/list', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.query.root);
+      const dir = typeof req.query.dir === 'string' ? req.query.dir : '';
+      const q = typeof req.query.q === 'string' ? req.query.q : '';
+      const data = listWorkspaceFiles(root, deps.config.getAll().projectDir, dir, q);
+      res.json({ ok: true, root, ...data });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'List failed' });
+    }
+  });
+
+  router.get('/files/read', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.query.root);
+      const relPath = typeof req.query.path === 'string' ? req.query.path : '';
+      const data = readWorkspaceTextFile(root, deps.config.getAll().projectDir, relPath);
+      res.json({ ok: true, root, ...data });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Read failed' });
+    }
+  });
+
+  router.put('/files/write', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.body?.root);
+      const relPath = typeof req.body?.path === 'string' ? req.body.path : '';
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      const data = writeWorkspaceTextFile(root, deps.config.getAll().projectDir, relPath, content);
+      res.json({ ok: true, root, ...data });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Save failed' });
+    }
+  });
+
+  router.get('/files/download', (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    try {
+      const root = parseRoot(req.query.root);
+      const relPath = typeof req.query.path === 'string' ? req.query.path : '';
+      const rootDir = resolveRootDir(root, deps.config.getAll().projectDir);
+      const full = resolveSafePath(rootDir, relPath);
+      if (!fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+        res.status(404).json({ ok: false, error: 'File not found' });
+        return;
+      }
+      res.download(full, path.basename(full));
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Download failed' });
+    }
+  });
+
+  router.post('/files/upload', deps.auth.requireAuth, (req, res) => {
+    try {
+      const root = parseRoot(req.body?.root || 'downloads');
+      const filename = typeof req.body?.filename === 'string' ? req.body.filename : `drop-${Date.now()}.bin`;
+      const base64Data = typeof req.body?.data === 'string' ? req.body.data : '';
+      const subDir = typeof req.body?.dir === 'string' ? req.body.dir : '';
+      const saved = saveUploadedFile(root, deps.config.getAll().projectDir, filename, base64Data, subDir);
+      res.json({ ok: true, ...saved });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'Upload failed' });
+    }
+  });
+
+  // --- Bidirectional Image Clipboard Sync ---
+  router.get('/clipboard/image', deps.auth.requireAuth, async (_req, res) => {
+    const dataUrl = await readClipboardImageBase64();
+    res.json({ ok: true, hasImage: Boolean(dataUrl), dataUrl });
+  });
+
+  router.post('/clipboard/image', deps.auth.requireAuth, async (req, res) => {
+    const dataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+    const ok = await writeClipboardImageBase64(dataUrl);
+    res.json({ ok, message: ok ? 'Image copied to computer clipboard' : 'Could not write image to clipboard' });
+  });
+
+  // --- Live Mini Screen Peek (for Trackpad & Snap) ---
+  router.get('/screen/peek', async (req, res) => {
+    const token =
+      (typeof req.query.token === 'string' ? req.query.token : '') ||
+      (req.header('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (token !== deps.auth.token) {
+      res.status(401).end();
+      return;
+    }
+    const maxW = Number(req.query.w) || 720;
+    const jpg = await captureScreenPeekJpeg(maxW);
+    if (!jpg) {
+      res.status(503).end();
+      return;
+    }
+    res.setHeader('content-type', 'image/jpeg');
+    res.setHeader('cache-control', 'no-store');
+    res.send(jpg);
   });
 
   return router;
