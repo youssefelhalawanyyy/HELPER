@@ -13,6 +13,7 @@ function isLikelyDevPort(port: number): boolean {
 
 export class PortService {
   private timer: NodeJS.Timeout | null = null;
+  private busy = false;
   private latestPorts: ActivePort[] = [];
 
   constructor(private onUpdate: (ports: ActivePort[]) => void) {}
@@ -65,6 +66,8 @@ export class PortService {
   }
 
   async scan(): Promise<ActivePort[]> {
+    if (this.busy) return this.latestPorts;
+    this.busy = true;
     try {
       if (IS_WIN) {
         return await this.scanWindows();
@@ -105,6 +108,8 @@ export class PortService {
       return this.latestPorts;
     } catch {
       return this.latestPorts;
+    } finally {
+      this.busy = false;
     }
   }
 

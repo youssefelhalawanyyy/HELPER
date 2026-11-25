@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 
 export class DeepTelemetryService {
   private timer: NodeJS.Timeout | null = null;
+  private busy = false;
   private lastSlowScan = 0;
   private cachedSlow: {
     batteryHealthPct: number | null;
@@ -338,11 +339,7 @@ export class DeepTelemetryService {
     if (IS_WIN) {
       try {
         const ps = `
-Add-Type 'using System; using System.Text; using System.Runtime.InteropServices; public class WinInfo { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int c); }'
-$h = [WinInfo]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 256
-[WinInfo]::GetWindowText($h, $sb, 256) | Out-Null
-$title = $sb.ToString()
+$title = [DevDeckWinApi]::GetFrontWindowTitle()
 $apps = (Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | Select-Object -ExpandProperty ProcessName -Unique | Select-Object -First 16) -join '||'
 $dm = (Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
 $isDark = if ($dm -eq 1) { 'false' } else { 'true' }
@@ -470,7 +467,10 @@ Write-Output ($title + '###' + $apps + '###' + $isDark)
   }
 
   async refresh(): Promise<MacDeepTelemetry> {
-    await this.scanSlowHardware();
+    if (this.busy) return this.latest;
+    this.busy = true;
+    try {
+      await this.scanSlowHardware();
     const [load, timeRem, pingMs, ctx] = await Promise.all([
       si.currentLoad().catch(() => ({ cpus: [] as Array<{ load: number }> })),
       this.readBatteryRemaining(),
@@ -504,8 +504,11 @@ Write-Output ($title + '###' + $apps + '###' + $isDark)
       darkMode: ctx.darkMode,
       ts: Date.now(),
     };
-    this.onUpdate(this.latest);
-    return this.latest;
+      this.onUpdate(this.latest);
+      return this.latest;
+    } finally {
+      this.busy = false;
+    }
   }
 
   start(intervalMs = 6000): void {

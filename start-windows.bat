@@ -1,8 +1,8 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul 2>nul
-title DevDeck Live Bridge (Windows -^> iPhone)
+title DevDeck Live Bridge (Windows 10/11 -^> iPhone)
 
 echo.
 echo  =======================================================
@@ -11,17 +11,30 @@ echo  =======================================================
 echo   Folder: %CD%
 echo.
 
-:: 1. Verify Node.js is installed
+:: Ensure standard Node.js and Git install paths are in PATH even right after winget install
+set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\Programs\nodejs;%ProgramFiles%\Git\cmd"
+
+:: 1. Verify Node.js is installed (auto-install via winget if missing!)
 where node.exe >nul 2>nul
 if %errorlevel% neq 0 (
-  echo [ERROR] Node.js is not installed or not in PATH.
-  echo         Install Node.js LTS from https://nodejs.org and reopen this window.
+  echo [SETUP] Node.js was not found in PATH. Attempting automatic install via Windows winget...
+  where winget.exe >nul 2>nul
+  if !errorlevel! equ 0 (
+    winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+    set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\Programs\nodejs"
+  )
+)
+
+where node.exe >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [ERROR] Node.js is not installed.
+  echo         Install Node.js LTS from https://nodejs.org and double-click start-windows.bat again.
   echo.
   pause
   exit /b 1
 )
 
-:: 2. Verify npm is available
+:: 2. Verify npm.cmd is available
 where npm.cmd >nul 2>nul
 if %errorlevel% neq 0 (
   echo [ERROR] npm.cmd was not found in PATH.
@@ -45,6 +58,12 @@ if not exist "node_modules\tsx\dist\cli.mjs" (
       exit /b 1
     )
   )
+)
+
+:: 4. Pre-build mac-bridge if dist/index.js is missing for instant startup
+if not exist "mac-bridge\dist\index.js" (
+  echo [BUILD] Compiling DevDeck Windows Bridge...
+  call npm.cmd run build -w mac-bridge >nul 2>nul
 )
 
 set NODE_NO_WARNINGS=1

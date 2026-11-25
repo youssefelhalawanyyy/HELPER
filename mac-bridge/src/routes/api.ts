@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { Router } from 'express';
 import type { AuthManager } from '../auth.js';
@@ -34,9 +35,43 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     res.json({
       ok: true,
       name: 'DevDeck Bridge',
-      version: '1.0.0',
+      version: '1.1.0',
+      platform: process.platform,
+      hostname: os.hostname(),
       lanIp: deps.lanIp,
       bridgePort: deps.bridgePort,
+      tunnelUrl: process.env.PUBLIC_BRIDGE_URL || '',
+    });
+  });
+
+  // 1-Click Localhost Loopback Pairing (for browser /setup running on the same Windows PC or Mac)
+  router.post('/pair/local', (req, res) => {
+    const remoteIp = (req.socket.remoteAddress || '').trim();
+    const isLoopback =
+      remoteIp === '127.0.0.1' ||
+      remoteIp === '::1' ||
+      remoteIp === '::ffff:127.0.0.1';
+    const isProxied = Boolean(
+      req.header('cf-connecting-ip') || req.header('x-forwarded-for'),
+    );
+
+    if (!isLoopback || isProxied) {
+      res.status(403).json({
+        ok: false,
+        error: 'Local 1-click pairing is only allowed from a browser on this computer (use 6-digit PIN for remote pairing).',
+      });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      token: deps.auth.token,
+      pin: deps.auth.pin,
+      host: deps.lanIp,
+      port: deps.bridgePort,
+      platform: process.platform,
+      hostname: os.hostname(),
+      tunnelUrl: process.env.PUBLIC_BRIDGE_URL || '',
     });
   });
 
@@ -59,6 +94,9 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
       token: deps.auth.token,
       host: deps.lanIp,
       port: deps.bridgePort,
+      platform: process.platform,
+      hostname: os.hostname(),
+      tunnelUrl: process.env.PUBLIC_BRIDGE_URL || '',
     });
   });
 

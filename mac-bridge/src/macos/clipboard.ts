@@ -69,6 +69,7 @@ export async function triggerMacPaste(): Promise<void> {
 
 export class ClipboardTracker {
   private timer: NodeJS.Timeout | null = null;
+  private busy = false;
   private current = '';
   private history: ClipboardItem[] = [];
   private readonly maxItems = 25;
@@ -90,12 +91,18 @@ export class ClipboardTracker {
     this.onUpdate(this.current, this.history);
   }
 
-  start(intervalMs = 1500): void {
+  start(intervalMs = 2200): void {
     if (this.timer) return;
     const poll = async () => {
-      const value = await readMacClipboard();
-      if (value && value !== this.current) {
-        this.record(value);
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        const value = await readMacClipboard();
+        if (value && value !== this.current) {
+          this.record(value);
+        }
+      } finally {
+        this.busy = false;
       }
     };
     void poll();

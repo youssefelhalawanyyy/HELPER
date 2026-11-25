@@ -1,3 +1,8 @@
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import { promisify } from 'node:util';
+import { IS_WIN } from '../platform/win32.js';
 import { loadDoctorAiKey } from '../services/doctorAiAgent.js';
 import { synthesizeNourSpeech } from '../services/devSuiteService.js';
 import { applyReviewedFile } from '../services/fileReview.js';
@@ -276,6 +281,204 @@ export function createDevSuiteRouter(opts: {
     } catch (e) {
       res.status(400).json({ ok: false, error: (e as Error).message });
     }
+  });
+
+  // --- Remote PowerShell / macOS Terminal Execution & AI Bridge Autopilot ---
+  const execFileAsync = promisify(execFile);
+
+  router.post('/host-shell', async (req, res) => {
+    const rawCmd = typeof req.body?.command === 'string' ? req.body.command.trim() : '';
+    const reqCwd = typeof req.body?.cwd === 'string' ? req.body.cwd.trim() : '';
+    if (!rawCmd || rawCmd.length > 4000) {
+      res.status(400).json({ ok: false, error: 'Enter a command (1–4000 characters)' });
+      return;
+    }
+
+    const cwd = reqCwd && fs.existsSync(reqCwd) ? reqCwd : opts.getProjectDir() || os.homedir();
+    const t0 = Date.now();
+    const shellLabel = IS_WIN ? 'Windows PowerShell' : 'macOS Terminal (zsh)';
+
+    try {
+      if (IS_WIN) {
+        const { stdout, stderr } = await execFileAsync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'; ${rawCmd}`,
+          ],
+          {
+            cwd,
+            timeout: 45_000,
+            maxBuffer: 4 * 1024 * 1024,
+            windowsHide: true,
+          },
+        );
+        res.json({
+          ok: true,
+          stdout: (stdout || '').trimEnd(),
+          stderr: (stderr || '').trimEnd(),
+          exitCode: 0,
+          durationMs: Date.now() - t0,
+          cwd,
+          platform: process.platform,
+          shell: shellLabel,
+        });
+      } else {
+        const { stdout, stderr } = await execFileAsync(
+          '/bin/zsh',
+          ['-lc', `export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; cd "${cwd.replace(/"/g, '\\"')}" && ${rawCmd}`],
+          {
+            cwd,
+            timeout: 45_000,
+            maxBuffer: 4 * 1024 * 1024,
+          },
+        );
+        res.json({
+          ok: true,
+          stdout: (stdout || '').trimEnd(),
+          stderr: (stderr || '').trimEnd(),
+          exitCode: 0,
+          durationMs: Date.now() - t0,
+          cwd,
+          platform: process.platform,
+          shell: shellLabel,
+        });
+      }
+    } catch (err) {
+      const e = err as Error & { stdout?: string; stderr?: string; code?: number | string };
+      res.json({
+        ok: true,
+        stdout: (e.stdout || '').trimEnd(),
+        stderr: (e.stderr || e.message || 'Command failed').trimEnd(),
+        exitCode: typeof e.code === 'number' ? e.code : 1,
+        durationMs: Date.now() - t0,
+        cwd,
+        platform: process.platform,
+        shell: shellLabel,
+      });
+    }
+  });
+
+  router.post('/ai-shell', async (req, res) => {
+    const promptText = typeof req.body?.prompt === 'string' ? req.body.prompt.trim().slice(0, 800) : '';
+    const targetOs: 'windows' | 'mac' =
+      req.body?.targetOs === 'windows' || req.body?.targetOs === 'mac'
+        ? req.body.targetOs
+        : IS_WIN
+          ? 'windows'
+          : 'mac';
+    const lastError = typeof req.body?.lastError === 'string' ? req.body.lastError.slice(0, 600) : '';
+
+    if (!promptText) {
+      res.status(400).json({ ok: false, error: 'Ask a question or describe the task' });
+      return;
+    }
+
+    const apiKey = loadDoctorAiKey();
+    if (apiKey) {
+      const sysPrompt = `You are the DevDeck Bridge & Terminal AI Engineer for ${targetOs === 'windows' ? 'Windows 10/11 PowerShell' : 'macOS Terminal (zsh)'}.
+Repository path: ${targetOs === 'windows' ? '$env:USERPROFILE\\HELPER' : '~/HELPER'}.
+Bridge port: 4747.
+Reply ONLY in valid JSON:
+{
+  "command": "exact single-line ${targetOs === 'windows' ? 'PowerShell' : 'zsh'} command ready to execute",
+  "explanation": "1-2 sentences explaining what the command does and how it solves the request"
+}
+User request: ${promptText}${lastError ? `\nRecent terminal error: ${lastError}` : ''}`;
+
+      for (const model of ['gemini-2.5-flash-lite', 'gemini-3-flash-preview']) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 10_000);
+        try {
+          const r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              signal: ctrl.signal,
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: sysPrompt }] }],
+                generationConfig: {
+                  temperature: 0.15,
+                  responseMimeType: 'application/json',
+                  thinkingConfig: { thinkingBudget: 0 },
+                },
+              }),
+            },
+          );
+          clearTimeout(timer);
+          if (!r.ok) continue;
+          const j = (await r.json()) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          };
+          const raw = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+          const parsed = JSON.parse(raw.replace(/^```json\s*/i, '').replace(/```$/, '').trim()) as {
+            command?: string;
+            explanation?: string;
+          };
+          if (parsed.command) {
+            res.json({
+              ok: true,
+              command: parsed.command,
+              explanation: parsed.explanation || 'AI command generated for your terminal.',
+              source: 'gemini',
+            });
+            return;
+          }
+        } catch {
+          clearTimeout(timer);
+        }
+      }
+    }
+
+    // Built-in deterministic expert fallback when offline or before Gemini key is configured
+    const q = `${promptText} ${lastError}`.toLowerCase();
+    let command = '';
+    let explanation = '';
+
+    if (/executionpolicy|running scripts is disabled|npm\.ps1/i.test(q)) {
+      command =
+        targetOs === 'windows'
+          ? 'Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force; & npm.cmd --version'
+          : 'chmod +x ~/HELPER/start-mac.command && npm --version';
+      explanation =
+        'Unblocks PowerShell script execution for your user account and invokes npm.cmd directly.';
+    } else if (/port 4747|eaddrinuse|already in use|kill|stuck/i.test(q)) {
+      command =
+        targetOs === 'windows'
+          ? "Get-NetTCPConnection -LocalPort 4747 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Output 'Cleared port 4747'"
+          : "lsof -ti tcp:4747 | xargs kill -9 2>/dev/null || true; echo 'Cleared port 4747'";
+      explanation = 'Finds and terminates any stale process holding port 4747.';
+    } else if (/firewall|allow|block|quic|tunnel/i.test(q)) {
+      command =
+        targetOs === 'windows'
+          ? "New-NetFirewallRule -DisplayName 'DevDeck Bridge 4747' -Direction Inbound -LocalPort 4747 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue; Write-Output 'Firewall rule ensured for TCP 4747'"
+          : 'curl -s http://127.0.0.1:4747/api/health';
+      explanation = 'Ensures TCP port 4747 is allowed through the local firewall and verifies bridge health.';
+    } else if (/update|pull|latest|upgrade|rebuild/i.test(q)) {
+      command =
+        targetOs === 'windows'
+          ? 'Set-Location "$env:USERPROFILE\\HELPER"; git pull --ff-only; & npm.cmd install; & npm.cmd run build -w mac-bridge'
+          : 'cd ~/HELPER && git pull --ff-only && npm install && npm run build -w mac-bridge';
+      explanation = 'Pulls the latest code from GitHub, updates packages, and hot-reloads the running bridge.';
+    } else {
+      command =
+        targetOs === 'windows'
+          ? 'Invoke-RestMethod -Uri http://127.0.0.1:4747/api/health | ConvertTo-Json'
+          : 'curl -s http://127.0.0.1:4747/api/health';
+      explanation = 'Checks the live DevDeck Bridge health, platform, LAN IP, and active tunnel status.';
+    }
+
+    res.json({
+      ok: true,
+      command,
+      explanation,
+      source: 'builtin',
+    });
   });
 
   return router;

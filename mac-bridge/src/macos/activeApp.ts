@@ -8,10 +8,8 @@ const execFileAsync = promisify(execFile);
 export async function getFrontmostAppName(): Promise<string> {
   if (IS_WIN) {
     try {
-      const out = await runPowerShell(
-        `Add-Type 'using System; using System.Runtime.InteropServices; public class Fg { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p); }'; $h=[Fg]::GetForegroundWindow(); $foregroundPid=0; [Fg]::GetWindowThreadProcessId($h, [ref]$foregroundPid) | Out-Null; (Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue).ProcessName`,
-        1800,
-      );
+      // Uses pre-compiled DevDeckWinApi inside persistent PowerShell worker (<3ms!)
+      const out = await runPowerShell('[DevDeckWinApi]::GetFrontProcessName()', 1500);
       return out.trim() || 'Windows';
     } catch {
       return 'Windows';
@@ -21,7 +19,10 @@ export async function getFrontmostAppName(): Promise<string> {
   try {
     const { stdout } = await execFileAsync(
       'osascript',
-      ['-e', 'tell application "System Events" to get name of first application process whose frontmost is true'],
+      [
+        '-e',
+        'tell application "System Events" to get name of first application process whose frontmost is true',
+      ],
       { timeout: 1200 },
     );
     return stdout.trim() || 'Unknown';
@@ -55,6 +56,7 @@ export function resolveProfileForApp(appName: string, profiles: DeckProfile[]): 
 
 export class ActiveAppPoller {
   private timer: NodeJS.Timeout | null = null;
+  private busy = false;
   private lastApp = '';
   private lastProfile: ProfileId = 'general';
 
@@ -64,18 +66,27 @@ export class ActiveAppPoller {
   ) {}
 
   getCurrent(): { appName: string; profileId: ProfileId } {
-    return { appName: this.lastApp || (IS_WIN ? 'Windows' : 'macOS'), profileId: this.lastProfile };
+    return {
+      appName: this.lastApp || (IS_WIN ? 'Windows' : 'macOS'),
+      profileId: this.lastProfile,
+    };
   }
 
-  start(intervalMs = 1500): void {
+  start(intervalMs = 2000): void {
     if (this.timer) return;
     const poll = async () => {
-      const appName = await getFrontmostAppName();
-      const profileId = resolveProfileForApp(appName, this.getProfiles());
-      if (appName !== this.lastApp || profileId !== this.lastProfile) {
-        this.lastApp = appName;
-        this.lastProfile = profileId;
-        this.onChange(appName, profileId);
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        const appName = await getFrontmostAppName();
+        const profileId = resolveProfileForApp(appName, this.getProfiles());
+        if (appName !== this.lastApp || profileId !== this.lastProfile) {
+          this.lastApp = appName;
+          this.lastProfile = profileId;
+          this.onChange(appName, profileId);
+        }
+      } finally {
+        this.busy = false;
       }
     };
     void poll();

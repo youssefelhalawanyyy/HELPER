@@ -3,6 +3,7 @@ import type { SystemStats } from '../types/protocol.js';
 
 export class StatsService {
   private timer: NodeJS.Timeout | null = null;
+  private busy = false;
   private latest: SystemStats = {
     cpuPct: 0,
     ramUsedGb: 0,
@@ -25,6 +26,8 @@ export class StatsService {
   }
 
   private async sample(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
     try {
       const [load, mem, disks, net, bat] = await Promise.all([
         si.currentLoad(),
@@ -61,6 +64,8 @@ export class StatsService {
       this.onStats(this.latest);
     } catch {
       // Ignore transient telemetry errors
+    } finally {
+      this.busy = false;
     }
   }
 

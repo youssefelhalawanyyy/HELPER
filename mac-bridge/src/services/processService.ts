@@ -33,6 +33,8 @@ const PROTECTED_PROCESSES = new Set([
 
 export class ProcessAndDockerService {
   private timer: NodeJS.Timeout | null = null;
+  private busyProc = false;
+  private busyDocker = false;
   private latestProcesses: HeavyProcess[] = [];
   private dockerAvailable = false;
   private latestContainers: DockerContainer[] = [];
@@ -51,6 +53,8 @@ export class ProcessAndDockerService {
   }
 
   async scanProcesses(): Promise<HeavyProcess[]> {
+    if (this.busyProc) return this.latestProcesses;
+    this.busyProc = true;
     try {
       if (IS_WIN) {
         const res = await si.processes();
@@ -107,6 +111,8 @@ export class ProcessAndDockerService {
       return list;
     } catch {
       return this.latestProcesses;
+    } finally {
+      this.busyProc = false;
     }
   }
 
@@ -145,11 +151,13 @@ export class ProcessAndDockerService {
   }
 
   async scanDocker(): Promise<{ available: boolean; containers: DockerContainer[] }> {
+    if (this.busyDocker) return { available: this.dockerAvailable, containers: this.latestContainers };
+    this.busyDocker = true;
     try {
       const { stdout } = await execFileAsync(
         'docker',
         ['ps', '-a', '--format', '{{.ID}}|||{{.Names}}|||{{.Status}}|||{{.State}}'],
-        { timeout: 2500 },
+        { timeout: 2500, windowsHide: true },
       );
       const containers: DockerContainer[] = stdout
         .split('\n')
@@ -175,6 +183,8 @@ export class ProcessAndDockerService {
       this.latestContainers = [];
       this.onDocker(false, []);
       return { available: false, containers: [] };
+    } finally {
+      this.busyDocker = false;
     }
   }
 
