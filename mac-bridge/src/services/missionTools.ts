@@ -24,6 +24,7 @@ $i.Dispose()`;
       await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
         env: { ...process.env, DECK_SNAPSHOT: file },
         timeout: 8000,
+        windowsHide: true,
       });
     } else throw Error('Desktop capture requires macOS or Windows');
     return {

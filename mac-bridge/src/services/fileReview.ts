@@ -5,7 +5,8 @@ import { lstat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
-const options = (cwd: string) => ({ cwd, timeout: 4000, maxBuffer: 2 * 1024 * 1024 });
+const IS_WIN = process.platform === 'win32';
+const options = (cwd: string) => ({ cwd, timeout: 4000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
 const diffArgs = ['--no-ext-diff', '--no-textconv', '--no-color', '--no-renames'];
 
 export async function changedFiles(cwd: string) {
@@ -49,14 +50,16 @@ export async function inspectFile(cwd: string, file: string) {
   );
   let patch = stdout;
   if (!patch) {
+    const posixFile = file.replace(/\\/g, '/');
     const result = await exec(
       'git',
-      ['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', '--', file],
+      ['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', '--', posixFile],
       options(cwd),
     );
-    if (result.stdout === file + '\0' && (await lstat(path.join(cwd, file))).isFile()) {
+    if (result.stdout.replace(/\\/g, '/') === posixFile + '\0' && (await lstat(path.join(cwd, file))).isFile()) {
+      const nullDevice = IS_WIN ? 'NUL' : '/dev/null';
       try {
-        await exec('git', ['diff', '--no-index', ...diffArgs, '--', '/dev/null', file], options(cwd));
+        await exec('git', ['diff', '--no-index', ...diffArgs, '--', nullDevice, posixFile], options(cwd));
       } catch (e) {
         const err = e as { code: number; stdout: string };
         if (err.code !== 1) throw e;

@@ -1,11 +1,13 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import { URL } from 'node:url';
+import {
+  killChildProcessTree,
+  spawnCloudflaredQuickTunnel,
+} from '../platform/cloudflared.js';
 
-const IS_WIN = process.platform === 'win32';
-const NPX_CMD = IS_WIN ? 'npx.cmd' : 'npx';
 const IDLE_TTL_MS = 45 * 60 * 1000;
 
 const BLOCKED_PORTS = new Set([21, 22, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5432, 5900, 6379, 27017]);
@@ -403,46 +405,40 @@ function ensureTunnelForEntry(entry: PreviewEntry): Promise<string | null> {
       resolve(url);
     };
 
-    const timer = setTimeout(() => finish(null), 9000);
+    const timer = setTimeout(() => finish(null), 18_000);
 
-    try {
-      const child = spawn(
-        NPX_CMD,
-        ['-y', 'cloudflared', 'tunnel', '--url', `http://127.0.0.1:${entry.proxyPort}`],
-        {
-          shell: IS_WIN,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        },
-      );
-      entry.tunnelProc = child;
+    spawnCloudflaredQuickTunnel(`http://127.0.0.1:${entry.proxyPort}`, false)
+      .then((child) => {
+        entry.tunnelProc = child;
 
-      const onData = (chunk: Buffer) => {
-        const text = chunk.toString('utf8');
-        const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
-        if (m) {
+        const onData = (chunk: Buffer) => {
+          const text = chunk.toString('utf8');
+          const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+          if (m) {
+            clearTimeout(timer);
+            finish(m[0]);
+          }
+        };
+
+        child.stdout?.on('data', onData);
+        child.stderr?.on('data', onData);
+        child.once('error', () => {
           clearTimeout(timer);
-          finish(m[0]);
-        }
-      };
-
-      child.stdout?.on('data', onData);
-      child.stderr?.on('data', onData);
-      child.once('error', () => {
+          entry.tunnelProc = null;
+          entry.tunnelUrl = null;
+          finish(null);
+        });
+        child.once('exit', () => {
+          clearTimeout(timer);
+          entry.tunnelProc = null;
+          entry.tunnelUrl = null;
+          finish(null);
+        });
+      })
+      .catch(() => {
         clearTimeout(timer);
-        entry.tunnelProc = null;
-        entry.tunnelUrl = null;
         finish(null);
       });
-      child.once('exit', () => {
-        clearTimeout(timer);
-        entry.tunnelProc = null;
-        entry.tunnelUrl = null;
-        finish(null);
-      });
-    } catch {
-      clearTimeout(timer);
-      finish(null);
-    }
   });
 
   return entry.tunnelPromise;
@@ -595,7 +591,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of entries) {
     if (now - entry.lastUsedAt > IDLE_TTL_MS) {
-      if (entry.tunnelProc && !entry.tunnelProc.killed) entry.tunnelProc.kill('SIGTERM');
+      killChildProcessTree(entry.tunnelProc);
       entry.proxyServer.close();
       entries.delete(key);
     }
@@ -604,7 +600,7 @@ setInterval(() => {
 
 export function closeAllLocalPreviews(): void {
   for (const [, entry] of entries) {
-    if (entry.tunnelProc && !entry.tunnelProc.killed) entry.tunnelProc.kill('SIGTERM');
+    killChildProcessTree(entry.tunnelProc);
     entry.proxyServer.close();
   }
   entries.clear();

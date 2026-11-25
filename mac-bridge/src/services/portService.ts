@@ -23,8 +23,8 @@ export class PortService {
 
   private async scanWindows(): Promise<ActivePort[]> {
     const [{ stdout: netOut }, { stdout: taskOut }] = await Promise.all([
-      execFileAsync('netstat', ['-ano', '-p', 'TCP'], { timeout: 2500, maxBuffer: 1024 * 1024 }),
-      execFileAsync('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 2500, maxBuffer: 1024 * 1024 }).catch(
+      execFileAsync('netstat', ['-ano', '-p', 'TCP'], { timeout: 2500, maxBuffer: 1024 * 1024, windowsHide: true }),
+      execFileAsync('tasklist', ['/FO', 'CSV', '/NH'], { timeout: 2500, maxBuffer: 1024 * 1024, windowsHide: true }).catch(
         () => ({ stdout: '' }),
       ),
     ]);

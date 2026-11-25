@@ -1,66 +1,70 @@
 @echo off
-title DevDeck Live Bridge (Windows -> iPhone)
+setlocal
+cd /d "%~dp0"
+chcp 65001 >nul 2>nul
+title DevDeck Live Bridge (Windows -^> iPhone)
+
 echo.
-echo  =============================================
-echo   DEVDECK LIVE LAUNCHER (Windows -^> iPhone)
-echo  =============================================
+echo  =======================================================
+echo   DEVDECK LIVE LAUNCHER (Windows 10/11 -^> iPhone PWA)
+echo  =======================================================
+echo   Folder: %CD%
 echo.
 
-:: Check Node.js
-where node >nul 2>nul
+:: 1. Verify Node.js is installed
+where node.exe >nul 2>nul
 if %errorlevel% neq 0 (
-  echo [ERROR] Node.js is not installed. Please install Node.js LTS from https://nodejs.org
-  pause
-  exit /b 1
-)
-
-:: Check npm
-where npm >nul 2>nul
-if %errorlevel% neq 0 (
-  echo [ERROR] npm is not installed.
-  pause
-  exit /b 1
-)
-
-:: Install dependencies if needed
-if not exist "node_modules" (
-  echo [INFO] First run - installing dependencies...
+  echo [ERROR] Node.js is not installed or not in PATH.
+  echo         Install Node.js LTS from https://nodejs.org and reopen this window.
   echo.
-  npm install --legacy-peer-deps 2>&1 | find "npm notice" >nul
+  pause
+  exit /b 1
+)
+
+:: 2. Verify npm is available
+where npm.cmd >nul 2>nul
+if %errorlevel% neq 0 (
+  echo [ERROR] npm.cmd was not found in PATH.
+  echo.
+  pause
+  exit /b 1
+)
+
+:: 3. Install workspace dependencies on first run (or if tsx is missing)
+if not exist "node_modules\tsx\dist\cli.mjs" (
+  echo [SETUP] Installing DevDeck dependencies ^(first run^)...
+  echo.
+  call npm.cmd install
   if %errorlevel% neq 0 (
-    echo [WARN] Some warnings during install, continuing...
+    echo.
+    echo [WARN] Standard npm install reported an error — retrying with --legacy-peer-deps...
+    call npm.cmd install --legacy-peer-deps
+    if %errorlevel% neq 0 (
+      echo [ERROR] npm install failed. Check your internet connection and try again.
+      pause
+      exit /b 1
+    )
   )
 )
 
-:: Set environment for stability
-set NODE_OPTIONS=--max-old-space-size=512
 set NODE_NO_WARNINGS=1
 
-:: Start with error handling
-echo.
-echo [starting] Initializing DevDeck Windows Bridge...
-echo.
-
-:: Start the bridge with restart on crash
 :bridge_start
 echo.
-echo [bridge] Starting bridge server (port 4747)...
-timeout /t 1 >nul
+echo [LIVE] Starting DevDeck Windows Bridge + Free Cloudflare HTTPS Tunnel...
+echo        ^(Scan the QR code below with your iPhone Camera once it appears!^)
+echo.
 
-node dist/index.js >bridge.log 2>&1
+call npm.cmd run live
 set BRIDGE_EXIT_CODE=%errorlevel%
 
 if %BRIDGE_EXIT_CODE% neq 0 (
   echo.
-  echo [ERROR] Bridge crashed with exit code: %BRIDGE_EXIT_CODE%
-  echo [retry] Attempting restart in 3 seconds...
-  timeout /t 3 >nul
+  echo [WARN] DevDeck Bridge exited ^(code %BRIDGE_EXIT_CODE%^). Restarting in 4 seconds...
+  echo        Press Ctrl+C to stop.
+  timeout /t 4 >nul
   goto bridge_start
 )
 
-echo.
-echo [success] DevDeck Bridge is running on port 4747
-echo.
-echo [info] Bridge log: bridge.log
 echo.
 pause

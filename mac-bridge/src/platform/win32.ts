@@ -19,7 +19,7 @@ export async function runPowerShell(script: string, timeout = 5000): Promise<str
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { timeout, maxBuffer: 4 * 1024 * 1024 },
+      { timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
     );
     return stdout || '';
   } catch (error) {
@@ -114,10 +114,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
       }
     }
   } catch {
-    // Silently continue to prevent daemon crash
+    # Silently continue to prevent daemon crash
     $crashCount++
     if ($crashCount -ge $maxCrashes) {
-      write-host "[daemon] Too many errors, shutting down" -ForegroundColor Yellow
       exit 1
     }
   }
@@ -145,9 +144,10 @@ export function ensureWinMouseDaemon(): ChildProcess | null {
     const proc = spawn(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { 
+      {
         stdio: ['pipe', 'ignore', 'ignore'],
         detached: false,
+        windowsHide: true,
       },
     );
     

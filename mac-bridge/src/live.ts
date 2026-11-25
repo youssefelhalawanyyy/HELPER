@@ -2,14 +2,18 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  killChildProcessTree,
+  resolveTsxCliMjs,
+  spawnCloudflaredQuickTunnel,
+} from './platform/cloudflared.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE_ROOT = path.resolve(__dirname, '..');
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 4747);
 const PUBLIC_PWA_URL = (process.env.PUBLIC_PWA_URL || 'https://helper-nu-swart.vercel.app').replace(/\/+$/, '');
-const IS_WIN = process.platform === 'win32';
-const NPX_CMD = IS_WIN ? 'npx.cmd' : 'npx';
-const OS_LABEL = IS_WIN ? 'Windows' : process.platform === 'darwin' ? 'Mac' : 'Linux';
+const OS_LABEL =
+  process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'Mac' : 'Linux';
 
 let tunnelChild: ChildProcess | null = null;
 let bridgeChild: ChildProcess | null = null;
@@ -20,45 +24,37 @@ let shuttingDown = false;
 const DIST_ENTRY = path.join(BRIDGE_ROOT, 'dist', 'index.js');
 const SRC_ENTRY = path.join(BRIDGE_ROOT, 'src', 'index.ts');
 
-console.log(`\n🚀 DevDeck Live Launcher (${OS_LABEL}) — starting free Cloudflare HTTPS tunnel...\n`);
-
-tunnelChild = spawn(
-  NPX_CMD,
-  ['-y', 'cloudflared', 'tunnel', '--url', `http://127.0.0.1:${BRIDGE_PORT}`],
-  {
-    cwd: BRIDGE_ROOT,
-    shell: IS_WIN,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  },
-);
-
 function spawnBridgeProcess(tunnelUrl: string): void {
+  const tsxCli = resolveTsxCliMjs();
   const useCompiled =
-    fs.existsSync(DIST_ENTRY) &&
-    (!fs.existsSync(SRC_ENTRY) || fs.statSync(DIST_ENTRY).mtimeMs >= fs.statSync(SRC_ENTRY).mtimeMs);
+    !tsxCli ||
+    (fs.existsSync(DIST_ENTRY) &&
+      (!fs.existsSync(SRC_ENTRY) || fs.statSync(DIST_ENTRY).mtimeMs >= fs.statSync(SRC_ENTRY).mtimeMs));
 
-  const child = useCompiled
-    ? spawn(process.execPath, [DIST_ENTRY], {
-        cwd: BRIDGE_ROOT,
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          BRIDGE_PORT: String(BRIDGE_PORT),
-          PUBLIC_PWA_URL,
-          PUBLIC_BRIDGE_URL: tunnelUrl,
-        },
-      })
-    : spawn(NPX_CMD, ['tsx', 'src/index.ts'], {
-        cwd: BRIDGE_ROOT,
-        shell: IS_WIN,
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          BRIDGE_PORT: String(BRIDGE_PORT),
-          PUBLIC_PWA_URL,
-          PUBLIC_BRIDGE_URL: tunnelUrl,
-        },
-      });
+  const env = {
+    ...process.env,
+    BRIDGE_PORT: String(BRIDGE_PORT),
+    PUBLIC_PWA_URL,
+    PUBLIC_BRIDGE_URL: tunnelUrl,
+  };
+
+  let entryArgs: string[];
+  if (useCompiled && fs.existsSync(DIST_ENTRY)) {
+    entryArgs = [DIST_ENTRY];
+  } else if (tsxCli) {
+    entryArgs = [tsxCli, SRC_ENTRY];
+  } else {
+    console.error('[ERROR] Neither compiled dist/index.js nor tsx CLI found. Run "npm install" first.');
+    process.exit(1);
+  }
+
+  // Spawn node.exe directly with shell: false — immune to Windows spaces/cmd.exe quoting & EINVAL!
+  const child = spawn(process.execPath, entryArgs, {
+    cwd: BRIDGE_ROOT,
+    stdio: 'inherit',
+    env,
+    windowsHide: false,
+  });
 
   bridgeChild = child;
 
@@ -67,7 +63,7 @@ function spawnBridgeProcess(tunnelUrl: string): void {
     if (shuttingDown) return;
     if (restartingBridge) {
       restartingBridge = false;
-      spawnBridgeProcess(currentTunnelUrl);
+      setTimeout(() => spawnBridgeProcess(currentTunnelUrl), 250);
       return;
     }
     cleanup();
@@ -79,8 +75,12 @@ function startBridge(tunnelUrl: string): void {
   if (bridgeStarted) return;
   bridgeStarted = true;
   currentTunnelUrl = tunnelUrl;
-  console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
-  console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code (auto-reload enabled)...\n`);
+  if (tunnelUrl) {
+    console.log(`\n✅ Tunnel live: ${tunnelUrl}`);
+    console.log(`🔗 Starting DevDeck ${OS_LABEL} Bridge with 1-scan Vercel QR code (auto-reload enabled)...\n`);
+  } else {
+    console.log(`\n⚠️  Cloudflare tunnel unavailable — starting DevDeck ${OS_LABEL} Bridge in Local Wi-Fi / LAN mode...\n`);
+  }
   spawnBridgeProcess(tunnelUrl);
 
   // Hot-reload ONLY the bridge process when dist/index.js is rebuilt, keeping the Cloudflare tunnel URL alive!
@@ -89,9 +89,9 @@ function startBridge(tunnelUrl: string): void {
     if (shuttingDown || !curr.mtimeMs || curr.mtimeMs === lastMtime) return;
     lastMtime = curr.mtimeMs;
     if (bridgeChild && !bridgeChild.killed) {
-      console.log('\n♻️  Detected updated mac-bridge build — hot-reloading bridge (keeping tunnel URL alive)...\n');
+      console.log('\n♻️  Detected updated bridge build — hot-reloading bridge (keeping tunnel URL alive)...\n');
       restartingBridge = true;
-      bridgeChild.kill('SIGTERM');
+      killChildProcessTree(bridgeChild);
     }
   });
 }
@@ -104,26 +104,11 @@ function inspectChunk(chunk: Buffer): void {
   }
 }
 
-tunnelChild.stdout?.on('data', inspectChunk);
-tunnelChild.stderr?.on('data', inspectChunk);
-
-tunnelChild.on('error', (err) => {
-  console.error('Failed to start cloudflared:', err.message);
-  process.exit(1);
-});
-
-tunnelChild.on('exit', (code) => {
-  if (!bridgeStarted) {
-    console.error(`cloudflared exited before creating tunnel (code ${code ?? 'unknown'})`);
-    process.exit(code ?? 1);
-  }
-});
-
 function cleanup(): void {
   shuttingDown = true;
   fs.unwatchFile(DIST_ENTRY);
-  if (bridgeChild && !bridgeChild.killed) bridgeChild.kill('SIGTERM');
-  if (tunnelChild && !tunnelChild.killed) tunnelChild.kill('SIGTERM');
+  killChildProcessTree(bridgeChild);
+  killChildProcessTree(tunnelChild);
 }
 
 process.on('SIGINT', () => {
@@ -134,3 +119,38 @@ process.on('SIGTERM', () => {
   cleanup();
   process.exit(0);
 });
+
+async function main(): Promise<void> {
+  console.log(`\n🚀 DevDeck Live Launcher (${OS_LABEL}) — starting free Cloudflare HTTPS tunnel...\n`);
+  try {
+    tunnelChild = await spawnCloudflaredQuickTunnel(`http://127.0.0.1:${BRIDGE_PORT}`, true);
+    tunnelChild.stdout?.on('data', inspectChunk);
+    tunnelChild.stderr?.on('data', inspectChunk);
+
+    // Fallback to LAN mode if tunnel doesn't report URL within 20s instead of hanging forever
+    const fallbackTimer = setTimeout(() => {
+      if (!bridgeStarted) {
+        startBridge('');
+      }
+    }, 20_000);
+    fallbackTimer.unref();
+
+    tunnelChild.on('error', (err) => {
+      console.warn(`[warn] cloudflared failed (${err.message}) — falling back to Local LAN mode.`);
+      if (!bridgeStarted) startBridge('');
+    });
+
+    tunnelChild.on('exit', () => {
+      if (!bridgeStarted && !shuttingDown) {
+        startBridge('');
+      }
+    });
+  } catch (err) {
+    console.warn(
+      `[warn] Could not initialize Cloudflare tunnel (${err instanceof Error ? err.message : 'error'}) — starting in Local LAN mode.`,
+    );
+    startBridge('');
+  }
+}
+
+void main();

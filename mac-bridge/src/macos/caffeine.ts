@@ -32,7 +32,7 @@ export class CaffeineManager {
           this.child = spawn(
             'powershell.exe',
             ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-            { stdio: 'ignore' },
+            { stdio: 'ignore', windowsHide: true },
           );
         } else {
           this.child = spawn('caffeinate', ['-di'], { stdio: 'ignore' });

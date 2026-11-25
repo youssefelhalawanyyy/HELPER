@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { type ChildProcess, spawn } from 'node:child_process';
+import { killChildProcessTree } from '../platform/cloudflared.js';
 import { IS_WIN } from '../platform/win32.js';
 import type { LogLine, LogPreset, LogStatus } from '../types/protocol.js';
 
@@ -64,12 +65,28 @@ export class LogStreamer {
   startPreset(preset: LogPreset, cwd: string): void {
     this.stop();
     const cmdLabel = `${preset.command} ${preset.args.join(' ')}`.trim();
-    const child = spawn(preset.command, preset.args, {
-      cwd,
-      shell: IS_WIN,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0' },
-    });
+    const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const child = IS_WIN
+      ? spawn(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `& ${psQuote(preset.command)} ${preset.args.map(psQuote).join(' ')}`,
+          ],
+          {
+            cwd,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+            env: { ...process.env, FORCE_COLOR: '0' },
+          },
+        )
+      : spawn(preset.command, preset.args, {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, FORCE_COLOR: '0' },
+        });
 
     this.child = child;
     this.status = {
@@ -126,7 +143,7 @@ export class LogStreamer {
 
   stop(): void {
     if (this.child && !this.child.killed) {
-      this.child.kill('SIGTERM');
+      killChildProcessTree(this.child);
       this.child = null;
     }
   }
