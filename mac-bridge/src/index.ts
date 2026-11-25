@@ -1185,6 +1185,25 @@ function shutdownBridge(): void {
   antigravityService.stop();
   powerThermalService.stop();
   closeAllLocalPreviews();
+  for (const ws of clients) {
+    try {
+      ws.terminate();
+    } catch {
+      // Ignore
+    }
+  }
+  clients.clear();
+  try {
+    wss.close();
+  } catch {
+    // Ignore
+  }
+  try {
+    server.closeAllConnections?.();
+  } catch {
+    // Ignore
+  }
+  setTimeout(() => process.exit(0), 120).unref();
   server.close(() => process.exit(0));
 }
 

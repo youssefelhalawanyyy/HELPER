@@ -195,6 +195,15 @@ export function killChildProcessTree(child: ChildProcess | null | undefined): vo
   }
   try {
     child.kill('SIGTERM');
+    setTimeout(() => {
+      try {
+        if (!child.killed && child.exitCode === null) {
+          child.kill('SIGKILL');
+        }
+      } catch {
+        // Ignore
+      }
+    }, 450).unref();
   } catch {
     // Ignore already exited
   }
