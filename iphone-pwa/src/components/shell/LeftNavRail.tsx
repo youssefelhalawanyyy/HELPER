@@ -20,6 +20,7 @@ import {
   Radar,
   Rocket,
   Server,
+  Sliders,
 } from 'lucide-react';
 
 export const PAGES = [
@@ -39,6 +40,7 @@ export const PAGES = [
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#88f1d1' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#7dd3fc' },
   { id: 'power', label: 'Power Guard', title: 'Power & Thermal', icon: BatteryCharging, accent: '#88f1d1' },
+  { id: 'perf', label: 'Perf & GPU', title: 'Perf & GPU Studio', icon: Sliders, accent: '#88f1d1' },
   { id: 'webtester', label: 'Web Studio', title: 'Web Studio', icon: Globe, accent: '#88f1d1' },
   { id: 'webmonitor', label: 'Web Monitor', title: 'Website Monitor', icon: Radar, accent: '#86efac' },
   { id: 'hosting', label: 'Hosting', title: 'Hosting Dashboard', icon: FolderKanban, accent: '#99f6e4' },

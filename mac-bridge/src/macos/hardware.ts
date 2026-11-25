@@ -283,7 +283,7 @@ export async function wakeMacDisplay(): Promise<void> {
     );
     return;
   }
-  const child = spawn('caffeinate', ['-u', '-t', '5'], {
+  const child = spawn('caffeinate', ['-u', '-t', '8'], {
     detached: true,
     stdio: 'ignore',
   });
@@ -293,6 +293,54 @@ export async function wakeMacDisplay(): Promise<void> {
     ['-e', 'tell application "System Events" to key code 63'],
     { timeout: 1500 },
   ).catch(() => {});
+}
+
+export async function wakeAndUnlockComputer(password?: string): Promise<string> {
+  await wakeMacDisplay();
+  const pwd = typeof password === 'string' ? password : '';
+  if (!pwd) {
+    return IS_WIN ? 'Windows PC screen woken from sleep' : 'Mac display woken from sleep';
+  }
+
+  // Wait briefly for the lock screen password field to wake and receive keyboard focus
+  await new Promise((r) => setTimeout(r, 700));
+
+  if (IS_WIN) {
+    // Escape SendKeys special characters: + ^ % ~ ( ) { } [ ]
+    const escaped = pwd.replace(/([+^%~(){}[\]])/g, '{$1}');
+    const b64 = Buffer.from(escaped, 'utf8').toString('base64');
+    const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.SendKeys]::SendWait(' ')
+Start-Sleep -Milliseconds 550
+$p = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}'))
+[System.Windows.Forms.SendKeys]::SendWait($p)
+Start-Sleep -Milliseconds 120
+[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+`;
+    await runPowerShell(ps, 4500).catch(() => {});
+    return 'Windows PC woken & unlock password submitted';
+  }
+
+  // macOS: Pass password safely via AppleScript argv (never interpolated into script text!)
+  const script = `
+on run argv
+  set pwd to item 1 of argv
+  tell application "System Events"
+    key code 49
+    delay 0.35
+    keystroke pwd
+    delay 0.12
+    key code 36
+  end tell
+end run
+`;
+  try {
+    await execFileAsync('osascript', ['-e', script, pwd], { timeout: 5000 });
+    return 'Mac woken & unlock password submitted';
+  } catch {
+    return 'Mac display woken (grant Accessibility permission to Terminal for auto-password typing)';
+  }
 }
 
 export function captureSelectionToClipboard(): void {

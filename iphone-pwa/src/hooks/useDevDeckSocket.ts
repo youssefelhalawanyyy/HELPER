@@ -23,6 +23,7 @@ import type {
   MacDeepTelemetry,
   MediaState,
   NetworkCommandState,
+  PerfStudioState,
   PowerThermalState,
   ProfileId,
   ServerEvent,
@@ -326,6 +327,20 @@ export function useDevDeckSocket() {
     pingMs: null,
     ts: 0,
   });
+  const [perfState, setPerfState] = useState<PerfStudioState>({
+    mode: 'normal',
+    platform: 'mac',
+    gpuName: 'Detecting GPU…',
+    vramMb: null,
+    displayInfo: 'Detecting display…',
+    reduceTransparency: false,
+    reduceMotion: false,
+    highRamBoost: false,
+    backgroundThrottled: false,
+    lastFreedRamMb: null,
+    lastActionNote: 'Normal stock mode — standard laptop/PC graphics & balanced power.',
+    updatedAt: 0,
+  });
   const [caffeineActive, setCaffeineActive] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('devdeck.caffeine.v1') === '1';
@@ -472,6 +487,9 @@ export function useDevDeckSocket() {
               break;
             case 'power:state':
               setPowerState(msg.payload);
+              break;
+            case 'perf:state':
+              setPerfState(msg.payload);
               break;
             case 'speedtest:state':
               setSpeedTest(msg.payload);
@@ -661,6 +679,7 @@ export function useDevDeckSocket() {
     doctorReport,
     networkState,
     powerState,
+    perfState,
     speedTest,
     caffeineActive,
     processes,

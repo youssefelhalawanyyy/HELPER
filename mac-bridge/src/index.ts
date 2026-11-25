@@ -23,6 +23,7 @@ import {
   setMacMicVolume,
   setMacMute,
   setMacVolume,
+  wakeAndUnlockComputer,
   wakeMacDisplay,
 } from './macos/hardware.js';
 import { CaffeineManager } from './macos/caffeine.js';
@@ -50,6 +51,7 @@ import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
 import { NetworkCommandService } from './services/networkCommandService.js';
 import { PowerThermalService } from './services/powerThermalService.js';
+import { PerfStudioService } from './services/perfStudioService.js';
 import { SystemDoctorService } from './services/systemDoctorService.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
@@ -191,6 +193,11 @@ const powerThermalService = new PowerThermalService(
     broadcast({ type: 'power:state', payload: state });
   },
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
+);
+const perfStudioService = new PerfStudioService(
+  powerThermalService,
+  caffeineManager,
+  (state) => broadcast({ type: 'perf:state', payload: state }),
 );
 
 // Live bidirectional Antigravity MCP state
@@ -613,8 +620,30 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     }
 
     case 'hardware:wake': {
-      await wakeMacDisplay();
-      reply(msg.payload.requestId, true, 'Mac display woken');
+      const wakeMsg = await wakeAndUnlockComputer(msg.payload.password);
+      reply(msg.payload.requestId, true, wakeMsg);
+      return;
+    }
+
+    case 'perf:setMode': {
+      const modeMsg = await perfStudioService.setMode(msg.payload.mode);
+      reply(msg.payload.requestId, true, modeMsg);
+      broadcast({ type: 'alert:flash', payload: { kind: 'success', message: modeMsg } });
+      return;
+    }
+
+    case 'perf:toggle': {
+      const toggleMsg = await perfStudioService.toggleSetting(
+        msg.payload.setting,
+        msg.payload.enabled,
+      );
+      reply(msg.payload.requestId, true, toggleMsg);
+      return;
+    }
+
+    case 'perf:refresh': {
+      await perfStudioService.refreshHardware();
+      reply(msg.payload.requestId, true, 'GPU & Performance hardware refreshed');
       return;
     }
 
@@ -1095,6 +1124,7 @@ wss.on('connection', (ws, req) => {
   sendTo(ws, { type: 'doctor:state', payload: systemDoctorService.getLatest() });
   sendTo(ws, { type: 'network:state', payload: networkCommandService.getLatest() });
   sendTo(ws, { type: 'power:state', payload: powerThermalService.getLatest() });
+  sendTo(ws, { type: 'perf:state', payload: perfStudioService.getLatest() });
   sendTo(ws, { type: 'agent:progress', payload: latestProgress });
   sendTo(ws, { type: 'speedtest:state', payload: latestSpeedTest });
   if (activeQuestion) {

@@ -9,8 +9,11 @@ import {
   BatteryCharging,
   Bell,
   Coffee,
+  Eye,
+  EyeOff,
   Fan,
   Gauge,
+  KeyRound,
   Lock,
   MonitorOff,
   Moon,
@@ -19,6 +22,7 @@ import {
   RotateCw,
   ShieldAlert,
   Sun,
+  Unlock,
   Zap,
 } from 'lucide-react';
 import { DECK_SPRING } from '@/components/shell/HardwarePrimitives';
@@ -44,6 +48,8 @@ function formatMins(min: number | null): string {
 export function PowerThermalView({ deck }: { deck: DevDeckState }) {
   const [rightTab, setRightTab] = useState<'cooling' | 'guards' | 'power'>('cooling');
   const [confirmDanger, setConfirmDanger] = useState<'restart' | 'shutdown' | null>(null);
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [showUnlockPwd, setShowUnlockPwd] = useState(false);
   const p = deck.powerState;
   const isConnected = deck.status === 'connected';
   const pColor = pressureColor(p.thermalPressure);
@@ -71,7 +77,13 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
       setConfirmDanger(null);
     }
     if (action === 'wake') {
-      deck.sendEvent({ type: 'hardware:wake', payload: { requestId: makeRequestId() } });
+      const pwd = unlockPassword;
+      deck.sendEvent({
+        type: 'hardware:wake',
+        payload: { requestId: makeRequestId(), ...(pwd ? { password: pwd } : {}) },
+      });
+      if (pwd) setUnlockPassword('');
+      return;
     }
     deck.sendEvent({ type: 'power:action', payload: { requestId: makeRequestId(), action } });
   };
@@ -542,25 +554,73 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
 
-        {/* TAB 3: 1-TAP POWER ACTIONS (Wake Up + Sleep + Safe 2-tap confirm on Restart/Shutdown) */}
+        {/* TAB 3: 1-TAP POWER ACTIONS (Wake Up & Password Unlock + Sleep + Safe 2-tap confirm on Restart/Shutdown) */}
         {rightTab === 'power' && (
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.96 }}
-              onClick={() => sendPowerAction('wake')}
-              className="col-span-2 flex items-center justify-center gap-2.5 rounded-xl border border-[#88f1d1]/50 bg-[#88f1d1]/16 py-2 text-[#88f1d1]"
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendPowerAction('wake');
+              }}
+              className="col-span-2 flex flex-col justify-center gap-1.5 rounded-xl border border-[#88f1d1]/50 bg-[#88f1d1]/12 p-2.5"
             >
-              <Sun aria-hidden="true" className="h-5 w-5 shrink-0" />
-              <div className="text-left">
-                <div className="text-[11px] font-extrabold uppercase">
-                  WAKE UP / OPEN FROM SLEEP
-                </div>
-                <div className="text-[8.5px] text-[#b8d0d6]">
-                  Turns display back on &amp; wakes computer from standby
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sun aria-hidden="true" className="h-4 w-4 shrink-0 text-[#88f1d1]" />
+                  <div>
+                    <div className="text-[10.5px] font-extrabold text-[#88f1d1] uppercase">
+                      WAKE UP &amp; AUTO-UNLOCK FROM SLEEP
+                    </div>
+                    <div className="text-[8px] text-[#b8d0d6]">
+                      Leave blank to wake display, or enter your Mac/PC password to unlock automatically
+                    </div>
+                  </div>
                 </div>
               </div>
-            </motion.button>
+
+              <div className="flex items-center gap-1.5">
+                <div className="relative min-w-0 flex-1">
+                  <KeyRound
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-2 left-2.5 h-3 w-3 text-[#88f1d1]"
+                  />
+                  <input
+                    type={showUnlockPwd ? 'text' : 'password'}
+                    value={unlockPassword}
+                    onChange={(e) => setUnlockPassword(e.target.value)}
+                    placeholder="Computer login password (optional)…"
+                    autoComplete="off"
+                    className="font-mono-tech h-7 w-full rounded-lg border border-[#88f1d1]/35 bg-[#071117] pr-7 pl-7 text-[10px] text-white outline-none focus:border-[#88f1d1]"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showUnlockPwd ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowUnlockPwd((v) => !v)}
+                    className="absolute top-1.5 right-2 text-zinc-400 hover:text-white"
+                  >
+                    {showUnlockPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+
+                <motion.button
+                  type="submit"
+                  whileTap={{ scale: 0.95 }}
+                  className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-[#88f1d1] px-3 text-[9.5px] font-extrabold text-[#061c17] uppercase"
+                >
+                  {unlockPassword ? (
+                    <>
+                      <Unlock aria-hidden="true" className="h-3 w-3" />
+                      WAKE &amp; UNLOCK
+                    </>
+                  ) : (
+                    <>
+                      <Sun aria-hidden="true" className="h-3 w-3" />
+                      WAKE UP
+                    </>
+                  )}
+                </motion.button>
+              </div>
+            </form>
 
             <motion.button
               type="button"

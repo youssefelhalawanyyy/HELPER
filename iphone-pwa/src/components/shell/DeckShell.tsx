@@ -78,6 +78,10 @@ const PowerThermalView = dynamic(
   () => import('@/components/views/PowerThermalView').then((m) => m.PowerThermalView),
   { loading: ViewSkeleton },
 );
+const PerfStudioView = dynamic(
+  () => import('@/components/views/PerfStudioView').then((m) => m.PerfStudioView),
+  { loading: ViewSkeleton },
+);
 const WebsiteTesterView = dynamic(
   () => import('@/components/views/WebsiteTesterView').then((m) => m.WebsiteTesterView),
   { loading: ViewSkeleton },
@@ -640,6 +644,7 @@ export function DeckShell() {
                 {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
                 {activeView === 'network' && <NetworkCommandView deck={deck} />}
                 {activeView === 'power' && <PowerThermalView deck={deck} />}
+                {activeView === 'perf' && <PerfStudioView deck={deck} />}
                 {activeView === 'webtester' && <WebsiteTesterView deck={deck} />}
                 {activeView === 'webmonitor' && <WebsiteMonitorView deck={deck} />}
                 {activeView === 'hosting' && <HostingDashboardView deck={deck} />}

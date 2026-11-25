@@ -512,6 +512,22 @@ export type PowerAction =
 
 export type FanMode = 'auto' | 'quiet' | 'balanced' | 'max';
 export type PowerProfile = 'eco' | 'balanced' | 'performance';
+export type PerfStudioMode = 'normal' | 'eco' | 'super' | 'turbo';
+
+export interface PerfStudioState {
+  mode: PerfStudioMode;
+  platform: 'mac' | 'windows' | 'linux';
+  gpuName: string;
+  vramMb: number | null;
+  displayInfo: string;
+  reduceTransparency: boolean;
+  reduceMotion: boolean;
+  highRamBoost: boolean;
+  backgroundThrottled: boolean;
+  lastFreedRamMb: number | null;
+  lastActionNote: string;
+  updatedAt: number;
+}
 
 export interface PowerThermalState {
   platform: 'mac' | 'windows' | 'linux';
@@ -574,6 +590,7 @@ export type ServerEvent =
   | { type: 'doctor:state'; payload: SystemDoctorReport }
   | { type: 'network:state'; payload: NetworkCommandState }
   | { type: 'power:state'; payload: PowerThermalState }
+  | { type: 'perf:state'; payload: PerfStudioState }
   | { type: 'speedtest:state'; payload: SpeedTestState }
   | { type: 'caffeine:state'; payload: { active: boolean } }
   | { type: 'processes:update'; payload: { processes: HeavyProcess[] } }
@@ -603,8 +620,18 @@ export type ClientEvent =
     }
   | { type: 'hardware:mute'; payload: { requestId: string; muted: boolean } }
   | { type: 'hardware:lock'; payload: { requestId: string } }
-  | { type: 'hardware:wake'; payload: { requestId: string } }
+  | { type: 'hardware:wake'; payload: { requestId: string; password?: string } }
   | { type: 'hardware:caffeine'; payload: { requestId: string; active: boolean } }
+  | { type: 'perf:setMode'; payload: { requestId: string; mode: PerfStudioMode } }
+  | {
+      type: 'perf:toggle';
+      payload: {
+        requestId: string;
+        setting: 'reduceTransparency' | 'reduceMotion' | 'freeRam' | 'throttleBg';
+        enabled?: boolean;
+      };
+    }
+  | { type: 'perf:refresh'; payload: { requestId: string } }
   | { type: 'window:snap'; payload: { requestId: string; position: WindowSnapPosition } }
   | {
       type: 'process:kill';
