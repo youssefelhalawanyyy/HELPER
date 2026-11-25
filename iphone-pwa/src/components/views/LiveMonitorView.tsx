@@ -89,13 +89,41 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
       {/* Column 1: Live telemetry */}
       <div className="tile flex min-h-0 flex-col justify-between gap-1.5 p-3">
         <div className="absolute top-0 left-0 h-[3px] w-1/2 rounded-r-full bg-[#22d3ee]" />
-        <div className="disp text-[clamp(16px,2.2cqw,24px)]">Telemetry</div>
-        <div className="telemetry-gauges flex items-center justify-around gap-2">
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="disp text-[clamp(16px,2.2cqw,24px)]">Telemetry</div>
+          {isConnected && deck.powerState.cpuTempC !== null && (
+            <span
+              className="font-mono-tech rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
+              style={{
+                background: `${
+                  heatBand(
+                    deck.powerState.cpuTempC,
+                    processorHeatScale(deck.powerState.overheatTempC),
+                  ).color
+                }22`,
+                color: heatBand(
+                  deck.powerState.cpuTempC,
+                  processorHeatScale(deck.powerState.overheatTempC),
+                ).color,
+              }}
+            >
+              {deck.powerState.cpuTempC.toFixed(1)}°C
+            </span>
+          )}
+        </div>
+        <div className="telemetry-gauges grid grid-cols-3 place-items-center gap-1.5">
           <InstrumentGauge
             mode="tach"
-            label="CPU"
+            label="CPU Load"
             value={isConnected && deck.stats.ts ? deck.stats.cpuPct : null}
             accent="#22d3ee"
+          />
+          <InstrumentGauge
+            label="CPU Heat"
+            unit="°C"
+            max={120}
+            value={isConnected ? deck.powerState.cpuTempC : null}
+            heat={processorHeatScale(deck.powerState.overheatTempC)}
           />
           <InstrumentGauge
             mode="tach"
@@ -106,7 +134,7 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
         </div>
         <div className="telemetry-readings space-y-0.5 text-console-caption">
           <div className="num flex items-center justify-between text-zinc-300">
-            <span className="sub">CPU Heat</span>
+            <span className="sub">CPU / GPU Heat</span>
             <span
               className="flex items-center gap-1 font-extrabold"
               style={{
@@ -119,7 +147,11 @@ export function LiveMonitorView({ deck }: { deck: DevDeckState }) {
               }}
             >
               {isConnected && deck.powerState.cpuTempC !== null
-                ? `${deck.powerState.cpuTempC}°C · ${
+                ? `${deck.powerState.cpuTempC.toFixed(1)}°C${
+                    deck.powerState.gpuTempC !== null
+                      ? ` / ${deck.powerState.gpuTempC.toFixed(1)}°C`
+                      : ''
+                  } · ${
                     heatBand(
                       deck.powerState.cpuTempC,
                       processorHeatScale(deck.powerState.overheatTempC),

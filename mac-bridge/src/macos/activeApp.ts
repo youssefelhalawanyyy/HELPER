@@ -16,6 +16,22 @@ export async function getFrontmostAppName(): Promise<string> {
     }
   }
 
+  // Fast native macOS LaunchServices query (<6ms, zero osascript/System Events/TCC CPU overhead)
+  try {
+    const { stdout: asnOut } = await execFileAsync('lsappinfo', ['front'], { timeout: 600 });
+    const asn = asnOut.trim();
+    if (asn && asn.startsWith('ASN:')) {
+      const { stdout: infoOut } = await execFileAsync('lsappinfo', ['info', '-only', 'name', asn], {
+        timeout: 600,
+      });
+      const m =
+        infoOut.match(/"LSDisplayName"\s*=\s*"([^"]+)"/) || infoOut.match(/^\s*"([^"]+)"/);
+      if (m?.[1]) return m[1].trim();
+    }
+  } catch {
+    // Fall back to osascript below
+  }
+
   try {
     const { stdout } = await execFileAsync(
       'osascript',

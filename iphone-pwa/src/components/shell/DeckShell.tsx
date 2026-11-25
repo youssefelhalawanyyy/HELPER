@@ -344,6 +344,38 @@ export function DeckShell() {
                 CPU{' '}
                 <b className="ml-1">{isConnected ? `${Math.round(deck.stats.cpuPct)}%` : '--'}</b>
               </span>
+              {isConnected && deck.powerState.cpuTempC !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundEngine.playClick();
+                    goToView('power');
+                  }}
+                  title="CPU Silicon Die Temperature (tap for Power Guard)"
+                  className="num flex h-5 items-center gap-1 rounded-full bg-white/[0.06] px-2 font-extrabold"
+                  style={{
+                    color:
+                      deck.powerState.cpuTempC >= deck.powerState.overheatTempC
+                        ? '#ff5d6c'
+                        : deck.powerState.cpuTempC >= Math.max(58, deck.powerState.overheatTempC - 13)
+                          ? '#fbbf24'
+                          : '#34d399',
+                  }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{
+                      background:
+                        deck.powerState.cpuTempC >= deck.powerState.overheatTempC
+                          ? '#ff5d6c'
+                          : deck.powerState.cpuTempC >= Math.max(58, deck.powerState.overheatTempC - 13)
+                            ? '#fbbf24'
+                            : '#34d399',
+                    }}
+                  />
+                  {deck.powerState.cpuTempC.toFixed(1)}°C
+                </button>
+              )}
               <span className="num flex h-5 items-center rounded-full bg-white/[0.06] px-2 text-[#f2f3f7]">
                 RAM{' '}
                 <b className="ml-1">{isConnected ? `${deck.stats.ramUsedGb.toFixed(1)}G` : '--'}</b>

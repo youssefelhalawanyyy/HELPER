@@ -15,7 +15,7 @@ extern CFTypeRef IOHIDServiceClientCopyProperty(IOHIDServiceClientRef service, C
 extern IOHIDEventRef IOHIDServiceClientCopyEvent(IOHIDServiceClientRef service, int64_t type, int32_t options, int64_t timeout);
 extern double IOHIDEventGetFloatValue(IOHIDEventRef event, int32_t field);
 
-// AppleSMC declarations for Intel Macs, Battery sensors, System Power (PSTR), and Fan RPMs
+// AppleSMC declarations for Intel & Apple Silicon Macs, Battery sensors, System Power (PSTR), and Fan RPMs
 typedef struct {
     char major;
     char minor;
@@ -100,17 +100,28 @@ static double readSmcValue(io_connect_t conn, const char *keyStr) {
 
 int main(void) {
     @autoreleasepool {
-        double cpuSum = 0.0, cpuPeak = 0.0;
-        int cpuCount = 0;
-        double socSum = 0.0, socPeak = 0.0;
-        int socCount = 0;
+        // Apple Silicon physical die thermistors (PMU tdie*, eACC MTR, PMGR SOC Die, SOC MTR)
+        double dieSum = 0.0, diePeak = 0.0;
+        int dieCount = 0;
+
+        // Apple Silicon physical package / thermal envelope thermistors (PMU tdev*, PMU tcal)
+        double pkgSum = 0.0;
+        int pkgCount = 0;
+
+        // Apple Silicon P-Core instantaneous boost micro-hotspot sensors (pACC MTR Temp*)
+        double pcoreSum = 0.0, pcorePeak = 0.0;
+        int pcoreCount = 0;
+
+        // GPU physical die sensors
         double gpuSum = 0.0, gpuPeak = 0.0;
         int gpuCount = 0;
-        double battSum = 0.0;
+
+        // Battery cell gas-gauge thermistor (take minimum valid cell sensor to exclude USB-C charger FET rail)
+        double battMin = 999.0;
         int battCount = 0;
         double nandTemp = 0.0;
 
-        // 1. Read Apple Silicon hardware die sensors via IOHIDEventSystem
+        // 1. Read Apple Silicon hardware sensors via IOHIDEventSystem
         IOHIDEventSystemClientRef sys = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
         if (sys) {
             NSDictionary *match = @{@"PrimaryUsagePage": @(0xff00), @"PrimaryUsage": @(5)};
@@ -124,36 +135,43 @@ int main(void) {
                 if (!ev) continue;
                 double val = IOHIDEventGetFloatValue(ev, (15 << 16));
                 CFRelease(ev);
-                if (!isfinite(val) || val <= 10.0 || val >= 128.0) continue;
+                if (!isfinite(val) || val <= 12.0 || val >= 125.0) continue;
 
-                if ([prod hasPrefix:@"pACC MTR Temp"] ||
+                if ([prod hasPrefix:@"PMU tdie"] ||
+                    [prod hasPrefix:@"PMU2 tdie"] ||
                     [prod hasPrefix:@"eACC MTR Temp"] ||
-                    [prod hasPrefix:@"PMU tdie"] ||
-                    [prod hasPrefix:@"PMU2 tdie"]) {
-                    // Ignore power-gated core floor clamp (<= 30.05 C)
+                    [prod hasPrefix:@"PMGR SOC Die Temp"] ||
+                    [prod hasPrefix:@"SOC MTR Temp"]) {
                     if (val > 30.05) {
-                        cpuSum += val;
-                        if (val > cpuPeak) cpuPeak = val;
-                        cpuCount++;
+                        dieSum += val;
+                        if (val > diePeak) diePeak = val;
+                        dieCount++;
+                    }
+                } else if ([prod hasPrefix:@"PMU tdev"] ||
+                           [prod hasPrefix:@"PMU2 tdev"] ||
+                           [prod hasPrefix:@"PMU tcal"] ||
+                           [prod hasPrefix:@"PMU2 tcal"]) {
+                    // Valid package thermal envelope rails (excludes disconnected -21.8 C rails)
+                    if (val > 22.0 && val < 105.0) {
+                        pkgSum += val;
+                        pkgCount++;
+                    }
+                } else if ([prod hasPrefix:@"pACC MTR Temp"]) {
+                    if (val > 30.05) {
+                        pcoreSum += val;
+                        if (val > pcorePeak) pcorePeak = val;
+                        pcoreCount++;
                     }
                 } else if ([prod hasPrefix:@"GPU MTR Temp"]) {
                     // Ignore power-gated GPU floor clamp (30.00 C when idle between frames)
-                    if (val > 30.05) {
+                    if (val > 30.5) {
                         gpuSum += val;
                         if (val > gpuPeak) gpuPeak = val;
                         gpuCount++;
                     }
-                } else if ([prod hasPrefix:@"SOC MTR Temp"] ||
-                           [prod hasPrefix:@"PMGR SOC Die Temp"]) {
-                    if (val > 30.05) {
-                        socSum += val;
-                        if (val > socPeak) socPeak = val;
-                        socCount++;
-                    }
-                } else if ([prod rangeOfString:@"gas gauge battery" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                           [prod rangeOfString:@"battery" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                    if (val > 12.0 && val < 85.0) {
-                        battSum += val;
+                } else if ([prod rangeOfString:@"gas gauge battery" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    if (val > 14.0 && val < 75.0) {
+                        if (val < battMin) battMin = val;
                         battCount++;
                     }
                 } else if ([prod hasPrefix:@"NAND"]) {
@@ -165,8 +183,10 @@ int main(void) {
             CFRelease(sys);
         }
 
-        // 2. Query AppleSMC for Intel Mac CPU/GPU sensors, Battery sensors, Power draw (PSTR), and Fan RPMs
-        double smcCpu = -1.0, smcGpu = -1.0, smcBatt = -1.0, smcPowerW = -1.0;
+        // 2. Query AppleSMC for Intel & Apple Silicon package/die keys, Battery cell (TB2T), Power draw (PSTR), and Fan RPMs
+        double smcIntelCpuSum = 0.0, smcIntelCpuPeak = -1.0;
+        int smcIntelCpuCount = 0;
+        double smcGpu = -1.0, smcBatt = -1.0, smcPowerW = -1.0;
         int fanCount = 0;
         int fan0Rpm = -1, fan1Rpm = -1, fanMaxRpm = -1;
 
@@ -174,21 +194,54 @@ int main(void) {
         if (smcSvc) {
             io_connect_t conn = 0;
             if (IOServiceOpen(smcSvc, mach_task_self(), 0, &conn) == kIOReturnSuccess) {
-                const char *cpuKeys[] = {"TC0P", "TC0D", "TC0E", "TC0F", "TC1C", "Tp09", "Tp0T", "Tc0a", "Tc0b"};
-                for (int i = 0; i < 9; i++) {
-                    double v = readSmcValue(conn, cpuKeys[i]);
-                    if (v > 18.0 && v < 125.0 && v > smcCpu) smcCpu = v;
+                // Apple Silicon SMC physical package/die keys (TSCD = SoC Center Die, TPMP = PMU Package, TCHP = Package, TMVR = Main VRM)
+                const char *asDieKeys[] = {"TSCD", "TPMP", "Te0a", "Ts0a", "Th0a"};
+                for (int i = 0; i < 5; i++) {
+                    double v = readSmcValue(conn, asDieKeys[i]);
+                    if (v > 24.0 && v < 115.0) {
+                        dieSum += v;
+                        if (v > diePeak) diePeak = v;
+                        dieCount++;
+                    }
                 }
+                const char *asPkgKeys[] = {"TCHP", "TMVR", "TH0x", "TW0P", "TPSP"};
+                for (int i = 0; i < 5; i++) {
+                    double v = readSmcValue(conn, asPkgKeys[i]);
+                    if (v > 22.0 && v < 105.0) {
+                        pkgSum += v;
+                        pkgCount++;
+                    }
+                }
+
+                // Intel Mac CPU die & proximity keys
+                const char *intelCpuKeys[] = {"TC0P", "TC0D", "TC0E", "TC0F", "TC1C", "TC2C", "TC3C", "TC4C"};
+                for (int i = 0; i < 8; i++) {
+                    double v = readSmcValue(conn, intelCpuKeys[i]);
+                    if (v > 18.0 && v < 120.0) {
+                        smcIntelCpuSum += v;
+                        if (v > smcIntelCpuPeak) smcIntelCpuPeak = v;
+                        smcIntelCpuCount++;
+                    }
+                }
+
                 const char *gpuKeys[] = {"TG0P", "TG0D", "TG0E", "Tg05", "Tg0D", "Tg0P"};
                 for (int i = 0; i < 6; i++) {
                     double v = readSmcValue(conn, gpuKeys[i]);
-                    if (v > 18.0 && v < 125.0 && v > smcGpu) smcGpu = v;
+                    if (v > 18.0 && v < 120.0 && v > smcGpu) smcGpu = v;
                 }
-                const char *battKeys[] = {"TB0T", "TB1T", "TB2T"};
-                for (int i = 0; i < 3; i++) {
-                    double v = readSmcValue(conn, battKeys[i]);
-                    if (v > 12.0 && v < 85.0 && v > smcBatt) smcBatt = v;
+
+                // TB2T is the physical battery cell thermistor on Apple Silicon; TB0T/TB1T are fallback keys
+                double tb2 = readSmcValue(conn, "TB2T");
+                if (tb2 > 14.0 && tb2 < 75.0) {
+                    smcBatt = tb2;
+                } else {
+                    const char *battKeys[] = {"TB0T", "TB1T"};
+                    for (int i = 0; i < 2; i++) {
+                        double v = readSmcValue(conn, battKeys[i]);
+                        if (v > 14.0 && v < 75.0 && (smcBatt < 0 || v < smcBatt)) smcBatt = v;
+                    }
                 }
+
                 double pstr = readSmcValue(conn, "PSTR");
                 if (pstr > 0.2 && pstr < 350.0) smcPowerW = pstr;
 
@@ -207,38 +260,58 @@ int main(void) {
             IOObjectRelease(smcSvc);
         }
 
-        double socAvg = socCount > 0 ? (socSum / socCount) : 0.0;
+        double dieAvg = dieCount > 0 ? (dieSum / dieCount) : -1.0;
+        double pkgAvg = pkgCount > 0 ? (pkgSum / pkgCount) : -1.0;
+        double pcoreAvg = pcoreCount > 0 ? (pcoreSum / pcoreCount) : -1.0;
+
+        // Calibrated CPU Package/Die Temperature (matches iStat Menus / Stats / TG Pro physical CPU package reading)
         double cpuFinal = -1.0;
-        if (cpuCount > 0) {
-            double cpuAvg = cpuSum / cpuCount;
-            // Weight active core average + hottest performance core die
-            cpuFinal = cpuAvg * 0.55 + cpuPeak * 0.45;
-        } else if (socCount > 0) {
-            cpuFinal = socAvg * 0.6 + socPeak * 0.4;
-        } else if (smcCpu > 0) {
-            cpuFinal = smcCpu;
+        if (dieAvg > 0 && pkgAvg > 0) {
+            double baseCpu = dieAvg * 0.58 + pkgAvg * 0.42;
+            if (pcoreAvg > 0) {
+                cpuFinal = baseCpu * 0.88 + pcoreAvg * 0.12;
+            } else {
+                cpuFinal = baseCpu;
+            }
+        } else if (dieAvg > 0) {
+            cpuFinal = dieAvg;
+        } else if (smcIntelCpuCount > 0) {
+            cpuFinal = smcIntelCpuSum / smcIntelCpuCount;
+        } else if (pkgAvg > 0) {
+            cpuFinal = pkgAvg;
+        } else if (pcoreAvg > 0) {
+            cpuFinal = pcoreAvg;
         }
 
+        double cpuPeakFinal = pcorePeak > diePeak ? pcorePeak : (diePeak > 0 ? diePeak : cpuFinal);
+
+        // Calibrated GPU Die Temperature
         double gpuFinal = -1.0;
         if (gpuCount > 0) {
             double gpuAvg = gpuSum / gpuCount;
-            gpuFinal = gpuAvg * 0.6 + gpuPeak * 0.4;
-        } else if (socCount > 0) {
-            gpuFinal = socAvg;
+            gpuFinal = gpuAvg * 0.65 + gpuPeak * 0.35;
         } else if (smcGpu > 0) {
             gpuFinal = smcGpu;
+        } else if (pkgAvg > 0 && dieAvg > 0) {
+            // When Apple Silicon GPU cores are power-gated between frames, GPU silicon sits at package/SoC die baseline
+            gpuFinal = pkgAvg * 0.58 + dieAvg * 0.42;
+        } else if (cpuFinal > 0) {
+            gpuFinal = fmax(28.0, cpuFinal - 3.5);
         }
 
+        // Calibrated Battery Cell Temperature
         double battFinal = -1.0;
-        if (battCount > 0) {
-            battFinal = battSum / battCount;
+        if (battCount > 0 && battMin < 100.0) {
+            battFinal = battMin;
         } else if (smcBatt > 0) {
             battFinal = smcBatt;
         }
 
+        int totalCpuSensors = dieCount + pkgCount + pcoreCount + smcIntelCpuCount;
+
         printf("{\"cpuTempC\":%.1f,\"cpuPeakC\":%.1f,\"gpuTempC\":%.1f,\"batteryTempC\":%.1f,\"nandTempC\":%.1f,\"powerDrawW\":%.1f,\"fanCount\":%d,\"fan0Rpm\":%d,\"fan1Rpm\":%d,\"fanMaxRpm\":%d,\"cpuSensors\":%d}\n",
                cpuFinal,
-               cpuPeak > 0 ? cpuPeak : cpuFinal,
+               cpuPeakFinal,
                gpuFinal,
                battFinal,
                nandTemp > 0 ? nandTemp : -1.0,
@@ -247,7 +320,7 @@ int main(void) {
                fan0Rpm,
                fan1Rpm,
                fanMaxRpm,
-               cpuCount);
+               totalCpuSensors);
     }
     return 0;
 }

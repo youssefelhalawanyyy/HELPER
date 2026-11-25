@@ -226,10 +226,10 @@ setInterval(async () => {
   }
 }, 5000).unref();
 statsService.start(2000);
+powerThermalService.start(50);
 activeAppPoller.start(1500);
 antigravityService.start(1200);
 setTimeout(() => portService.start(4000), 300);
-powerThermalService.start(1600);
 setTimeout(() => gitService.start(5000), 500);
 setTimeout(() => clipboardTracker.start(1800), 700);
 setTimeout(() => processService.start(5000), 900);

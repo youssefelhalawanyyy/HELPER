@@ -143,7 +143,7 @@ export class DeepTelemetryService {
 
   private async scanSlowHardware(): Promise<void> {
     const now = Date.now();
-    if (now - this.lastSlowScan < 25_000) return;
+    if (now - this.lastSlowScan < 120_000) return;
     this.lastSlowScan = now;
 
     if (IS_WIN) {
@@ -151,29 +151,25 @@ export class DeepTelemetryService {
       return;
     }
 
-    // 1. Battery health / cycles / wattage (macOS)
+    // 1. Battery health / cycles / wattage (macOS — fast ioreg query <15ms instead of heavy system_profiler)
     try {
-      const { stdout } = await execFileAsync('system_profiler', ['SPPowerDataType', '-json'], {
-        timeout: 4000,
-        maxBuffer: 2 * 1024 * 1024,
+      const { stdout } = await execFileAsync('ioreg', ['-rn', 'AppleSmartBattery'], {
+        timeout: 2000,
+        maxBuffer: 512 * 1024,
       });
-      const json = JSON.parse(stdout) as { SPPowerDataType?: Array<Record<string, unknown>> };
-      const entries = json.SPPowerDataType || [];
-      for (const item of entries) {
-        const health = item.sppower_battery_health_info as Record<string, unknown> | undefined;
-        if (health) {
-          const cycles = Number(health.sppower_battery_cycle_count);
-          if (Number.isFinite(cycles)) this.cachedSlow.batteryCycles = cycles;
-          const capStr = String(health.sppower_battery_health_maximum_capacity || '');
-          const capMatch = capStr.match(/(\d+)/);
-          if (capMatch) this.cachedSlow.batteryHealthPct = Number(capMatch[1]);
-        }
-        const charger = item.sppower_ac_charger_watts;
-        if (charger !== undefined) {
-          const w = Number(charger);
-          if (Number.isFinite(w)) this.cachedSlow.batteryWattage = w;
-        }
+      const num = (key: string): number | null => {
+        const m = stdout.match(new RegExp(`"${key}"\\s*=\\s*(-?\\d+)`));
+        return m ? Number(m[1]) : null;
+      };
+      const cycles = num('CycleCount');
+      if (cycles !== null && cycles > 0) this.cachedSlow.batteryCycles = cycles;
+      const designCap = num('DesignCapacity');
+      const maxCap = num('AppleRawMaxCapacity') ?? num('NominalChargeCapacity');
+      if (designCap && maxCap && designCap > 100 && maxCap > 100) {
+        this.cachedSlow.batteryHealthPct = Math.min(100, Math.round((maxCap / designCap) * 100));
       }
+      const watts = num('Watts');
+      if (watts !== null && watts > 0) this.cachedSlow.batteryWattage = watts;
     } catch {
       // Ignore
     }

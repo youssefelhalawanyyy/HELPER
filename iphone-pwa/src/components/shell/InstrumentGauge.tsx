@@ -17,7 +17,7 @@ export const batteryHeatScale: HeatScale = { warm: 38, hot: 45 };
 export function processorHeatScale(limit: number): HeatScale {
   const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 85;
   return {
-    warm: Math.max(55, Math.min(70, safeLimit - 15)),
+    warm: Math.max(58, Math.min(73, safeLimit - 13)),
     hot: safeLimit,
   };
 }
@@ -488,9 +488,9 @@ export const InstrumentGauge = memo(function InstrumentGauge({
 
         {/* Recessed Digital Cockpit LCD Window (mathematically clear of needle at all -120°..+120° angles) */}
         <rect
-          x="40"
+          x="35"
           y="88"
-          width="60"
+          width="70"
           height="20.5"
           rx="5"
           fill="#04060a"
@@ -503,7 +503,7 @@ export const InstrumentGauge = memo(function InstrumentGauge({
           }
           strokeWidth="0.9"
         />
-        <line x1="42" y1="89" x2="98" y2="89" stroke="rgba(255,255,255,0.04)" strokeWidth="0.8" />
+        <line x1="38" y1="89" x2="102" y2="89" stroke="rgba(255,255,255,0.04)" strokeWidth="0.8" />
 
         <text
           className={styles.value}
