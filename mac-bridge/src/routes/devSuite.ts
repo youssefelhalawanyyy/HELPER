@@ -1,6 +1,7 @@
 import { loadDoctorAiKey } from '../services/doctorAiAgent.js';
 import { synthesizeNourSpeech } from '../services/devSuiteService.js';
 import { applyReviewedFile } from '../services/fileReview.js';
+import { createPreviewSession } from '../services/localPreviewService.js';
 import { publicPushKey, subscribeDevice } from '../services/watchPush.js';
 import { editSites, healthDays, watchList, checkWatched } from '../services/deskMonitor.js';
 import { desktopSnapshot, formatPrompt, typeIntoHost } from '../services/missionTools.js';
@@ -19,7 +20,12 @@ import {
   type SshConnectionInput,
 } from '../services/devSuiteService.js';
 
-export function createDevSuiteRouter(opts: { expectedToken: string; getProjectDir: () => string }): Router {
+export function createDevSuiteRouter(opts: {
+  expectedToken: string;
+  getProjectDir: () => string;
+  lanIp: string;
+  bridgePort: number;
+}): Router {
   const router = Router();
 
   // Require Bearer token (same auth model as /api/scans)
@@ -51,6 +57,26 @@ export function createDevSuiteRouter(opts: { expectedToken: string; getProjectDi
     }
     const result = await inspectWebsite(url);
     res.json(result);
+  });
+
+  router.post('/preview-session', async (req, res) => {
+    const { url, wantHttps, forceProxy } = req.body as {
+      url?: string;
+      wantHttps?: boolean;
+      forceProxy?: boolean;
+    };
+    if (!url?.trim()) {
+      res.status(400).json({ ok: false, error: 'Missing url' });
+      return;
+    }
+    const session = await createPreviewSession({
+      url: url.trim(),
+      lanIp: opts.lanIp,
+      bridgePort: opts.bridgePort,
+      wantHttps,
+      forceProxy,
+    });
+    res.json(session);
   });
 
   router.post('/monitor', async (req, res) => {

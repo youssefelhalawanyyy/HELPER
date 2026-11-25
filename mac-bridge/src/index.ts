@@ -43,6 +43,7 @@ import { createApiRouter } from './routes/api.js';
 import { pushWatch } from './services/watchPush.js';
 import { startWatch, recordHealth } from './services/deskMonitor.js';
 import { createDevSuiteRouter } from './routes/devSuite.js';
+import { closeAllLocalPreviews } from './services/localPreviewService.js';
 import { createWebhookRouter, WebhookStore } from './routes/webhook.js';
 import { AntigravityService, runMacSpeedTest } from './services/antigravityService.js';
 import { NetworkCommandService } from './services/networkCommandService.js';
@@ -302,6 +303,8 @@ app.use(
   createDevSuiteRouter({
     expectedToken: auth.token,
     getProjectDir: () => configStore.getAll().projectDir,
+    lanIp,
+    bridgePort: BRIDGE_PORT,
   }),
 );
 
@@ -1167,7 +1170,7 @@ server.listen(BRIDGE_PORT, '0.0.0.0', () => {
   console.log(`\nLocal Wi-Fi Pair URL:\n${localUrl}\n`);
 });
 
-process.on('SIGINT', () => {
+function shutdownBridge(): void {
   statsService.stop();
   activeAppPoller.stop();
   portService.stop();
@@ -1179,5 +1182,9 @@ process.on('SIGINT', () => {
   deepTelemetry.stop();
   antigravityService.stop();
   powerThermalService.stop();
+  closeAllLocalPreviews();
   server.close(() => process.exit(0));
-});
+}
+
+process.on('SIGINT', shutdownBridge);
+process.on('SIGTERM', shutdownBridge);

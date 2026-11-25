@@ -56,6 +56,7 @@ export function PreviewAmbientView({
 }) {
   const [mode, setMode] = useState<'ambient' | 'preview'>('ambient');
   const [urlInput, setUrlInput] = useState(deck.previewUrl);
+  const [tunneledPreviewUrl, setTunneledPreviewUrl] = useState('');
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
   useEffect(() => {
@@ -67,11 +68,38 @@ export function PreviewAmbientView({
     0,
     Math.ceil(((deskBreak?.deadline || 0) - (now?.getTime() || Date.now())) / 1000),
   );
+  const rawPreview = deck.previewUrl || 'http://localhost:3000';
+  useEffect(() => {
+    if (mode !== 'preview') return;
+    if (deck.status !== 'connected' || !deck.bridgeBaseUrl || !deck.pairing?.token) {
+      setTunneledPreviewUrl('');
+      return;
+    }
+    let alive = true;
+    const wantHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    void fetch(`${deck.bridgeBaseUrl}/api/devsuite/preview-session`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deck.pairing.token}`,
+      },
+      body: JSON.stringify({ url: rawPreview, wantHttps }),
+    })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean; previewUrl?: string }) => {
+        if (alive && d?.ok && d.previewUrl) setTunneledPreviewUrl(d.previewUrl);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [mode, rawPreview, deck.status, deck.bridgeBaseUrl, deck.pairing?.token]);
+
   const resolvedUrl = useMemo(() => {
-    const raw = deck.previewUrl || 'http://localhost:3000';
-    if (!deck.hello?.lanIp) return raw;
-    return raw.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/i, `//${deck.hello.lanIp}`);
-  }, [deck.previewUrl, deck.hello?.lanIp]);
+    if (tunneledPreviewUrl) return tunneledPreviewUrl;
+    if (!deck.hello?.lanIp) return rawPreview;
+    return rawPreview.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/i, `//${deck.hello.lanIp}`);
+  }, [tunneledPreviewUrl, rawPreview, deck.hello?.lanIp]);
 
   const timeStr = now?.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) || '––:––';
   const secStr = now ? String(now.getSeconds()).padStart(2, '0') : '––';

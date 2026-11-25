@@ -3,6 +3,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import { promisify } from 'node:util';
 import { loadDoctorAiKey } from './doctorAiAgent.js';
+import { isLocalTargetHost, normalizeWebStudioUrl } from './localPreviewService.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +31,10 @@ export interface WebsiteInspectResult {
   finalUrl: string;
   status: number;
   elapsedMs: number;
+  sizeBytes?: number;
+  isLocalhost?: boolean;
+  localPort?: number | null;
+  frameBlocked?: boolean;
   headers: Record<string, string>;
   meta: {
     title: string;
@@ -87,10 +92,7 @@ export interface HostingOverviewResult {
 }
 
 function normalizeUrl(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) throw new Error('URL is required');
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
+  return normalizeWebStudioUrl(raw);
 }
 
 export async function runApiRequest(req: ApiProxyRequest): Promise<ApiProxyResponse> {
@@ -151,23 +153,59 @@ function extractTagAttr(html: string, regex: RegExp): string {
 
 export async function inspectWebsite(rawUrl: string): Promise<WebsiteInspectResult> {
   const url = normalizeUrl(rawUrl);
+  const parsed = new URL(url);
+  const isLocalhost = isLocalTargetHost(parsed.hostname);
+  const localPort = isLocalhost ? (parsed.port ? Number(parsed.port) : 80) : null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10_000);
   const t0 = Date.now();
 
   try {
-    const res = await fetch(url, {
-      redirect: 'follow',
-      signal: ctrl.signal,
-      headers: { 'user-agent': 'DevDeck-Inspector/1.0' },
-    });
-    const html = (await res.text()).slice(0, 180_000);
+    let res: Response;
+    try {
+      const targetFetchUrl = isLocalhost
+        ? `http://127.0.0.1:${localPort}${parsed.pathname}${parsed.search}`
+        : url;
+      res = await fetch(targetFetchUrl, {
+        redirect: 'follow',
+        signal: ctrl.signal,
+        headers: {
+          'user-agent': 'DevDeck-Inspector/2.0',
+          ...(isLocalhost ? { host: `localhost:${localPort}` } : {}),
+        },
+      });
+    } catch (primaryErr) {
+      if (!isLocalhost) throw primaryErr;
+      // Fallback to IPv6 loopback [::1] for Vite / Node 20+ dev servers bound to ::1
+      res = await fetch(`http://[::1]:${localPort}${parsed.pathname}${parsed.search}`, {
+        redirect: 'follow',
+        signal: ctrl.signal,
+        headers: {
+          'user-agent': 'DevDeck-Inspector/2.0',
+          host: `localhost:${localPort}`,
+        },
+      });
+    }
+
+    const fullText = await res.text();
+    const sizeBytes = Buffer.byteLength(fullText, 'utf8');
+    const html = fullText.slice(0, 180_000);
     clearTimeout(timer);
 
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => {
       headers[k] = v;
     });
+
+    const xfo = (headers['x-frame-options'] || '').toLowerCase();
+    const csp = (headers['content-security-policy'] || '').toLowerCase();
+    const cspBlocksFrame =
+      csp.includes('frame-ancestors') &&
+      !/frame-ancestors\s+\*/.test(csp) &&
+      !csp.includes('helper-nu-swart.vercel.app');
+    const frameBlocked = Boolean(
+      !isLocalhost && (xfo.includes('deny') || xfo.includes('sameorigin') || cspBlocksFrame),
+    );
 
     const title = extractTagAttr(html, /<title[^>]*>([\s\S]*?)<\/title>/i).replace(/\s+/g, ' ');
     const metaContent = (attr: string, val: string) => {
@@ -189,9 +227,13 @@ export async function inspectWebsite(rawUrl: string): Promise<WebsiteInspectResu
 
     return {
       url,
-      finalUrl: res.url || url,
+      finalUrl: isLocalhost ? url : res.url || url,
       status: res.status,
       elapsedMs: Math.max(1, Date.now() - t0),
+      sizeBytes,
+      isLocalhost,
+      localPort,
+      frameBlocked,
       headers,
       meta: {
         title,
@@ -211,6 +253,10 @@ export async function inspectWebsite(rawUrl: string): Promise<WebsiteInspectResu
       finalUrl: url,
       status: 0,
       elapsedMs: Math.max(1, Date.now() - t0),
+      sizeBytes: 0,
+      isLocalhost,
+      localPort,
+      frameBlocked: false,
       headers: {},
       meta: {
         title: '',
@@ -222,7 +268,11 @@ export async function inspectWebsite(rawUrl: string): Promise<WebsiteInspectResu
         ogImage: '',
         charset: '',
       },
-      error: err instanceof Error ? err.message : 'Failed to inspect URL',
+      error: isLocalhost
+        ? `Nothing listening on localhost:${localPort} yet — run "npm run dev" on your computer.`
+        : err instanceof Error
+          ? err.message
+          : 'Failed to inspect URL',
     };
   }
 }

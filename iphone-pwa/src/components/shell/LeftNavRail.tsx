@@ -40,7 +40,7 @@ export const PAGES = [
   { id: 'doctor', label: 'PC Doctor', title: 'System Doctor', icon: HeartPulse, accent: '#efb6c7' },
   { id: 'network', label: 'NetOps Pro', title: 'NetOps Pro', icon: Network, accent: '#9cd5ca' },
   { id: 'power', label: 'Power Guard', title: 'Power & Thermal', icon: BatteryCharging, accent: '#a8e6cf' },
-  { id: 'webtester', label: 'Web Tester', title: 'Responsive Tester', icon: Globe, accent: '#93c5fd' },
+  { id: 'webtester', label: 'Web Studio', title: 'Web Studio', icon: Globe, accent: '#93c5fd' },
   { id: 'webmonitor', label: 'Web Monitor', title: 'Website Monitor', icon: Radar, accent: '#86efac' },
   { id: 'hosting', label: 'Hosting', title: 'Hosting Dashboard', icon: FolderKanban, accent: '#fcd34d' },
   { id: 'ssh', label: 'SSH & VPS', title: 'SSH Server Manager', icon: Server, accent: '#67e8f9' },
