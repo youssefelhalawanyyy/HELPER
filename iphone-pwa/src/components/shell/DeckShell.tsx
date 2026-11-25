@@ -17,6 +17,7 @@ import {
   Maximize2,
   Mic,
   Minimize2,
+  Moon,
   Volume2,
   VolumeX,
   Zap,
@@ -24,6 +25,7 @@ import {
 import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBanner';
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
 import { PIN_STORAGE_KEY, PinLockOverlay } from '@/components/shell/PinLockOverlay';
+import { StandbyOverlay } from '@/components/shell/StandbyOverlay';
 import { useDeskBreak } from '@/hooks/useDeskBreak';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
@@ -155,6 +157,8 @@ export function DeckShell() {
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinDialogMode, setPinDialogMode] = useState<'unlock' | 'setup' | null>(null);
   const [pendingViewIdx, setPendingViewIdx] = useState<number | null>(null);
+  const [standbyActive, setStandbyActive] = useState(false);
+  const standbyTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
   const overlayOpen =
     pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion) || Boolean(pinDialogMode);
@@ -205,6 +209,37 @@ export function DeckShell() {
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
+
+  // Automatic 10-Minute Battery-Saving OLED StandBy Timer (wakes instantly on any touch)
+  useEffect(() => {
+    const TEN_MINUTES_MS = 10 * 60_000;
+    const resetStandbyTimer = () => {
+      if (standbyTimerRef.current) window.clearTimeout(standbyTimerRef.current);
+      if (nour.liveCallOn) return;
+      standbyTimerRef.current = window.setTimeout(() => {
+        setStandbyActive(true);
+      }, TEN_MINUTES_MS);
+    };
+
+    resetStandbyTimer();
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'touchstart', 'keydown', 'wheel'];
+    for (const ev of events) {
+      window.addEventListener(ev, resetStandbyTimer, { passive: true });
+    }
+    return () => {
+      if (standbyTimerRef.current) window.clearTimeout(standbyTimerRef.current);
+      for (const ev of events) {
+        window.removeEventListener(ev, resetStandbyTimer);
+      }
+    };
+  }, [nour.liveCallOn]);
+
+  // Auto-wake StandBy if an urgent agent question arrives
+  useEffect(() => {
+    if (deck.agentQuestion && standbyActive) {
+      setStandbyActive(false);
+    }
+  }, [deck.agentQuestion, standbyActive]);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length !== 1 || pairingModalOpen || snippetsOpen || deck.agentQuestion) return;
@@ -494,6 +529,20 @@ export function DeckShell() {
             </div>
             <div className="console-utilities" role="group" aria-label="Quick controls">
               {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
+              <motion.button
+                type="button"
+                aria-label="Enter OLED StandBy screen"
+                title="OLED Dim StandBy Mode (also auto-starts after 10 min idle)"
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setStandbyActive(true);
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#8b90a0] hover:text-[#88f1d1]"
+              >
+                <Moon className="h-3 w-3" />
+              </motion.button>
+
               <motion.button
                 type="button"
                 aria-label="PIN Lock settings"
@@ -792,6 +841,17 @@ export function DeckShell() {
               }}
             />
           )}
+          <AnimatePresence>
+            {standbyActive && (
+              <StandbyOverlay
+                deck={deck}
+                onWake={() => {
+                  soundEngine.playClick();
+                  setStandbyActive(false);
+                }}
+              />
+            )}
+          </AnimatePresence>
           <footer className="console-footer">
             {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
             <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#98c8ce29] bg-[#0d1921] px-2 py-0.5">
