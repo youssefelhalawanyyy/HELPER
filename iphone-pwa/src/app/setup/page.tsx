@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Brand } from '@/components/shell/LeftNavRail';
+import { useWakeLock } from '@/hooks/useWakeLock';
 import {
   Activity,
   ArrowLeft,
@@ -144,6 +145,7 @@ const FEATURES = [
 ];
 
 export default function SetupGuidePage() {
+  useWakeLock();
   const [os, setOs] = useState<OsKind>('windows');
   const [detectedOs, setDetectedOs] = useState<string>('');
 
