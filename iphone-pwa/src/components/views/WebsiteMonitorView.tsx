@@ -29,6 +29,7 @@ interface MonitoredSite {
   domainDaysLeft: number | null;
   history: Array<{ up: boolean; ms: number; ts: number }>;
   lastCheckedAt: number;
+  failureStage?:string;
   error?: string;
 }
 
@@ -110,6 +111,46 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
   const [selectedId, setSelectedId] = useState<string>(DEFAULT_SITES[0].id);
   const [newUrl, setNewUrl] = useState('');
   const [checking, setChecking] = useState(false);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagResult, setDiagResult] = useState<{
+    url: string;
+    failedStage: string | null;
+    phoneUp: boolean | null;
+    stages: Record<'dns' | 'tcp' | 'tls' | 'http', { ok: boolean; ms: number; detail: string }>;
+  } | null>(null);
+
+  const diagnoseOutage = async (targetUrl: string) => {
+    if (!targetUrl || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    setDiagBusy(true);
+    try {
+      const [bridgeRes, phoneUp] = await Promise.all([
+        fetch(`${deck.bridgeBaseUrl}/api/monitor/diagnose`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${deck.pairing.token}`,
+          },
+          body: JSON.stringify({ url: targetUrl }),
+        }).then((r) => r.json()),
+        fetch(targetUrl, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => true)
+          .catch(() => false),
+      ]);
+      if (bridgeRes?.ok && bridgeRes.stages) {
+        setDiagResult({
+          url: targetUrl,
+          failedStage: bridgeRes.failedStage,
+          phoneUp,
+          stages: bridgeRes.stages,
+        });
+      }
+    } catch {
+      deck.showToast(false, 'Could not run 4-stage outage diagnostic');
+    } finally {
+      setDiagBusy(false);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -230,7 +271,8 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
           domainExpiry: string | null;
           domainDaysLeft: number | null;
           checkedAt: number;
-          error?: string;
+          failureStage?:string;
+  error?: string;
         };
         return {
           ...site,
@@ -244,6 +286,7 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
           domainDaysLeft: data.domainDaysLeft,
           lastCheckedAt: data.checkedAt || Date.now(),
           error: data.error,
+          failureStage:data.failureStage,
           history: [...site.history.slice(-15), { up: data.up, ms: data.responseMs, ts: Date.now() }],
         };
       }
@@ -261,7 +304,9 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
       return {
         ...site,
         up,
-        status: up ? 200 : 0,
+        status: 0,
+        failureStage:undefined,
+        error:up?undefined:"Phone could not reach this site",
         responseMs: ms,
         lastCheckedAt: Date.now(),
         history: [...site.history.slice(-15), { up, ms, ts: Date.now() }],
@@ -345,6 +390,7 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
     setNewUrl('');
   };
 
+  const [comparison,setComparison]=useState<Record<string,string>>({});
   const selected = sites.find((s) => s.id === selectedId) || sites[0];
   const uptimePct =
     selected && selected.history.length > 0
@@ -485,10 +531,72 @@ export function WebsiteMonitorView({ deck }: { deck: DevDeckState }) {
                   color: selected.up === null ? '#a1a1aa' : selected.up ? '#34d399' : '#ff5d6c',
                 }}
               >
-                {selected.up === null ? 'PENDING' : selected.up ? `UP · ${selected.status}` : 'DOWN'}
+                {selected.up === null ? 'PENDING' : selected.up ? (selected.status?'UP · '+selected.status:'Reachable') : 'DOWN'}
               </span>
             </div>
 
+            <section className="work-card">
+              <div className="flex items-center justify-between gap-2">
+                <strong>
+                  {selected.failureStage ? 'First failure · ' + selected.failureStage : 'Outage & connection trace'}
+                </strong>
+                <button
+                  type="button"
+                  disabled={diagBusy}
+                  onClick={() => void diagnoseOutage(selected.url)}
+                  className="font-mono-tech rounded-full border border-[#22d3ee]/40 bg-[#22d3ee]/15 px-2 py-0.5 text-[8.5px] font-extrabold text-[#22d3ee] hover:bg-[#22d3ee]/25"
+                >
+                  {diagBusy ? 'TRACING…' : 'EXPLAIN'}
+                </button>
+              </div>
+              <small>{selected.error || (selected.status ? 'Computer received HTTP ' + selected.status : 'Tap EXPLAIN to trace DNS → TCP → TLS → HTTP.')}</small>
+              {diagResult && diagResult.url === selected.url && (
+                <div className="mt-1.5 space-y-1">
+                  <div className="grid grid-cols-4 gap-1">
+                    {(['dns', 'tcp', 'tls', 'http'] as const).map((stage) => {
+                      const s = diagResult.stages[stage];
+                      const ok = s?.ok;
+                      return (
+                        <div
+                          key={stage}
+                          className="rounded-lg border px-1.5 py-1 text-center"
+                          style={{
+                            borderColor: ok ? 'rgba(52,211,153,0.35)' : 'rgba(255,93,108,0.45)',
+                            background: ok ? 'rgba(52,211,153,0.1)' : 'rgba(255,93,108,0.14)',
+                          }}
+                        >
+                          <div className="font-mono-tech text-[8px] font-extrabold uppercase text-white">
+                            {stage}
+                          </div>
+                          <div
+                            className="font-mono-tech text-[7.5px]"
+                            style={{ color: ok ? '#34d399' : '#ff5d6c' }}
+                          >
+                            {ok ? `${s.ms}ms` : 'FAIL'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="font-mono-tech text-[8.5px] text-zinc-300">
+                    {diagResult.failedStage
+                      ? `Failed at ${diagResult.failedStage.toUpperCase()}: ${diagResult.stages[diagResult.failedStage as 'dns' | 'tcp' | 'tls' | 'http']?.detail || 'Check failed'}`
+                      : 'All 4 checks (DNS, TCP, TLS, HTTP) passed on Computer'}
+                    {diagResult.phoneUp !== null && (
+                      <>
+                        {' · '}
+                        <span className={diagResult.phoneUp ? 'text-[#34d399]' : 'text-[#ff5d6c]'}>
+                          Phone: {diagResult.phoneUp ? 'Reachable' : 'Unreachable'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              <button disabled={comparison[selected.url]==='Checking…'} onClick={async()=>{const url=selected.url;const show=(message:string)=>setComparison(prev=>({...prev,[url]:message}));show('Checking…');try{
+                const res=await fetch(url,{cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(6000)});show('This device · HTTP '+res.status);await res.body?.cancel();
+              }catch{try{await fetch(url,{mode:'no-cors',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(6000)});show('This device reached the site. Browser privacy hides its HTTP status.');}catch{show('This device could not reach the site. Browser policy or connectivity may be responsible.');}}}}>Compare from this device</button><output>{comparison[selected.url]}</output>
+            </section>
             {/* 4-Card Metrics: Response Time, Uptime, SSL Expiry, Domain Expiry */}
             <div className="grid grid-cols-2 gap-1.5">
               <div className="rounded-xl border border-white/[0.07] bg-black/65 p-2">

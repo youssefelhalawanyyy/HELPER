@@ -18,6 +18,7 @@ const DEFAULT_SCANS_DIR = path.join(BRIDGE_ROOT, 'scans');
 const DEFAULT_PROJECT_DIR = path.resolve(BRIDGE_ROOT, '..');
 
 export interface PersistedConfig extends DevDeckPublicConfig {
+  verifiedMacroInstalled?:boolean;
   token: string;
 }
 
@@ -56,6 +57,7 @@ const DEFAULT_PROFILES: DeckProfile[] = [
 ];
 
 const DEFAULT_MACROS: MacroButton[] = [
+  {id:'start-coding',profileId:'general',label:'Start coding',sublabel:'Open project and verify preview',icon:'Play',color:'cyan',actionType:'chain',payload:'project, dev-server, wait-localhost, preview'},
   {
     id: 'morning-setup',
     profileId: 'general',
@@ -552,6 +554,7 @@ export class ConfigStore {
 
         // Ensure Antigravity and new Terminal stream/AppleScript default macros exist if profile has none
         const existingMacros = parsed.macros?.length ? [...parsed.macros] : [...DEFAULT_MACROS];
+        if (!parsed.verifiedMacroInstalled && !existingMacros.some(m => m.id === 'start-coding')) existingMacros.push({...DEFAULT_MACROS[0]});
         if (addMusic)
           existingMacros.push(
             ...DEFAULT_MACROS.filter(
@@ -578,6 +581,7 @@ export class ConfigStore {
           token: parsed.token || crypto.randomBytes(24).toString('hex'),
           profiles: existingProfiles,
           macros: existingMacros,
+          verifiedMacroInstalled:true,
           snippets: parsed.snippets?.length ? parsed.snippets : DEFAULT_SNIPPETS,
           logPresets: parsed.logPresets?.length ? parsed.logPresets : DEFAULT_LOG_PRESETS,
           projectDir: parsed.projectDir || process.env.DEVDECK_PROJECT_DIR || DEFAULT_PROJECT_DIR,
@@ -596,6 +600,7 @@ export class ConfigStore {
       token: crypto.randomBytes(24).toString('hex'),
       profiles: DEFAULT_PROFILES,
       macros: DEFAULT_MACROS,
+      verifiedMacroInstalled:true,
       snippets: DEFAULT_SNIPPETS,
       logPresets: DEFAULT_LOG_PRESETS,
       projectDir: process.env.DEVDECK_PROJECT_DIR || DEFAULT_PROJECT_DIR,

@@ -25,7 +25,7 @@ export class StatsService {
     return this.latest;
   }
 
-  private async sample(): Promise<void> {
+  async sample(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     try {

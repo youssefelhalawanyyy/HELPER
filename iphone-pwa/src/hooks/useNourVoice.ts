@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DeckViewId } from '@/components/shell/LeftNavRail';
 import type { DevDeckState } from '@/hooks/useDevDeckSocket';
 import { makeRequestId } from '@/lib/formatters';
+import type {ActivityWindow} from '../../../shared/activity';
 import { localNourCommand } from '@/lib/nourCommands';
 import { bridgeRequest } from '@/lib/bridgeRequest';
 import { soundEngine } from '@/lib/soundEngine';
@@ -14,6 +15,8 @@ export interface NourChatTurn {
   id: string;
   role: 'user' | 'model';
   localOnly?: boolean;
+  evidence?:{title:string;detail:string;ts:number}[];
+  volume?:number;
   text: string;
   ts: number;
 }
@@ -172,7 +175,7 @@ async function directClientAoedeTts(text: string): Promise<{ buffer: ArrayBuffer
   return null;
 }
 
-export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) => void) {
+export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) => void, privateDisplay=false) {
   const [botName, setBotNameState] = useState('نور');
   const [phase, setPhase] = useState<NourVoicePhase>('idle');
   const [liveCallOn, setLiveCallOn] = useState(false);
@@ -502,9 +505,25 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
       let audioMime = 'audio/wav';
       let action: string | null = null;
 
+      let evidence:NourChatTurn['evidence'];
+      let volume:number|undefined;
       try {
-        const local = localNourCommand(clean, deck, onNavigate);
-        if (local !== null) {
+        const historyIntent=/what(?:.s| has)? changed|what happened|(?:ايه|إيه|ايش|ماذا).*(?:حصل|اتغير|تغير|حدث)/i.test(clean);
+        const volumeIntent=/(?:volume|صوت)/i.test(clean)&&/(?:half|النص|نص|50%|٥٠)/i.test(clean);
+        const local=historyIntent||volumeIntent?null:localNourCommand(clean,deck,onNavigate);
+        if(historyIntent){
+          userTurn.localOnly=true;
+          const data=await bridgeRequest<ActivityWindow>(deck,'activity?minutes=10',undefined,ctrl.signal);
+          evidence=data.events.slice(-3).reverse().map(e=>({title:e.title,detail:e.kind+' · '+new Date(e.ts).toLocaleTimeString(),ts:e.ts}));
+          const peak=data.readings.filter(r=>r.heat!=null).sort((a,b)=>b.heat!-a.heat!)[0];
+          const arabic=/[ء-ي]/.test(clean);
+          if(peak)evidence.push({title:arabic?'أعلى حرارة كانت '+peak.heat+' درجة':'Peak CPU temperature was '+peak.heat+' °C',detail:new Date(peak.ts).toLocaleTimeString()+' · '+(peak.cpu??'—')+'% CPU · '+(peak.rpm??'—')+' RPM · '+peak.apps.join(', '),ts:peak.ts});
+          replyText=evidence.length?(arabic?'آخر عشر دقايق: ':'Last ten minutes: ')+evidence.map(e=>e.title).join('. '):(arabic?'مفيش أحداث مسجلة آخر عشر دقايق.':'No events were recorded in the last ten minutes.');
+        }else if(volumeIntent){
+          userTurn.localOnly=true;
+          const result=await bridgeRequest<{value:number}>(deck,'volume',{value:50},ctrl.signal);
+          volume=result.value;replyText=/[ء-ي]/.test(clean)?'الصوت دلوقتي '+volume+' في المية.':'Volume set to '+volume+'%.';
+        }else if (local !== null) {
           userTurn.localOnly = true;
           replyText = local;
         } else if (deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token) {
@@ -594,7 +613,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         }
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') return;
-        replyText = 'النت قطع ثانية، قول تاني كده؟';
+        if(userTurn.localOnly)replyText=(err as Error).message;else replyText = 'النت قطع ثانية، قول تاني كده؟';
       }
 
       if (ctrl.signal.aborted || mySeq !== requestSeqRef.current) return;
@@ -603,7 +622,7 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
         id: makeRequestId(),
         role: 'model',
         text: replyText,
-        localOnly: userTurn.localOnly,
+        localOnly: userTurn.localOnly, evidence,volume,
         ts: Date.now(),
       };
       setTurns((prev) => [...prev.slice(-30), modelTurn]);
@@ -862,16 +881,20 @@ export function useNourVoice(deck: DevDeckState, onNavigate: (view: DeckViewId) 
   }, [liveCallOn, wakeWordOn]);
 
   const spokenEvent = useRef('');
+  useEffect(()=>{if(!privateDisplay)return;
+    requestSeqRef.current++;abortReqRef.current?.abort();liveCallRef.current=false;wakeWordRef.current=false;
+    setLiveCallOn(false);setWakeWordOn(false);stopRecognition();stopSpeaking();setPhase('idle');
+  },[privateDisplay,stopRecognition,stopSpeaking]);
   const allowAlert = useRef(false);
   useEffect(() => {
-    allowAlert.current = spokenAlerts && !muted;
+    allowAlert.current = spokenAlerts && !muted && !privateDisplay;
     return () => {
       allowAlert.current = false;
     };
-  }, [spokenAlerts, muted]);
+  }, [spokenAlerts, muted,privateDisplay]);
   useEffect(() => {
     const alert = deck.alertFlash;
-    if (!alert || alert.id === spokenEvent.current || !spokenAlerts || muted) return;
+    if (privateDisplay || !alert || alert.id === spokenEvent.current || !spokenAlerts || muted) return;
     const message = alert.message;
     const percent = message.match(/(\d+)%/)?.[1];
     const text =

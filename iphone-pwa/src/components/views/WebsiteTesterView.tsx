@@ -160,6 +160,10 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
   const [copiedShare, setCopiedShare] = useState(false);
   const [frameKey, setFrameKey] = useState(0);
   const [stageSize, setStageSize] = useState({ w: 360, h: 240 });
+  const [bugPinMode, setBugPinMode] = useState(false);
+  const [bugPin, setBugPin] = useState<{ xPct: number; yPct: number; pxX: number; pxY: number } | null>(null);
+  const [bugNote, setBugNote] = useState('');
+  const [sendingBug, setSendingBug] = useState(false);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const initializedRef = useRef(false);
@@ -608,6 +612,29 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
             type="button"
             onClick={() => {
               soundEngine.playClick();
+              setBugPinMode((v) => {
+                if (v) setBugPin(null);
+                return !v;
+              });
+            }}
+            aria-label="Point at UI bug and send to Antigravity"
+            aria-pressed={bugPinMode}
+            title="Point at UI bug and tell Antigravity"
+            className="flex h-7 shrink-0 items-center gap-1 rounded-xl border px-2 text-[8.5px] font-extrabold"
+            style={{
+              background: bugPinMode ? 'rgba(255,93,108,0.22)' : '#bcfff20d',
+              borderColor: bugPinMode ? '#ff5d6c' : '#b3e5df36',
+              color: bugPinMode ? '#ff5d6c' : '#effaf7',
+            }}
+          >
+            <Sparkles className="h-3 w-3" />
+            {bugPinMode ? 'PIN ON' : 'UI BUG'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playClick();
               setExpanded((v) => !v);
             }}
             aria-label={expanded ? 'Show DevTools inspector' : 'Expand preview stage'}
@@ -830,10 +857,82 @@ export function WebsiteTesterView({ deck }: { deck: DevDeckState }) {
                     border: 0,
                   }}
                 />
+                {bugPinMode && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Tap where the UI bug is"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const xPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                      const yPct = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                      soundEngine.playClick();
+                      setBugPin({
+                        xPct: Math.round(xPct * 100),
+                        yPct: Math.round(yPct * 100),
+                        pxX: Math.round(xPct * vpW),
+                        pxY: Math.round(yPct * vpH),
+                      });
+                    }}
+                    className="absolute inset-0 z-20 cursor-crosshair bg-[#ff5d6c]/[0.06]"
+                  >
+                    {bugPin ? (
+                      <span
+                        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[#ff5d6c] px-1.5 py-0.5 font-mono-tech text-[9px] font-extrabold text-white shadow-lg"
+                        style={{ left: `${bugPin.xPct}%`, top: `${bugPin.yPct}%` }}
+                      >
+                        ⊕ {bugPin.pxX},{bugPin.pxY}
+                      </span>
+                    ) : (
+                      <span className="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 rounded-full bg-black/85 px-2.5 py-1 font-mono-tech text-[9px] font-bold text-[#ff5d6c]">
+                        Tap the broken element on screen
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
         </div>
+        {bugPinMode && bugPin && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!bugNote.trim() || sendingBug) return;
+              setSendingBug(true);
+              soundEngine.playClick();
+              const prompt = [
+                `Fix the UI bug I pointed at on ${targetUrl}`,
+                `Viewport: ${vpW}x${vpH} CSS px · Marked point: (${bugPin.pxX}, ${bugPin.pxY}) (${bugPin.xPct}%, ${bugPin.yPct}%) from top-left`,
+                `User note: ${bugNote.trim()}`,
+              ].join('\n');
+              deck.sendEvent({
+                type: 'antigravity:prompt',
+                payload: { requestId: makeRequestId(), text: prompt, submit: true },
+              });
+              deck.showToast(true, `Sent UI bug at (${bugPin.pxX}, ${bugPin.pxY}) to Antigravity`);
+              setBugNote('');
+              setBugPin(null);
+              setBugPinMode(false);
+              setSendingBug(false);
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-[#ff5d6c]/40 bg-[#ff5d6c]/10 px-2 py-1.5"
+          >
+            <input
+              value={bugNote}
+              onChange={(e) => setBugNote(e.target.value)}
+              placeholder={`Describe bug at (${bugPin.pxX}, ${bugPin.pxY})… e.g. الزرار بيطلع بره الشاشة`}
+              className="min-w-0 flex-1 bg-transparent text-[10px] text-white outline-none placeholder:text-zinc-400"
+            />
+            <button
+              type="submit"
+              disabled={!bugNote.trim() || sendingBug}
+              className="shrink-0 rounded-lg bg-[#ff5d6c] px-2.5 py-1 text-[9px] font-extrabold text-white disabled:opacity-40"
+            >
+              Send to Antigravity
+            </button>
+          </form>
+        )}
       </div>
 
       {/* RIGHT: Pro DevTools Inspector (Hidden when Full-Stage Expanded) */}

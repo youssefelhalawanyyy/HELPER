@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceBookmarks, ChainProgress } from './WorkspaceControls';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import styles from './SmartDeckView.module.css';
@@ -314,9 +315,18 @@ export function SmartDeckView({
   const profileAccent =
     ACCENT_HEX[(activeProfile?.accent ?? 'cyan') as MacroButton['color']] ?? '#88f1d1';
 
+  const pinKey = 'devdeck.pinned.'+(deck.bridgeBaseUrl || 'local');
+  const [pinned,setPinned] = useState<string[]>([]);
+  const [chain,setChain] = useState<MacroButton|null>(null);
+  useEffect(()=>{try {setPinned(JSON.parse(localStorage.getItem(pinKey)||'[]'));} catch {setPinned([]);}setChain(null);},[pinKey]);
+  function togglePin(id:string) {
+    const next = pinned.includes(id)?pinned.filter(key=>key!==id):[...pinned,id];
+    setPinned(next); localStorage.setItem(pinKey,JSON.stringify(next));
+  }
   const profileMacros = (deck.config?.macros ?? []).filter((m) => m.profileId === activeProfileId);
   const searchTerm = query.trim().toLowerCase();
-  const visibleMacros = profileMacros.filter((m) =>
+  const orderedMacros = [...pinned.flatMap(id=>deck.config?.macros.filter(m=>m.id===id) || []), ...profileMacros.filter(m=>!pinned.includes(m.id))];
+  const visibleMacros = orderedMacros.filter((m) =>
     [m.label, m.sublabel, ACTION_META[m.actionType]?.label].some((part) =>
       part?.toLowerCase().includes(searchTerm),
     ),
@@ -414,7 +424,7 @@ export function SmartDeckView({
     }
   };
 
-  const handlePressMacro = (macro: MacroButton) => {
+  const handlePressMacro = async (macro: MacroButton) => {
     soundEngine.playClick();
     if (!isConnected) {
       deck.showToast(false, 'Pair your computer first to execute macros');
@@ -429,12 +439,11 @@ export function SmartDeckView({
       toggleVoice(macro);
       return;
     }
+    if (macro.actionType === 'chain') setChain(macro);
+    const result=await deck.requestAction({type:'macro:execute',payload:{requestId:makeRequestId(),macroId:macro.id}});
+    if (!result.ok) return;
     setFlashId(macro.id);
-    window.setTimeout(() => setFlashId((cur) => (cur === macro.id ? null : cur)), 480);
-    deck.sendEvent({
-      type: 'macro:execute',
-      payload: { requestId: makeRequestId(), macroId: macro.id },
-    });
+    window.setTimeout(()=>setFlashId(cur=>cur===macro.id?null:cur),700);
     if (macro.actionType === 'stream' && onNavigateToMonitor) {
       onNavigateToMonitor();
     }
@@ -757,7 +766,7 @@ export function SmartDeckView({
                             : macro.sublabel || ACTION_META[macro.actionType].label
                         }
                         Icon={ICON_MAP[macro.icon] || Clock}
-                        detail={editMode ? 'Edit' : ACTION_META[macro.actionType].label}
+                        detail={flashId===macro.id?'Confirmed':editMode?'Edit':pinned.includes(macro.id)?'Pinned':ACTION_META[macro.actionType].label}
                         voice={listening}
                       />
                     </button>
@@ -780,6 +789,7 @@ export function SmartDeckView({
                 </div>
               )}
             </div>
+            {isConnected && <WorkspaceBookmarks deck={deck}/>}
           </section>
 
           <aside className={styles.sidebar} aria-label="Computer workspace and ports">
@@ -904,6 +914,7 @@ export function SmartDeckView({
         )}
       </HardwareDialog>
 
+      {chain && <ChainProgress deck={deck} id={chain.id} onClose={()=>setChain(null)} retry={()=>void handlePressMacro(chain)}/>}
       {/* ============================ Macro editor =========================== */}
       <HardwareDialog
         open={Boolean(editingMacro)}
@@ -916,6 +927,7 @@ export function SmartDeckView({
             className={`grid grid-cols-12 gap-3 ${styles.editor}`}
             data-no-swipe="true"
           >
+            {existingMacro && <button type="button" className="col-span-12" onClick={()=>togglePin(editingMacro.id)}>{pinned.includes(editingMacro.id)?'Unpin key':'Pin key across profiles'}</button>}
             {/* Live preview */}
             <div className="col-span-4 flex flex-col gap-1.5">
               <span className="sub">Preview</span>

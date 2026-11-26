@@ -199,6 +199,7 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
                 <Mic className="h-7 w-7 text-white" />
               )}
             </motion.button>
+          {phase!=='idle' && phase!=='wake_listening' && <motion.div className="work-listening" initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} transition={{duration:.18}}><b>{phaseLabel}</b><p dir="auto">{phase==='listening'?liveTranscript||'…':phase==='thinking'?turns.at(-1)?.text:turns.at(-1)?.text}</p>{phase==='speaking'&&turns.at(-1)?.volume!=null&&<meter aria-label="Volume" min={0} max={100} value={turns.at(-1)?.volume}/>}</motion.div>}
           </div>
 
           <div className="space-y-0.5">
@@ -366,7 +367,7 @@ export function NourVoiceView({ nour }: { nour: NourVoiceController }) {
                           : 'rounded-br-sm border border-[#98c8ce29] bg-[#102129] text-[#effaf7]'
                       }`}
                     >
-                      <div>{t.text}</div>
+                      <div>{t.text}</div>{t.evidence?.map((e,i)=><details key={i} className="work-source"><summary>{e.title}</summary>{e.detail}</details>)}{t.volume!=null && <meter aria-label="Confirmed volume" min={0} max={100} value={t.volume}/>}
                       <div className="mt-1 flex items-center justify-between gap-2 text-[7.5px] text-zinc-400">
                         <span className="font-mono-tech">{formatTime(t.ts)}</span>
                         {!isUser && (

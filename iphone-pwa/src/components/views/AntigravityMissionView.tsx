@@ -1,5 +1,6 @@
 'use client';
 
+import {VisualReview} from './VisualReview';
 import { bridgeRequest } from '@/lib/bridgeRequest';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -50,7 +51,7 @@ const SLASH_COMMANDS = [
   { cmd: '/learn', desc: 'Save rule', color: '#60a5fa' },
 ];
 
-interface SpeechRecLike {
+export interface SpeechRecLike {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
@@ -1035,6 +1036,7 @@ export function AntigravityMissionView({ deck }: { deck: DevDeckState }) {
           }}
           className="mt-1.5 flex items-center gap-1.5 border-t border-white/[0.06] pt-1.5"
         >
+          <VisualReview key={(deck.bridgeBaseUrl||'')+(deck.config?.projectDir||'')} deck={deck} selected={selectedDiffFile} select={openFileDiff} review={review} reviewBusy={busy}/>
           <button type="button" disabled={busy} onClick={() => void capture()} className="text-xs">
             Snapshot
           </button>

@@ -1,3 +1,6 @@
+import { runChain, waitForPreview, previewReady } from './services/verifiedChain.js';
+import { openProject, openPage, webAddress } from './services/workspaceDesk.js';
+import { recordActivity, recordReading, recordLoad, recordApps, recordWorkload } from './services/activityHistory.js';
 import http from 'node:http';
 import os from 'node:os';
 import { URL } from 'node:url';
@@ -56,6 +59,7 @@ import { AntigravityService, runMacSpeedTest } from './services/antigravityServi
 import { NetworkCommandService } from './services/networkCommandService.js';
 import { PowerThermalService } from './services/powerThermalService.js';
 import { PerfStudioService } from './services/perfStudioService.js';
+import { IncidentTimelineService } from './services/incidentTimelineService.js';
 import { SystemDoctorService } from './services/systemDoctorService.js';
 import { FocusService } from './services/focusService.js';
 import { GitService } from './services/gitService.js';
@@ -126,13 +130,34 @@ function broadcast(event: ServerEvent): void {
 }
 
 // --- Core Services ---
+const incidentTimeline = new IncidentTimelineService();
+let latestActiveAppName = 'Antigravity';
+
 const statsService = new StatsService((stats) => {
+  recordLoad(stats);
   broadcast({ type: 'stats:update', payload: stats });
+  const pw = powerThermalService?.getLatest?.();
+  const top = processService?.getLatestProcesses?.()?.[0];
+  incidentTimeline.recordSample({
+    ts: Date.now(),
+    cpuPct: stats.cpuPct,
+    cpuTempC: pw?.cpuTempC ?? null,
+    fanRpm: pw?.fanRpm?.[0] ?? null,
+    ramPct: stats.ramPct,
+    batteryPct: stats.batteryPct,
+    batteryWattage: pw?.powerDrawW ?? null,
+    charging: Boolean(stats.batteryCharging),
+    topApp: top?.name || '',
+    topAppCpu: top?.cpuPct || 0,
+    activeApp: latestActiveAppName,
+  });
 });
 
 const activeAppPoller = new ActiveAppPoller(
   () => configStore.getPublic().profiles,
   (appName, profileId) => {
+    latestActiveAppName = appName;
+    recordWorkload(appName);
     broadcast({ type: 'app:active', payload: { appName, profileId, ts: Date.now() } });
     void perfStudioService?.handleActiveAppChange(appName).catch(() => {});
   },
@@ -144,10 +169,25 @@ const portService = new PortService((ports) => {
 
 const logStreamer = new LogStreamer(
   (line) => broadcast({ type: 'logs:line', payload: line }),
-  (status) => broadcast({ type: 'logs:status', payload: status }),
+  (status) => {
+    if (status.command) recordActivity('build', status.command + (status.running ? ' started' : ' · exit ' + (status.exitCode ?? 'unknown')));
+    broadcast({ type: 'logs:status', payload: status });
+  },
   (kind, message) => broadcast({ type: 'alert:flash', payload: { kind, message } }),
 );
 
+let devServerProject = '';
+async function ensureDevServer(projectDir: string, previewUrl: string) {
+  const local = webAddress(previewUrl,true);
+  if (await previewReady(local)) return;
+  const status = logStreamer.getStatus();
+  if (status.running) {
+    if(status.presetId !== 'deck-dev-server' || devServerProject !== projectDir) throw Error('Another project or log preset is running');
+    return;
+  }
+  devServerProject = projectDir;
+  logStreamer.startPreset({id:'deck-dev-server',label:'Project dev server',command:'npm',args:['run','dev']},projectDir);
+}
 const gitService = new GitService(
   () => configStore.getAll().projectDir,
   () => configStore.getAll().deployCommand,
@@ -172,7 +212,7 @@ const caffeineManager = new CaffeineManager((active) => {
 });
 
 const processService = new ProcessAndDockerService(
-  (processes) => broadcast({ type: 'processes:update', payload: { processes } }),
+  (processes) => { recordApps(processes); broadcast({ type: 'processes:update', payload: { processes } }); },
   (available, containers) => broadcast({ type: 'docker:update', payload: { available, containers } }),
 );
 
@@ -211,6 +251,7 @@ const networkCommandService = new NetworkCommandService(
 );
 const powerThermalService = new PowerThermalService(
   (state) => {
+    recordReading(state);
     if (state.hasBattery && state.healthPct != null) recordHealth({ battery: state.healthPct });
     broadcast({ type: 'power:state', payload: state });
   },
@@ -300,6 +341,10 @@ function scheduleIdleSleep(): void {
 }
 
 // Keep lightweight guards running cleanly at low overhead
+const idleSamples=setInterval(()=>{if(!pollersRunning) {
+  void processService.scanProcesses().catch(()=>{});
+  void statsService.sample().catch(()=>{});
+}},10000);
 powerThermalService.start(120);
 activeAppPoller.start(2200);
 
@@ -365,6 +410,93 @@ app.use(
     perfStudio: perfStudioService,
     powerThermal: powerThermalService,
     systemDoctor: systemDoctorService,
+    timeline: incidentTimeline,
+    getCurrentWorkspaceMeta: () => ({
+      branch: gitService.getLatest().branch || 'main',
+      activeApp: latestActiveAppName || 'Antigravity',
+      browserUrl: deepTelemetry.getLatest().activeBrowserUrl || '',
+    }),
+    openWorkspaceBookmark: async (bm) => {
+      if (bm.projectDir) configStore.updateSettings({ projectDir: bm.projectDir });
+      if (bm.activeApp) {
+        await focusMacApp(bm.activeApp, deepTelemetry.getLatest().runningApps).catch(() => {});
+      }
+      if (bm.browserUrl && /^https?:\/\//i.test(bm.browserUrl)) {
+        const { execFile } = await import('node:child_process');
+        execFile(process.platform === 'win32' ? 'cmd.exe' : 'open', process.platform === 'win32' ? ['/c', 'start', '', bm.browserUrl] : [bm.browserUrl]);
+      }
+    },
+    runVerifiedStep: async (step: string) => {
+      try {
+        if (step === 'wake') {
+          await wakeMacDisplay();
+          return { ok: true, detail: 'Display woken' };
+        }
+        if (step === 'caffeine') {
+          caffeineManager.setActive(true);
+          return { ok: true, detail: 'Caffeine lock ON' };
+        }
+        if (step === 'antigravity' || step === 'chrome') {
+          const appName = step === 'chrome' ? 'Google Chrome' : 'Antigravity IDE';
+          const msg = await focusMacApp(appName, deepTelemetry.getLatest().runningApps);
+          return { ok: true, detail: msg };
+        }
+        if (step.startsWith('wait:')) {
+          const target = step.slice(5).trim();
+          const url = /^https?:\/\//i.test(target) ? target : `http://${target}`;
+          const deadline = Date.now() + 12_000;
+          while (Date.now() < deadline) {
+            try {
+              const r = await fetch(url);
+              if (r.status < 500) return { ok: true, detail: `${url} responded (${r.status})` };
+            } catch {}
+            await new Promise((r) => setTimeout(r, 600));
+          }
+          return { ok: false, detail: `Timed out waiting for ${url}` };
+        }
+        if (step.startsWith('perf:')) {
+          const mode = step.slice(5).trim().toLowerCase() as 'normal' | 'eco' | 'super' | 'turbo';
+          const msg = await perfStudioService.setMode(mode);
+          incidentTimeline.recordEvent({ kind: 'perf_switch', title: `Mode → ${mode.toUpperCase()}`, detail: msg, targetView: 'perf' });
+          return { ok: true, detail: msg };
+        }
+        if (step.startsWith('brightness:')) {
+          const pct = Number(step.slice(11).trim());
+          await setMacBrightness(pct);
+          return { ok: true, detail: `Brightness ${pct}%` };
+        }
+        if (step.startsWith('volume:')) {
+          const pct = Number(step.slice(7).trim());
+          await setMacVolume(pct);
+          return { ok: true, detail: `Volume ${pct}%` };
+        }
+        if (step.startsWith('app:')) {
+          const msg = await focusMacApp(step.slice(4).trim(), deepTelemetry.getLatest().runningApps);
+          return { ok: true, detail: msg };
+        }
+        if (step.startsWith('shell:')) {
+          const res = await runConfiguredShellCommand(step.slice(6).trim(), configStore.getAll().projectDir);
+          return { ok: res.ok, detail: res.output.slice(0, 120) };
+        }
+        if (step === 'dev-server') {
+          const status = logStreamer.getStatus();
+          if (!status.running) {
+            logStreamer.startPreset(
+              { id: 'deck-dev-server', label: 'Project dev server', command: 'npm', args: ['run', 'dev'] },
+              configStore.getAll().projectDir,
+            );
+          }
+          return { ok: true, detail: 'Dev server started' };
+        }
+        if (isKnownShortcut(step)) {
+          const msg = await runShortcut(step);
+          return { ok: true, detail: msg };
+        }
+        return { ok: false, detail: `Unknown step "${step}"` };
+      } catch (err) {
+        return { ok: false, detail: err instanceof Error ? err.message : 'Step failed' };
+      }
+    },
   }),
 );
 
@@ -374,6 +506,7 @@ app.use(
   createDevSuiteRouter({
     expectedToken: auth.token,
     getProjectDir: () => configStore.getAll().projectDir,
+    restoreProject: (dir, url) => { configStore.updateSettings({projectDir:dir, previewUrl:url}); broadcast({type:'config:sync',payload:configStore.getPublic()}); if(url) broadcast({type:'preview:url',payload:{url,label:'Workspace'}}); },
     lanIp,
     bridgePort: BRIDGE_PORT,
     networkService: networkCommandService,
@@ -401,7 +534,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean);
-          const supported = ['wake', 'antigravity', 'chrome', 'dev-server', 'caffeine'];
+          const supported = ['project','wait-localhost','preview','wake', 'antigravity', 'chrome', 'dev-server', 'caffeine'];
           const isDynamicStep = (s: string) =>
             /^(perf:(normal|eco|super|turbo)|brightness:\d+|volume:\d+|app:.+|shell:.+)$/i.test(s);
           if (
@@ -410,7 +543,13 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
             steps.some((s) => !supported.includes(s) && !isDynamicStep(s) && !isKnownShortcut(s))
           )
             throw Error('Choose up to 12 supported steps (wake, caffeine, perf:super, brightness:80, volume:50, app:Chrome, shell:...)');
-          for (const step of steps) {
+          const { projectDir, previewUrl } = configStore.getAll();
+          await runChain(macroId, steps, projectDir + '\n' + previewUrl, async step => {
+            if (step === 'project') { await openProject(projectDir); return; }
+            if (step === 'wait-localhost') { 
+              if (steps.indexOf('dev-server')>=0 && steps.indexOf('dev-server')<steps.indexOf(step)) await ensureDevServer(projectDir,previewUrl);
+              await waitForPreview(webAddress(previewUrl,true)); return; }
+            if (step === 'preview') { await openPage(webAddress(previewUrl,true)); return; }
             if (step === 'wake') await wakeMacDisplay();
             else if (step === 'antigravity' || step === 'chrome')
               await focusMacApp(
@@ -430,23 +569,12 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
             } else if (step.startsWith('app:')) {
               await focusMacApp(step.slice(4).trim(), deepTelemetry.getLatest().runningApps);
             } else if (step.startsWith('shell:')) {
-              await runConfiguredShellCommand(step.slice(6).trim(), configStore.getAll().projectDir);
+              const result = await runConfiguredShellCommand(step.slice(6).trim(), projectDir);
+              if (!result.ok) throw Error(result.output);
             } else if (step === 'dev-server') {
-              const status = logStreamer.getStatus();
-              if (status.running && status.presetId !== 'deck-dev-server')
-                throw Error('Another log preset is running');
-              if (!status.running)
-                logStreamer.startPreset(
-                  {
-                    id: 'deck-dev-server',
-                    label: 'Project dev server',
-                    command: 'npm',
-                    args: ['run', 'dev'],
-                  },
-                  configStore.getAll().projectDir,
-                );
+              await ensureDevServer(projectDir,previewUrl);
             } else await runShortcut(step);
-          }
+          });
           reply(requestId, true, macro.label + ' completed');
         } else if (macro.actionType === 'shortcut') {
           if (!isKnownShortcut(macro.payload)) {
@@ -802,6 +930,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       );
       reply(msg.payload.requestId, res.ok, res.message);
       if (res.ok) {
+        recordActivity('action', res.message);
         broadcast({ type: 'alert:flash', payload: { kind: 'warning', message: res.message } });
       }
       return;
@@ -1100,6 +1229,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
       const { requestId, action } = msg.payload;
       try {
         const message = await powerThermalService.runPowerAction(action);
+      recordActivity('action', message);
         reply(requestId, true, message);
       } catch (err) {
         reply(requestId, false, err instanceof Error ? err.message : 'Power action failed');
@@ -1110,6 +1240,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     case 'power:fanMode': {
       const { requestId, mode } = msg.payload;
       const message = await powerThermalService.setFanMode(mode);
+      recordActivity('action', message);
       reply(requestId, true, message);
       return;
     }
@@ -1117,6 +1248,7 @@ async function handleClientEvent(ws: WebSocket, msg: ClientEvent): Promise<void>
     case 'power:profile': {
       const { requestId, profile } = msg.payload;
       const message = await powerThermalService.setPowerProfile(profile);
+      recordActivity('action', message);
       reply(requestId, true, message);
       return;
     }
@@ -1400,6 +1532,7 @@ server.listen(BRIDGE_PORT, '0.0.0.0', () => {
 });
 
 function shutdownBridge(): void {
+  clearInterval(idleSamples);
   statsService.stop();
   activeAppPoller.stop();
   portService.stop();

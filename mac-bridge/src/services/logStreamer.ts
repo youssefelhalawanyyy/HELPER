@@ -154,6 +154,7 @@ export class LogStreamer {
     });
 
     child.on('close', (code) => {
+      if (this.child && this.child !== child) return;
       if (outBuf) this.emitLine('stdout', outBuf);
       if (errBuf) this.emitLine('stderr', errBuf);
       this.child = null;

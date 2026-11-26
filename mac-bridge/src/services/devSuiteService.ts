@@ -1,3 +1,4 @@
+import {probeWebsite} from './websiteProbe.js';
 import { execFile } from 'node:child_process';
 import net from 'node:net';
 import tls from 'node:tls';
@@ -50,6 +51,7 @@ export interface WebsiteInspectResult {
 }
 
 export interface SiteMonitorResult {
+  failureStage?:string;
   url: string;
   up: boolean;
   status: number;
@@ -359,28 +361,8 @@ async function checkDomainExpiryRdap(hostname: string): Promise<{
 export async function checkSiteMonitor(rawUrl: string): Promise<SiteMonitorResult> {
   const url = normalizeUrl(rawUrl);
   const parsed = new URL(url);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
-  const t0 = Date.now();
-
-  let status = 0;
-  let up = false;
-  let error: string | undefined;
-
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: ctrl.signal,
-      headers: { 'user-agent': 'DevDeck-Monitor/1.0' },
-    });
-    clearTimeout(timer);
-    status = res.status;
-    up = res.status >= 200 && res.status < 400;
-  } catch (err) {
-    clearTimeout(timer);
-    error = err instanceof Error ? err.message : 'Unreachable';
-  }
+  const t0=Date.now();
+  const {status,up,error,failureStage}=await probeWebsite(url);
   const responseMs = Math.max(1, Date.now() - t0);
 
   const [ssl, rdap] = await Promise.all([
@@ -395,6 +377,7 @@ export async function checkSiteMonitor(rawUrl: string): Promise<SiteMonitorResul
     up,
     status,
     responseMs,
+    failureStage,
     sslIssuer: ssl.issuer,
     sslValidTo: ssl.validTo,
     sslDaysLeft: ssl.daysLeft,

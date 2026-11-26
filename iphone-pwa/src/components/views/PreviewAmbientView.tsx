@@ -3,6 +3,7 @@
 import { InstrumentGauge, processorHeatScale } from '@/components/shell/InstrumentGauge';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ReadingDetail, type Metric } from './ReadingHistory';
 import { motion } from 'framer-motion';
 import { DeskWeather } from './DeskWeather';
 import styles from './DeskClock.module.css';
@@ -48,10 +49,12 @@ export interface DeskBreakController {
 export function PreviewAmbientView({
   deck,
   deskBreak,
+  privateMode = false,
   onPair,
 }: {
   deck: DevDeckState;
   deskBreak?: DeskBreakController;
+  privateMode?: boolean;
   onPair?: () => void;
 }) {
   const [mode, setMode] = useState<'ambient' | 'preview'>('ambient');
@@ -62,11 +65,17 @@ export function PreviewAmbientView({
   const [showWeather, setShowWeather] = useState(true);
   const [showClipboard, setShowClipboard] = useState(true);
   const [nightModeManual, setNightModeManual] = useState(false);
+  const [metric,setMetric]=useState<Metric|null>(null);
+  const [meeting,setMeeting]=useState('');
+  const [lastSensor,setLastSensor]=useState(0);
+  useEffect(()=>setMeeting(localStorage.getItem('devdeck.nextMeeting')||''),[]);
+  useEffect(()=>{setLastSensor(Number(sessionStorage.getItem("heat-seen:"+deck.bridgeBaseUrl))||0);},[deck.bridgeBaseUrl]);
+  useEffect(()=>{if(deck.status==="connected"&&deck.bridgeBaseUrl&&deck.powerState.cpuTempC!=null){setLastSensor(deck.powerState.updatedAt);sessionStorage.setItem("heat-seen:"+deck.bridgeBaseUrl,String(deck.powerState.updatedAt));}},[deck.status,deck.bridgeBaseUrl,deck.powerState.cpuTempC,deck.powerState.updatedAt]);
   const nightStandActive = nightModeManual;
   useEffect(() => setUrlInput(deck.previewUrl), [deck.previewUrl]);
   useEffect(() => {
     setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    const timer = window.setInterval(() => {if(!document.hidden)setNow(new Date());}, 1000);
     // Subtle 2px OLED Burn-In Protection Pixel Shift every 5 minutes
     const shiftTimer = window.setInterval(() => {
       const steps = [
@@ -87,7 +96,7 @@ export function PreviewAmbientView({
     if (deck.status === 'connected' && deck.powerState.cpuTempC === null) {
       deck.sendEvent({ type: 'power:refresh', payload: { requestId: makeRequestId() } });
     }
-  }, [deck.status, deck.powerState.cpuTempC, deck]);
+  }, [deck.status, deck.powerState.cpuTempC, deck.sendEvent]);
   const breakSec = Math.max(
     0,
     Math.ceil(((deskBreak?.deadline || 0) - (now?.getTime() || Date.now())) / 1000),
@@ -131,6 +140,18 @@ export function PreviewAmbientView({
     now?.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) || 'Local time';
   const isConnected = deck.status === 'connected';
 
+  const until = Date.parse(meeting)-(now?.getTime()||0);
+  const age=(now?.getTime()||0)-lastSensor;
+  const focus=deck.agentProgress.active?deck.agentProgress.step+' · '+deck.agentProgress.percent+'%':
+    deck.logStatus.running && /build|test|check/i.test(deck.logStatus.command||'')?'Running '+deck.logStatus.command:
+    until>0 && until<=1800000?'Meeting in '+Math.ceil(until/60000)+' min':
+    lastSensor && age>45000?'Heat sensor last seen '+new Date(lastSensor).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'';
+  function dial(key:Metric){
+    return key==='heat'?<InstrumentGauge label="CPU heat" unit="°C" max={120} value={isConnected?deck.powerState.cpuTempC:null} heat={processorHeatScale(deck.powerState.overheatTempC)}/>:
+      key==='cpu'?<InstrumentGauge mode="tach" label="CPU load" value={isConnected&&deck.stats.ts?deck.stats.cpuPct:null} accent="#7dd3fc"/>:
+      <InstrumentGauge mode="battery" label="Battery" value={isConnected&&deck.powerState.hasBattery?deck.powerState.batteryPct:null} accent="#acafff"/>;
+  }
+  const batteryMinutes=deck.powerState.timeRemainingMin;
   if (mode === 'preview') {
     return (
       <div className="tile preview-browser flex min-h-0 flex-1 flex-col p-2.5">
@@ -258,6 +279,7 @@ export function PreviewAmbientView({
             ))}
           </div>
         </div>
+        {focus && <div className={styles.focus}>{focus}</div>}
         <div className={styles.world}>
           {[
             ['Cairo', 'Africa/Cairo'],
@@ -271,7 +293,6 @@ export function PreviewAmbientView({
           ))}
         </div>
       </section>
-      {showWeather && <DeskWeather />}
       <section className={styles.instrument}>
         <header>
           <h2>
@@ -281,26 +302,11 @@ export function PreviewAmbientView({
           {!isConnected && <button onClick={onPair}>Pair desktop</button>}
         </header>
         <div className={styles.cluster}>
-          <InstrumentGauge
-            mode="tach"
-            label="CPU load"
-            value={isConnected && deck.stats.ts ? deck.stats.cpuPct : null}
-            accent="#22d3ee"
-          />
-          <InstrumentGauge
-            label="CPU heat"
-            unit="°C"
-            max={120}
-            value={isConnected ? deck.powerState.cpuTempC : null}
-            heat={processorHeatScale(deck.powerState.overheatTempC)}
-          />
-          <InstrumentGauge
-            mode="battery"
-            label="Battery"
-            value={isConnected ? deck.stats.batteryPct : null}
-            accent="#34d399"
-          />
+          {(['cpu','heat','battery'] as const).map(key=><button type="button" key={key} aria-label={'View '+key+' history'} onClick={()=>setMetric(key)}>
+            <div data-clock-key={key}>{dial(key)}</div></button>)}
         </div>
+        {isConnected && deck.powerState.hasBattery && !deck.powerState.acConnected && batteryMinutes!=null && batteryMinutes>0 &&
+          <button className="work-trigger" onClick={()=>setMetric('battery')}>About {Math.floor(batteryMinutes/60)}h {Math.round(batteryMinutes%60)}m at this workload</button>}
         <dl className={styles.readings}>
           {[
             ['Memory', deck.stats.ramUsedGb, ' GB'],
@@ -317,6 +323,8 @@ export function PreviewAmbientView({
           ))}
         </dl>
       </section>
+      {metric && <ReadingDetail metric={metric} deck={deck} onClose={()=>setMetric(null)} header={dial(metric)}/>}
+      {showWeather && <DeskWeather />}
       <section className={styles.instrument}>
         <header>
           <h2>
@@ -336,6 +344,7 @@ export function PreviewAmbientView({
             ))
           )}
         </div>
+        <label className={styles.meeting}>Next meeting<input type="datetime-local" value={meeting} onChange={e=>{setMeeting(e.target.value);localStorage.setItem('devdeck.nextMeeting',e.target.value);}}/></label>
         {/* Mac Media Controls */}
         <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.07] bg-black/60 p-2">
           {deck.mediaState.artworkUrl && (
@@ -390,58 +399,68 @@ export function PreviewAmbientView({
       </section>
 
       {/* Right: Mac Clipboard History + Automatic "Open on iPhone" URL Detection */}
-      {showClipboard && <div className={styles.clipboard}>
-        <div className="mb-2 flex items-center justify-between">
-          <div className="disp text-[24px]">Clipboard</div>
-          <span className="sub">{deck.clipboard.history.length} items</span>
-        </div>
+      {showClipboard && (
+        <div className={styles.clipboard}>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="disp text-[24px]">Clipboard</div>
+            <span className="sub">
+              {privateMode ? 'Private mode' : `${deck.clipboard.history.length} items`}
+            </span>
+          </div>
 
-        <div className="deck-scroll flex-1 space-y-1.5 overflow-y-auto pr-0.5">
-          {deck.clipboard.history.map((item) => {
-            const detectedUrl = extractUrl(item.text);
-            return (
-              <div
-                key={item.id}
-                className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.04] px-2.5 py-2"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    soundEngine.playClick();
-                    deck.sendEvent({
-                      type: 'clipboard:copy',
-                      payload: { requestId: makeRequestId(), text: item.text },
-                    });
-                  }}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <p className="font-mono-tech line-clamp-2 text-console-caption text-zinc-200">
-                    {item.text}
-                  </p>
-                </button>
-
-                {detectedUrl && (
-                  <a
-                    href={detectedUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-1 text-console-caption font-extrabold text-[#041317]"
+          {privateMode ? (
+            <div className="sub grid flex-1 place-items-center rounded-xl border border-[#fbbf24]/25 bg-[#fbbf24]/5 p-4 text-center text-[#fbbf24]">
+              Presentation Mode active — private clipboard previews, paths, and links are hidden.
+            </div>
+          ) : (
+            <div className="deck-scroll flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+              {deck.clipboard.history.map((item) => {
+                const detectedUrl = extractUrl(item.text);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.04] px-2.5 py-2"
                   >
-                    <ExternalLink className="h-2.5 w-2.5" />
-                    Open
-                  </a>
-                )}
-              </div>
-            );
-          })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundEngine.playClick();
+                        deck.sendEvent({
+                          type: 'clipboard:copy',
+                          payload: { requestId: makeRequestId(), text: item.text },
+                        });
+                      }}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <p className="font-mono-tech line-clamp-2 text-console-caption text-zinc-200">
+                        {item.text}
+                      </p>
+                    </button>
 
-          {deck.clipboard.history.length === 0 && (
-            <div className="sub grid h-full place-items-center text-center">
-              Copy text or a link on your computer to see it here.
+                    {detectedUrl && (
+                      <a
+                        href={detectedUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex shrink-0 items-center gap-1 rounded-full bg-[#22d3ee] px-2 py-1 text-console-caption font-extrabold text-[#041317]"
+                      >
+                        <ExternalLink className="h-2.5 w-2.5" />
+                        Open
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+
+              {deck.clipboard.history.length === 0 && (
+                <div className="sub grid h-full place-items-center text-center">
+                  Copy text or a link on your computer to see it here.
+                </div>
+              )}
             </div>
           )}
         </div>
-      </div>}
+      )}
     </div>
   );
 }

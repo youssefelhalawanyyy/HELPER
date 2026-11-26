@@ -1,5 +1,6 @@
 'use client';
 
+import {bridgeRequest} from '@/lib/bridgeRequest';
 import { TrackpadAccessories } from './TrackpadAccessories';
 import { LiveScreenPreview } from './LiveScreenPreview';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -182,6 +183,18 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
     y: 0,
   });
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const [precision,setPrecision]=useState(false),[lens,setLens]=useState('');
+  const precisionOn=useRef(false), precisionTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const primaryTouch=useRef(-1);
+  function releasePrecision(){clearTimeout(precisionTimer.current);const active=precisionOn.current;precisionOn.current=false;setPrecision(false);return active;}
+  useEffect(()=>()=>clearTimeout(precisionTimer.current),[]);
+  const {bridgeBaseUrl,pairing}=deck;
+  useEffect(()=>{if(!precision)return;const ctrl=new AbortController();let timer:ReturnType<typeof setTimeout>;setLens('');
+    async function sample(){try{const r=await bridgeRequest<{image:string}>({bridgeBaseUrl,pairing},'cursor-lens',undefined,ctrl.signal);
+      if(!ctrl.signal.aborted){setLens(r.image);timer=setTimeout(sample,250);}
+    }catch{if(!ctrl.signal.aborted)setLens('unavailable');}}
+    void sample();return ()=>{ctrl.abort();clearTimeout(timer);};
+  },[precision,bridgeBaseUrl,pairing]);
   const maxFingersRef = useRef(1);
   const lastSingleTapTsRef = useRef(0);
   const tempTapDragRef = useRef(false);
@@ -545,6 +558,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
 
               const fingers = Array.from(pointersRef.current.values());
               if (count === 1) {
+                primaryTouch.current=e.pointerId;
                 maxFingersRef.current = 1;
                 if (padRafRef.current !== null) cancelAnimationFrame(padRafRef.current);
                 padRafRef.current = null;
@@ -581,7 +595,10 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                   x: (a.x + b.x) / 2,
                   y: (a.y + b.y) / 2,
                 };
+                clearTimeout(precisionTimer.current);
+                precisionTimer.current=setTimeout(()=>{if(pointersRef.current.size===2&&gesture.current.mode==='pending'){precisionOn.current=true;setPrecision(true);}},320);
               } else if (count >= 3) {
+                releasePrecision();
                 gesture.current = {
                   mode: 'spaces',
                   span: 0,
@@ -660,6 +677,10 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               const fingers = Array.from(pointersRef.current.values());
               const g = gesture.current;
 
+              if(precisionOn.current){
+                if(primaryTouch.current===e.pointerId){padPendingRef.current.dx+=rawDx*.24;padPendingRef.current.dy+=rawDy*.24;}
+                return;
+              }
               // 3-Finger Desktop Switch (Left/Right) & Mission Control / Task View (Up)
               if (g.mode === 'spaces' || g.mode === 'done') {
                 if (fingers.length >= 3 && g.mode === 'spaces') {
@@ -768,6 +789,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               padPendingRef.current.dy += py * gain;
             }}
             onPointerUp={(e) => {
+              if(releasePrecision()){maxFingersRef.current=1;gesture.current.mode='pending';padMovedDistRef.current=100;}
               pointersRef.current.delete(e.pointerId);
               if (pointersRef.current.size === 0) {
                 padActiveRef.current = false;
@@ -824,6 +846,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               }
             }}
             onPointerCancel={(e) => {
+              releasePrecision();
               gesture.current.mode = 'done';
               pointersRef.current.delete(e.pointerId);
               if (pointersRef.current.size === 0) {
@@ -848,6 +871,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
                 'radial-gradient(ellipse at 50% 35%, rgba(35,85,85,0.34), rgba(9,19,25,0.96) 72%)',
             }}
           >
+            <small className="precision-hint">Hold a second finger for precision</small>
             {/* Live Mini Screen Peek Overlay inside Trackpad Glass (Hardware MJPEG Stream) */}
             {screenPeekOn && deck.status === 'connected' && deck.bridgeBaseUrl && deck.pairing?.token && (
               /* eslint-disable-next-line @next/next/no-img-element */
@@ -858,6 +882,7 @@ export function HardwareToolsView({ deck }: { deck: DevDeckState }) {
               />
             )}
 
+            {precision&&<div className="cursor-lens" style={{left:Math.min(82,Math.max(18,touchVisual.xPct))+'%',top:Math.min(78,Math.max(22,touchVisual.yPct-17))+'%'}}>{lens&&lens!=='unavailable'?<img alt="Magnified desktop cursor region" src={lens}/>:<small>{lens==='unavailable'?'Precision · screen unavailable':'Precision'}</small>}</div>}
             {/* Subtle Precision Corner Reticle Marks */}
             <span className="pointer-events-none absolute top-2.5 left-2.5 h-3 w-3 border-t border-l border-[#88f1d1]/30" />
             <span className="pointer-events-none absolute top-2.5 right-9 h-3 w-3 border-t border-r border-[#88f1d1]/30" />

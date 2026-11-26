@@ -369,6 +369,7 @@ export function useDevDeckSocket() {
   const [macTelemetry, setMacTelemetry] = useState<MacDeepTelemetry | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
 
+  const pending = useRef(new Map<string, (result: {ok:boolean;message:string}) => void>());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const retryCountRef = useRef(0);
@@ -405,6 +406,7 @@ export function useDevDeckSocket() {
         wsRef.current.onclose = null;
         wsRef.current.close();
         wsRef.current = null;
+        for (const finish of pending.current.values()) finish({ok:false,message:"Connection closed before confirmation"});
       }
       if (reconnectTimerRef.current) {
         window.clearTimeout(reconnectTimerRef.current);
@@ -572,6 +574,7 @@ export function useDevDeckSocket() {
               setMacTelemetry(msg.payload);
               break;
             case 'action:result':
+              pending.current.get(msg.payload.requestId)?.(msg.payload);
               showToast(msg.payload.ok, msg.payload.message);
               if (!msg.payload.ok) soundEngine.playErrorThud();
               break;
@@ -583,6 +586,7 @@ export function useDevDeckSocket() {
 
       ws.onclose = (ev) => {
         wsRef.current = null;
+        for (const finish of pending.current.values()) finish({ok:false,message:"Connection closed before confirmation"});
         if (ev.code === 4001) {
           // Invalid token -> return to pairing screen
           setStatus('unpaired');
@@ -717,6 +721,19 @@ export function useDevDeckSocket() {
     return true;
   }, [showToast]);
 
+  const requestAction = useCallback((event: ClientEvent & {payload:{requestId:string}}) =>
+    new Promise<{ok:boolean;message:string}>(resolve => {
+      const id = event.payload.requestId;
+      const timer = setTimeout(() => finish({ok:false,message:'The computer has not confirmed the action'}), 90000);
+      function finish(result:{ok:boolean;message:string}) {
+        clearTimeout(timer);
+        pending.current.delete(id);
+        resolve(result);
+      }
+      pending.current.set(id,finish);
+      if (!sendEvent(event)) finish({ok:false,message:'Computer disconnected'});
+    }), [sendEvent]);
+
   const clearLogs = useCallback(() => setLogs([]), []);
   const dismissAgentNotification = useCallback(() => setAgentNotification(null), []);
 
@@ -758,6 +775,7 @@ export function useDevDeckSocket() {
     macTelemetry,
     toast,
     sendEvent,
+    requestAction,
     pairWithPin,
     savePairing,
     clearPairing,

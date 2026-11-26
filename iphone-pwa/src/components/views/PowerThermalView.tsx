@@ -1,7 +1,9 @@
 'use client';
 
 import { InstrumentGauge, batteryHeatScale, heatBand, processorHeatScale } from '@/components/shell/InstrumentGauge';
+import { IncidentReplaySheet } from '@/components/shell/IncidentReplaySheet';
 
+import { IncidentList } from './ReadingHistory';
 import { HealthInsights } from './HealthInsights';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -59,6 +61,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
     minutes: number;
   } | null>(null);
   const [schedAction, setSchedAction] = useState<'sleep' | 'shutdown'>('sleep');
+  const [replayOpen, setReplayOpen] = useState(false);
   const [tempHistory, setTempHistory] = useState<number[]>([]);
 
   useEffect(() => {
@@ -201,6 +204,17 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
             <span className="disp truncate text-[18px]">Power Guard</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setReplayOpen(true);
+              }}
+              className="font-mono-tech rounded-full border border-[#fb923c]/35 bg-[#fb923c]/15 px-2 py-0.5 text-[8.5px] font-extrabold text-[#fb923c] hover:bg-[#fb923c]/25"
+              title="Replay ±60s thermal incident timeline"
+            >
+              REPLAY
+            </button>
             <span
               className="font-mono-tech rounded-full px-2 py-0.5 text-[8.5px] font-extrabold uppercase"
               style={{ background: `${pColor}22`, color: pColor }}
@@ -556,6 +570,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
               <strong>Auto-pilot · {p.autoPilot ? 'On' : 'Off'}</strong>
               <small className="block">Alert on swap spikes and enable Eco below 25% on battery.</small>
             </button>
+            <IncidentList deck={deck} />
             <HealthInsights deck={deck} />
             {/* Charge Guard */}
             <div className="rounded-xl border border-[#34d399]/25 bg-black/65 p-2">
@@ -884,6 +899,7 @@ export function PowerThermalView({ deck }: { deck: DevDeckState }) {
           </div>
         )}
       </div>
+      {replayOpen && <IncidentReplaySheet deck={deck} onClose={() => setReplayOpen(false)} />}
     </div>
   );
 }

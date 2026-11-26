@@ -39,7 +39,11 @@ import {
 import type { PerfStudioService } from '../services/perfStudioService.js';
 import type { PowerThermalService } from '../services/powerThermalService.js';
 import type { SystemDoctorService } from '../services/systemDoctorService.js';
+import type { IncidentTimelineService } from '../services/incidentTimelineService.js';
 import type { PerfStudioMode } from '../types/protocol.js';
+import dns from 'node:dns/promises';
+import net from 'node:net';
+import tls from 'node:tls';
 
 const execFileAsync = promisify(execFile);
 const IS_WIN = process.platform === 'win32';
@@ -230,6 +234,10 @@ export interface ApiRouterDeps {
   perfStudio?: PerfStudioService;
   powerThermal?: PowerThermalService;
   systemDoctor?: SystemDoctorService;
+  timeline?: IncidentTimelineService;
+  runVerifiedStep?: (step: string) => Promise<{ ok: boolean; detail: string }>;
+  getCurrentWorkspaceMeta?: () => { branch: string; activeApp: string; browserUrl: string };
+  openWorkspaceBookmark?: (bm: { projectDir: string; activeApp: string; browserUrl: string }) => Promise<void>;
 }
 
 export function createApiRouter(deps: ApiRouterDeps): Router {
@@ -758,6 +766,219 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     }
     const rules = deps.perfStudio?.setCustomRule(appName, mode || null) || {};
     res.json({ ok: true, rules });
+  });
+
+  // --- Incident Replay, Nour "What Changed?" Timeline & Gauge History ---
+  router.get('/timeline/incident', deps.auth.requireAuth, (req, res) => {
+    const centerTs = Number(req.query.ts) || undefined;
+    res.json({ ok: true, ...(deps.timeline?.getIncidentReplay(centerTs) || { centerTs: Date.now(), samples: [], events: [], heatAlerts: [] }) });
+  });
+
+  router.get('/timeline/gauges', deps.auth.requireAuth, (_req, res) => {
+    res.json({ ok: true, ...(deps.timeline?.getGaugeHistory() || { samples: [], events: [], batteryInsights: { estimateText: '--', codingWatts: 10, callsWatts: 13, idleWatts: 4 } }) });
+  });
+
+  router.get('/timeline/summary', deps.auth.requireAuth, (req, res) => {
+    const mins = Math.max(1, Math.min(60, Number(req.query.mins) || 10));
+    res.json({ ok: true, ...(deps.timeline?.getSummary(mins) || { minutes: mins, summaryText: 'No events yet.', events: [], peakTempC: null, peakCpuPct: 0, topApp: 'None' }) });
+  });
+
+  // --- Verified Step-by-Step Macro Execution (supports retrying a single failed step) ---
+  router.post('/macros/run-verified', deps.auth.requireAuth, async (req, res) => {
+    const steps: string[] = Array.isArray(req.body?.steps)
+      ? req.body.steps.map((s: unknown) => String(s || '').trim()).filter(Boolean)
+      : [];
+    const startIndex = Math.max(0, Number(req.body?.startIndex) || 0);
+    if (!steps.length || !deps.runVerifiedStep) {
+      res.status(400).json({ ok: false, error: 'Steps required' });
+      return;
+    }
+    const results: Array<{ index: number; step: string; status: 'ok' | 'failed' | 'skipped'; detail: string; elapsedMs: number }> = [];
+    for (let i = 0; i < steps.length; i += 1) {
+      if (i < startIndex) {
+        results.push({ index: i, step: steps[i], status: 'skipped', detail: 'Already completed', elapsedMs: 0 });
+        continue;
+      }
+      const t0 = Date.now();
+      const out = await deps.runVerifiedStep(steps[i]);
+      results.push({
+        index: i,
+        step: steps[i],
+        status: out.ok ? 'ok' : 'failed',
+        detail: out.detail,
+        elapsedMs: Date.now() - t0,
+      });
+      if (!out.ok) {
+        res.json({ ok: false, failedIndex: i, results });
+        return;
+      }
+    }
+    deps.timeline?.recordEvent({
+      kind: 'macro_run',
+      title: `Verified Routine (${steps.length} steps)`,
+      detail: steps.join(' → ').slice(0, 90),
+      targetView: 'deck',
+    });
+    res.json({ ok: true, failedIndex: null, results });
+  });
+
+  // --- Workspace Bookmarks ("Save my place") ---
+  router.get('/bookmarks', deps.auth.requireAuth, (_req, res) => {
+    res.json({ ok: true, bookmarks: deps.timeline?.listBookmarks() || [] });
+  });
+
+  router.post('/bookmarks', deps.auth.requireAuth, (req, res) => {
+    const meta = deps.getCurrentWorkspaceMeta?.() || { branch: 'main', activeApp: 'Antigravity', browserUrl: '' };
+    const name = typeof req.body?.name === 'string' && req.body.name.trim()
+      ? req.body.name.trim()
+      : `${path.basename(deps.config.getAll().projectDir)} (${meta.branch})`;
+    const lastTask = typeof req.body?.lastTask === 'string' ? req.body.lastTask.trim() : '';
+    const saved = deps.timeline?.saveBookmark({
+      name,
+      projectDir: deps.config.getAll().projectDir,
+      branch: meta.branch,
+      activeApp: meta.activeApp,
+      browserUrl: meta.browserUrl,
+      lastTask,
+    });
+    res.json({ ok: true, bookmark: saved, bookmarks: deps.timeline?.listBookmarks() || [] });
+  });
+
+  router.post('/bookmarks/open', deps.auth.requireAuth, async (req, res) => {
+    const id = String(req.body?.id || '');
+    const bm = deps.timeline?.listBookmarks().find((b) => b.id === id);
+    if (!bm) {
+      res.status(404).json({ ok: false, error: 'Bookmark not found' });
+      return;
+    }
+    try {
+      await deps.openWorkspaceBookmark?.(bm);
+      res.json({ ok: true, message: `Reopened ${bm.name}` });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Reopen failed' });
+    }
+  });
+
+  router.delete('/bookmarks/:id', deps.auth.requireAuth, (req, res) => {
+    const bookmarks = deps.timeline?.deleteBookmark(String(req.params.id || '')) || [];
+    res.json({ ok: true, bookmarks });
+  });
+
+  // --- Website Monitor Outage Stage Explainer (DNS -> TCP -> TLS -> HTTP) ---
+  router.post('/monitor/diagnose', deps.auth.requireAuth, async (req, res) => {
+    const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    try {
+      const parsed = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
+      const host = parsed.hostname;
+      const isHttps = parsed.protocol === 'https:';
+      const port = Number(parsed.port) || (isHttps ? 443 : 80);
+
+      const stages: Record<'dns' | 'tcp' | 'tls' | 'http', { ok: boolean; ms: number; detail: string }> = {
+        dns: { ok: false, ms: 0, detail: 'Pending' },
+        tcp: { ok: false, ms: 0, detail: 'Pending' },
+        tls: { ok: !isHttps, ms: 0, detail: isHttps ? 'Pending' : 'Not HTTPS' },
+        http: { ok: false, ms: 0, detail: 'Pending' },
+      };
+
+      // Stage 1: DNS Lookup
+      const tDns = Date.now();
+      try {
+        const lookup = await dns.lookup(host);
+        stages.dns = { ok: true, ms: Date.now() - tDns, detail: lookup.address };
+      } catch (e) {
+        stages.dns = { ok: false, ms: Date.now() - tDns, detail: e instanceof Error ? e.message : 'DNS failed' };
+        res.json({ ok: true, url: parsed.toString(), failedStage: 'dns', stages });
+        return;
+      }
+
+      // Stage 2: TCP Connection
+      const tTcp = Date.now();
+      const tcpOk = await new Promise<boolean>((resolve) => {
+        const s = net.connect({ host, port, timeout: 3500 }, () => {
+          s.destroy();
+          resolve(true);
+        });
+        s.on('error', () => resolve(false));
+        s.on('timeout', () => {
+          s.destroy();
+          resolve(false);
+        });
+      });
+      stages.tcp = { ok: tcpOk, ms: Date.now() - tTcp, detail: tcpOk ? `Port ${port} open` : `Port ${port} refused/timed out` };
+      if (!tcpOk) {
+        res.json({ ok: true, url: parsed.toString(), failedStage: 'tcp', stages });
+        return;
+      }
+
+      // Stage 3: TLS Certificate Handshake (HTTPS only)
+      if (isHttps) {
+        const tTls = Date.now();
+        const tlsRes = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
+          const s = tls.connect({ host, port, servername: host, timeout: 3500 }, () => {
+            const cert = s.getPeerCertificate();
+            const exp = cert?.valid_to ? `Valid until ${cert.valid_to}` : 'TLS OK';
+            s.destroy();
+            resolve({ ok: true, detail: exp });
+          });
+          s.on('error', (err) => resolve({ ok: false, detail: err.message }));
+          s.on('timeout', () => {
+            s.destroy();
+            resolve({ ok: false, detail: 'TLS handshake timed out' });
+          });
+        });
+        stages.tls = { ok: tlsRes.ok, ms: Date.now() - tTls, detail: tlsRes.detail };
+        if (!tlsRes.ok) {
+          res.json({ ok: true, url: parsed.toString(), failedStage: 'tls', stages });
+          return;
+        }
+      }
+
+      // Stage 4: HTTP Response
+      const tHttp = Date.now();
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5000);
+        const resp = await fetch(parsed.toString(), { method: 'GET', signal: ctrl.signal });
+        clearTimeout(timer);
+        stages.http = { ok: resp.status < 500, ms: Date.now() - tHttp, detail: `HTTP ${resp.status}` };
+        res.json({
+          ok: true,
+          url: parsed.toString(),
+          failedStage: stages.http.ok ? null : 'http',
+          stages,
+        });
+      } catch (e) {
+        stages.http = { ok: false, ms: Date.now() - tHttp, detail: e instanceof Error ? e.message : 'HTTP failed' };
+        res.json({ ok: true, url: parsed.toString(), failedStage: 'http', stages });
+      }
+    } catch {
+      res.status(400).json({ ok: false, error: 'Invalid URL' });
+    }
+  });
+
+  // --- Antigravity Before / After Visual Review Snapshots ---
+  const visualSnapshots: { before: string | null; after: string | null; updatedAt: number } = {
+    before: null,
+    after: null,
+    updatedAt: 0,
+  };
+
+  router.get('/antigravity/snapshots', deps.auth.requireAuth, (_req, res) => {
+    res.json({ ok: true, ...visualSnapshots });
+  });
+
+  router.post('/antigravity/snapshot', deps.auth.requireAuth, async (req, res) => {
+    const slot = req.body?.slot === 'before' ? 'before' : 'after';
+    const cached = getLatestCachedScreenFrame();
+    const jpg = cached || (await captureScreenPeekJpeg(1120));
+    if (!jpg) {
+      res.status(503).json({ ok: false, error: 'Could not capture screen (check Screen Recording permission)' });
+      return;
+    }
+    const dataUrl = `data:image/jpeg;base64,${jpg.toString('base64')}`;
+    visualSnapshots[slot] = dataUrl;
+    visualSnapshots.updatedAt = Date.now();
+    res.json({ ok: true, slot, ...visualSnapshots });
   });
 
   // --- AI Principal Systems Engineer Ask & Auto-Fix ---

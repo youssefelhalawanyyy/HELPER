@@ -1,3 +1,8 @@
+import {cursorLens} from '../services/cursorLens.js';
+import {setMacVolume} from '../macos/hardware.js';
+import { listBookmarks, saveBookmark, restoreBookmark, capturePage } from '../services/workspaceDesk.js';
+import { chainStatus } from '../services/verifiedChain.js';
+import { activityWindow, recentIncidents } from '../services/activityHistory.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,6 +33,7 @@ import {
 } from '../services/devSuiteService.js';
 
 export function createDevSuiteRouter(opts: {
+  restoreProject: (dir:string,url?:string)=>void;
   expectedToken: string;
   getProjectDir: () => string;
   lanIp: string;
@@ -182,6 +188,29 @@ export function createDevSuiteRouter(opts: {
     }
   });
   router.get('/watch', (_req, res) => res.json(watchList()));
+  router.get('/chain/:id', (req,res)=>res.json({run:chainStatus(req.params.id) || null}));
+  router.get('/cursor-lens',async(_req,res)=>{try{res.set('Cache-Control','no-store').json({image:await cursorLens()});}catch{res.status(503).json({error:'Screen capture unavailable. Check desktop screen recording access.'});}});
+  router.post('/volume',async(req,res)=>{
+    const value=req.body.value;
+    if(!Number.isInteger(value)||value<0||value>100){res.status(400).json({error:'Choose a volume from 0 to 100'});return;}
+    try{res.json({value:await setMacVolume(value)});}catch(e){res.status(500).json({error:(e as Error).message});}
+  });
+  router.get('/bookmarks', (_req,res)=>res.json(listBookmarks()));
+  router.post('/bookmarks', async (req,res)=>{
+    try { res.json(await saveBookmark(opts.getProjectDir(),req.body)); } catch(e){ res.status(400).json({error:(e as Error).message}); }
+  });
+  router.post('/bookmarks/restore', async (req,res)=>{
+    try { const item=await restoreBookmark(req.body.id); opts.restoreProject(item.dir,item.pages[0]); res.json({ok:true}); } catch(e){ res.status(400).json({error:(e as Error).message}); }
+  });
+  router.post('/review/capture', async(req,res)=>{
+    try {res.set('Cache-Control','no-store').json(await capturePage(req.body.url,req.body.width,req.body.height));}
+    catch(e){res.status(400).json({error:(e as Error).message.slice(0,300)});}
+  });
+  router.get('/activity', (req, res) => {
+    const center = Number(req.query.center) || undefined;
+    const minutes = Math.min(60, Math.max(1, Number(req.query.minutes) || 10));
+    res.set('Cache-Control', 'no-store').json({ ...activityWindow(center, minutes), incidents: recentIncidents() });
+  });
   router.get('/health-history', (_req, res) => res.json(healthDays));
   router.post('/watch', async (req, res) => {
     try {

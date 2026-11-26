@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { CSSProperties } from 'react';
+import {ControlLibrary,PublicDisplay} from './ControlLibrary';
 import { Brand, LeftNavRail, PAGES, type DeckViewId } from './LeftNavRail';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'framer-motion';
 import {
@@ -13,11 +14,13 @@ import {
   ChevronRight,
   ClipboardList,
   Coffee,
+  EyeOff,
   Lock,
   Maximize2,
   Mic,
   Minimize2,
   Moon,
+  Search,
   Volume2,
   VolumeX,
   Zap,
@@ -26,6 +29,7 @@ import { AgentNotificationBanner } from '@/components/shell/AgentNotificationBan
 import { AgentQuestionOverlay } from '@/components/shell/AgentQuestionOverlay';
 import { PIN_STORAGE_KEY, PinLockOverlay } from '@/components/shell/PinLockOverlay';
 import { StandbyOverlay } from '@/components/shell/StandbyOverlay';
+import { CommandSearchOverlay } from '@/components/shell/CommandSearchOverlay';
 import { useDeskBreak } from '@/hooks/useDeskBreak';
 import { PreviewAmbientView } from '@/components/views/PreviewAmbientView';
 import { SmartDeckView } from '@/components/views/SmartDeckView';
@@ -158,10 +162,28 @@ export function DeckShell() {
   const [pinDialogMode, setPinDialogMode] = useState<'unlock' | 'setup' | null>(null);
   const [pendingViewIdx, setPendingViewIdx] = useState<number | null>(null);
   const [standbyActive, setStandbyActive] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [privateMode, setPrivateMode] = useState(false);
   const standbyTimerRef = useRef<number | null>(null);
   const reduceMotion = useReducedMotion();
   const overlayOpen =
-    pairingModalOpen || snippetsOpen || Boolean(deck.agentQuestion) || Boolean(pinDialogMode);
+    pairingModalOpen ||
+    snippetsOpen ||
+    Boolean(deck.agentQuestion) ||
+    Boolean(pinDialogMode) ||
+    searchOpen;
+
+  // Desktop Cmd+K / Ctrl+K shortcut for Universal Command Search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const swipeStartRef = useRef<{ x: number; y: number; blocked: boolean } | null>(null);
 
   useEffect(() => {
@@ -200,7 +222,9 @@ export function DeckShell() {
   );
 
   // Persistent Nour Voice AI session — stays alive while swiping across ALL pages!
-  const nour = useNourVoice(deck, goToView);
+  const [presentation,setPresentation]=useState<'loading'|'off'|'preview'|'live'>('loading');
+  useEffect(()=>{setPresentation(sessionStorage.getItem('devdeck.present')==='on'?'live':'off');},[]);
+  const nour = useNourVoice(deck, goToView,presentation!=='off');
 
   // Secondary views load on-demand via next/dynamic and cache automatically — zero upfront CPU burst on launch!
 
@@ -329,6 +353,13 @@ export function DeckShell() {
         ? '#fbbf24'
         : '#34d399';
 
+  useEffect(()=>{
+    const update=()=>document.documentElement.toggleAttribute('data-asleep',document.hidden||standbyActive);
+    update();document.addEventListener('visibilitychange',update);
+    return ()=>{document.removeEventListener('visibilitychange',update);document.documentElement.removeAttribute('data-asleep');};
+  },[standbyActive]);
+  if(presentation==='loading')return <main aria-busy="true"/>;
+  if(presentation!=='off')return <PublicDisplay deck={deck} preview={presentation==='preview'} start={()=>{sessionStorage.setItem('devdeck.present','on');setPresentation('live');}} close={()=>{sessionStorage.removeItem('devdeck.present');setPresentation('off');}}/>;
   return (
     <MotionConfig reducedMotion="user">
       <div
@@ -529,6 +560,41 @@ export function DeckShell() {
             </div>
             <div className="console-utilities" role="group" aria-label="Quick controls">
               {/* Quick Utility Buttons (Snippets + Sound + Caffeine + Antigravity IDE) */}
+              <motion.button
+                type="button"
+                aria-label="Search every control (Cmd+K)"
+                title="Universal Search (⌘K)"
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setSearchOpen(true);
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06] text-[#88f1d1]"
+              >
+                <Search className="h-3 w-3" />
+              </motion.button>
+
+              <motion.button
+                type="button"
+                aria-label="Toggle Private Presentation Mode"
+                title={privateMode ? 'Private Presentation Mode ON (sensitive info hidden)' : 'Private Presentation Mode'}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  soundEngine.playClick();
+                  setPrivateMode((v) => !v);
+                  deck.showToast(
+                    true,
+                    !privateMode
+                      ? 'Private Presentation Mode ON — clipboard, paths & IPs hidden'
+                      : 'Private Presentation Mode OFF',
+                  );
+                }}
+                className="grid h-5 w-6 place-items-center rounded-full bg-white/[0.06]"
+                style={{ color: privateMode ? '#fbbf24' : '#8b90a0' }}
+              >
+                <EyeOff className="h-3 w-3" />
+              </motion.button>
+
               <motion.button
                 type="button"
                 aria-label="Enter OLED StandBy screen"
@@ -784,7 +850,14 @@ export function DeckShell() {
                   <MacInspectorView deck={deck} onNavigateToMonitor={() => goToView('monitor')} />
                 )}
                 {activeView === 'hardware' && <HardwareToolsView deck={deck} />}
-                {activeView === 'preview' && <PreviewAmbientView deck={deck} deskBreak={deskBreak} onPair={() => setPairingModalOpen(true)} />}
+                {activeView === 'preview' && (
+                  <PreviewAmbientView
+                    deck={deck}
+                    deskBreak={deskBreak}
+                    privateMode={privateMode}
+                    onPair={() => setPairingModalOpen(true)}
+                  />
+                )}
                 {activeView === 'launch' && <LaunchControlView deck={deck} />}
                 {activeView === 'doctor' && <SystemDoctorView deck={deck} />}
                 {activeView === 'network' && <NetworkCommandView deck={deck} />}
@@ -852,6 +925,17 @@ export function DeckShell() {
               />
             )}
           </AnimatePresence>
+          {searchOpen && (
+            <CommandSearchOverlay
+              deck={deck}
+              onNavigate={(id) => {
+                goToView(id);
+                setSearchOpen(false);
+              }}
+              onClose={() => setSearchOpen(false)}
+            />
+          )}
+          <ControlLibrary deck={deck} active={activeView} navigate={goToView} present={()=>setPresentation('preview')}/>
           <footer className="console-footer">
             {/* Page Switcher Pill (Swipe or Tap Dots / Arrows) */}
             <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#98c8ce29] bg-[#0d1921] px-2 py-0.5">

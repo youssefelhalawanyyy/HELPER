@@ -1,7 +1,9 @@
 'use client';
 
 import { InstrumentGauge } from '@/components/shell/InstrumentGauge';
+import { IncidentReplaySheet } from '@/components/shell/IncidentReplaySheet';
 
+import { IncidentList } from './ReadingHistory';
 import { HealthInsights } from './HealthInsights';
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -43,6 +45,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
   const [keyInput, setKeyInput] = useState('');
   const [aiPrompt, setAiPrompt] = useState('');
   const [askingAi, setAskingAi] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
   const [aiAnswer, setAiAnswer] = useState<{
     question: string;
     answer: string;
@@ -156,6 +159,16 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
             <span className="disp text-[19px]">{isWin ? 'PC Rescue' : 'Mac Rescue'}</span>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setReplayOpen(true);
+              }}
+              className="rounded-full border border-[#fbbf24]/40 bg-[#fbbf24]/14 px-1.5 py-0.5 text-console-micro font-extrabold text-[#fbbf24] uppercase"
+            >
+              REPLAY
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -408,6 +421,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
         {/* TAB 1: Issues & Plain-English Diagnosis */}
         {rightTab === 'issues' && (
           <div className="deck-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+            <IncidentList deck={deck} />
             <HealthInsights deck={deck} />
             {doc.issues.map((issue) => {
               const color =
@@ -771,6 +785,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
           </motion.button>
         </div>
       </div>
+      {replayOpen && <IncidentReplaySheet deck={deck} onClose={() => setReplayOpen(false)} />}
     </div>
   );
 }

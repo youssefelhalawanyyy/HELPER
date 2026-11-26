@@ -84,6 +84,13 @@ export function localNourCommand(
     matches[0].click();
     return 'ضغطت على الزرار.';
   }
+  if (/(?:ايه اللي حصل|what changed|last 10 min|اخر عشر دقايق|حصل ايه|ملخص اخر)/.test(text)) {
+    const temp = deck.powerState.cpuTempC !== null ? `${deck.powerState.cpuTempC.toFixed(1)}°C` : '--';
+    const topApp = deck.processes[0]?.name || deck.activeApp.appName || 'النظام';
+    const lastLog = deck.logs[deck.logs.length - 1]?.text?.slice(0, 60);
+    navigate('power');
+    return `آخر 10 دقايق: الحرارة حالياً ${temp}، CPU ${Math.round(deck.stats.cpuPct)}% (أتقل برنامج: ${topApp})، والفرع ${deck.gitStatus.branch || 'main'}${lastLog ? ` · آخر سجل: ${lastLog}` : ''}. فتحتلك Power Guard عشان تقدر تضغط Replay وتشوف التايم لاين بالتفصيل.`;
+  }
   if (/^(?:wake (?:the )?(?:display|screen)|صحي الشاشة|افتحلي اللابتوب|افتح اللابتوب|صحي اللابتوب|wake laptop|wake computer)$/.test(text))
     return send({ type: 'hardware:wake', payload: { requestId } });
   if (/(?:super mode|سوبر مود|وضع سوبر|حولي علي سوبر|حولي على سوبر|حول سوبر)/.test(text)) {
