@@ -8,11 +8,12 @@ import type { DoctorPostReport, SystemDoctorReport } from '../types/protocol.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KEY_FILE = path.resolve(__dirname, '../../data/doctor_ai.json');
 
+// Flagship reasoning models first: Gemini 2.5 Pro for deep OS troubleshooting & root-cause fixes,
+// with automatic graceful fallback to Gemini 2.5 Flash (thinking enabled) and 2.0 Flash.
 const MODELS = [
-  'gemini-2.5-flash-lite',
-  'gemini-3.1-flash-lite-preview',
-  'gemini-3-flash-preview',
-  'gemini-flash-lite-latest',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
   'gemini-flash-latest',
 ];
 
@@ -70,6 +71,7 @@ interface AiStepResponse {
   reasoning: string;
   command?: string;
   summaryOfFix?: string;
+  answer?: string;
   whatWasFixed?: string[];
   whatWasNotFixed?: string[];
   whyItHappened?: string[];
@@ -86,22 +88,22 @@ async function callGeminiJson(
   systemInstruction: string,
   history: GeminiTurn[],
   onLine?: (line: string) => void,
-): Promise<AiStepResponse> {
+): Promise<{ result: AiStepResponse; modelUsed: string }> {
   let lastErr = 'Gemini request failed';
 
   for (const model of MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 18_000);
+    const timer = setTimeout(() => controller.abort(), 32_000);
     try {
       const generationConfig: Record<string, unknown> = {
-        temperature: 0.2,
-        maxOutputTokens: 1024,
+        temperature: 0.15,
+        maxOutputTokens: 2800,
         responseMimeType: 'application/json',
       };
-      // Disable slow extended thinking on Flash models so each repair step replies in ~1-2s
-      if (/gemini-3|2\.5-flash/i.test(model)) {
-        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      // Enable real structured reasoning on 2.5 Flash (Pro reasons natively!)
+      if (/gemini-2\.5-flash/i.test(model)) {
+        generationConfig.thinkingConfig = { thinkingBudget: 2048 };
       }
 
       const res = await fetch(url, {
@@ -117,28 +119,35 @@ async function callGeminiJson(
       clearTimeout(timer);
 
       const data = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
         error?: { message?: string };
       };
 
       if (!res.ok) {
         lastErr = data.error?.message || `HTTP ${res.status}`;
-        onLine?.(`⚠ ${model}: ${lastErr.slice(0, 90)} — trying fallback…`);
+        onLine?.(`⚠ ${model}: ${lastErr.slice(0, 95)} — trying next model…`);
         if (res.status === 503 || res.status === 429 || res.status === 404 || res.status === 400) {
           continue;
         }
         throw new Error(lastErr);
       }
 
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const textPart = parts.find((p) => !p.thought && typeof p.text === 'string' && p.text.trim());
+      const raw = textPart?.text?.trim() || '';
       if (!raw) throw new Error('Empty AI response');
       const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
-      return JSON.parse(cleaned) as AiStepResponse;
+      return { result: JSON.parse(cleaned) as AiStepResponse, modelUsed: model };
     } catch (err) {
       clearTimeout(timer);
-      const msg = err instanceof Error ? (err.name === 'AbortError' ? 'Timed out after 18s' : err.message) : String(err);
+      const msg =
+        err instanceof Error
+          ? err.name === 'AbortError'
+            ? 'Timed out after 32s'
+            : err.message
+          : String(err);
       lastErr = msg;
-      onLine?.(`⚠ ${model}: ${msg.slice(0, 90)}`);
+      onLine?.(`⚠ ${model}: ${msg.slice(0, 95)}`);
     }
   }
 
@@ -148,7 +157,7 @@ async function callGeminiJson(
 function runShellStreaming(
   command: string,
   onLine: (line: string) => void,
-  timeoutMs = 45_000,
+  timeoutMs = 30_000,
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
     const child = IS_WIN
@@ -174,7 +183,7 @@ function runShellStreaming(
 
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      onLine('⚠ Command timed out after 15s (continuing)');
+      onLine(`⚠ Command timed out after ${Math.round(timeoutMs / 1000)}s (continuing)`);
       resolve({ code: -1, output: out });
     }, timeoutMs);
 
@@ -193,13 +202,52 @@ function runShellStreaming(
   });
 }
 
+function buildSystemInstruction(osName: string, userGoal?: string): string {
+  return `You are DevDeck AI Principal Systems Engineer (powered by Gemini 2.5 Pro) — an expert ${osName} diagnostics, performance, and repair specialist who ACTUALLY FIXES real computer problems safely and explains everything in crystal-clear everyday English.
+
+${userGoal ? `USER'S SPECIFIC REQUEST: "${userGoal}"\nPrioritize solving this exact request first, verifying the fix, and reporting concrete measured results!\n` : ''}
+REAL REPAIRS & DEEP CHECKS YOU SHOULD ACTUALLY EXECUTE:
+1. **Disk & Bloat**: Measure exact largest directories in ~/Library/Caches, ~/Library/Developer, ~/.cache, ~/Downloads (or Windows %LOCALAPPDATA%, Temp, Downloads). Safely clean regenerable caches (npm cache clean --force, pnpm store prune, brew cleanup -s, pip cache purge, qlmanage -r cache, old logs) and measure exact MB/GB freed!
+2. **CPU, Heat & Runaway Processes**: Inspect top CPU/RAM hogs (\`ps -Arcwwwxo pid,pcpu,pmem,comm | head -15\` on Mac or \`Get-Process | Sort-Object CPU -Desc | Select -First 12\` on Windows). Safely throttle (\`renice +10\`) or terminate stuck/zombie non-system hogs if clearly hung, NEVER kill DevDeck/node bridge/Finder/System/Antigravity.
+3. **Crashes & Errors**: Inspect actual latest crash reports (\`~/Library/Logs/DiagnosticReports\` on Mac or \`Get-WinEvent -LogName Application,System -MaxEvents 12 -FilterXPath '*[System[Level<=2]]'\` on Windows) so you tell the user the EXACT app/driver that crashed and WHY.
+4. **Network, DNS & Services**: Check DNS resolution, stuck ports, or broken system caches, and flush/reset safely (\`dscacheutil -flushcache\`, \`ipconfig /flushdns\`).
+5. **Verify Your Work**: After running a fix, verify the result so you report REAL numbers (exact MB freed, exact process fixed, exact error resolved).
+
+STRICT SAFETY GUARDRAILS:
+- NEVER delete personal Documents, Desktop, Photos, Downloads, or user source code.
+- NEVER run sudo, format, diskpart, mkfs, dd, shutdown, reboot, or curl|sh.
+- Keep commands concise, deterministic, and non-interactive (max 8 steps).
+
+ALWAYS respond with ONLY valid JSON matching this schema:
+When running a command:
+{
+  "done": false,
+  "reasoning": "1-2 sentence clear English explanation of what you found and WHY you are running this command",
+  "command": "exact single-line ${IS_WIN ? 'PowerShell' : 'zsh'} command",
+  "summaryOfFix": "optional concrete plain-English description of what this command fixed"
+}
+When finished:
+{
+  "done": true,
+  "reasoning": "Clear wrap-up sentence",
+  "answer": "Direct 2-4 sentence plain-English answer to the user's request with concrete numbers",
+  "whatWasFixed": ["Concrete bullet of EVERY fix completed with real MB/GB/items/errors fixed"],
+  "whatWasNotFixed": ["Anything that could not be auto-fixed and WHY"],
+  "whyItHappened": ["Clear root-cause explanation tailored to THIS computer"],
+  "nextSteps": ["Specific actionable step naming exact apps, folders, or settings found"]
+}`;
+}
+
 export async function runAutonomousAiRescue(
   initialReport: SystemDoctorReport,
   onLine: (line: string) => void,
   onStatus: (status: string) => void,
   priorFixes: string[] = [],
   priorNotFixed: string[] = [],
+  userGoal?: string,
 ): Promise<{
+  answer?: string;
+  modelUsed: string;
   whatWasFixed: string[];
   whatWasNotFixed: string[];
   whyItHappened: string[];
@@ -211,35 +259,7 @@ export async function runAutonomousAiRescue(
   }
 
   const osName = IS_WIN ? 'Windows 10/11 (PowerShell)' : 'macOS (zsh)';
-  const systemInstruction = `You are DevDeck AI Systems Engineer — a senior ${osName} diagnostics and repair specialist talking to a user in SIMPLE, CLEAR, EASY-TO-UNDERSTAND EVERYDAY ENGLISH (avoid confusing jargon!).
-Your ONLY purpose is to investigate every remaining problem on this computer, ACTUALLY FIX everything safe (clear safe dev/app caches like npm/pip/brew/yarn/Xcode DerivedData/temp logs, find exact huge files or folders starving the drive, identify exact crashing apps and heavy browser/background hogs), and write a super clear, detailed plain-English final report.
-
-STRICT SAFETY RULES:
-- NEVER delete personal documents, photos, Desktop, Downloads, or user source code.
-- NEVER use sudo, format, diskpart, mkfs, dd, shutdown, reboot, or curl|sh.
-- Safe repairs & deep checks you SHOULD run when relevant:
-  - If free disk space is low (< 20 GB): find the exact top 5 largest folders/files in ~/Downloads, ~/Library/Caches, ~/Library/Developer, ~/.cache (or Windows %LOCALAPPDATA% / Downloads), AND safely clean regenerable caches (npm cache clean --force, brew cleanup -s, pip cache purge, old logs) so free disk space ACTUALLY increases!
-  - If browser bloat or high RAM: list the exact top 5 RAM-eating apps in MB/GB so the user knows which exact app to close.
-  - If crashes exist: inspect the latest crash file name/reason so you can tell the user in plain English WHICH app crashed and WHY.
-- You have up to 8 command steps. Focus on making REAL, MEASURABLE improvements, then return done: true with a complete, unified, easy-to-read English report merging Stage 1 (priorFixes) and your Stage 2 work.
-
-ALWAYS respond with ONLY valid JSON matching this exact schema:
-When running a command:
-{
-  "done": false,
-  "reasoning": "1-2 sentence simple English explanation of WHY you are running this command",
-  "command": "exact single-line ${IS_WIN ? 'PowerShell' : 'zsh'} command",
-  "summaryOfFix": "optional short plain-English description of what this command fixed"
-}
-When finished:
-{
-  "done": true,
-  "reasoning": "Friendly wrap-up sentence",
-  "whatWasFixed": ["Simple, clear English bullet of EVERY fix actually completed (Stage 1 + Stage 2) with exact MB/GB freed or items repaired"],
-  "whatWasNotFixed": ["Clear English bullet of anything that could NOT be auto-fixed and WHY (e.g. personal files in Downloads, or needing a reboot)"],
-  "whyItHappened": ["Easy-to-understand English explanation of the exact root causes making THIS computer slow or unstable"],
-  "nextSteps": ["Specific, easy numbered step telling the user exactly what to do (naming exact files, folders, or apps you found!)"]
-}`;
+  const systemInstruction = buildSystemInstruction(osName, userGoal);
 
   const snapshot = {
     os: osName,
@@ -260,7 +280,9 @@ When finished:
       role: 'user',
       parts: [
         {
-          text: `Automated Stage 1 repairs have already completed. Here is the live snapshot of this computer. Now perform Stage 2 deep investigation & safe repairs for all remaining issues:\n${JSON.stringify(snapshot, null, 2)}`,
+          text: userGoal
+            ? `The user asked: "${userGoal}"\nLive computer snapshot:\n${JSON.stringify(snapshot, null, 2)}\nInvestigate and fix this thoroughly right now.`
+            : `Automated Stage 1 repairs have already completed. Here is the live snapshot of this computer. Now perform Stage 2 deep investigation, actually fix every remaining safe issue, verify the improvements, and produce a clear plain-English report:\n${JSON.stringify(snapshot, null, 2)}`,
         },
       ],
     },
@@ -269,11 +291,21 @@ When finished:
   const collectedFixes: string[] = [...priorFixes];
   const collectedNotFixed: string[] = [...priorNotFixed];
   let finalResult: AiStepResponse | null = null;
+  let activeModel = MODELS[0];
 
-  const MAX_STEPS = 5;
+  const MAX_STEPS = 8;
   for (let step = 1; step <= MAX_STEPS; step += 1) {
-    onStatus(`AI Step ${step}/${MAX_STEPS}: Analyzing system…`);
-    const decision = await callGeminiJson(apiKey, systemInstruction, history, onLine);
+    onStatus(`AI Step ${step}/${MAX_STEPS}: Reasoning (${activeModel})…`);
+    const { result: decision, modelUsed } = await callGeminiJson(
+      apiKey,
+      systemInstruction,
+      history,
+      onLine,
+    );
+    if (step === 1 || modelUsed !== activeModel) {
+      activeModel = modelUsed;
+      onLine(`🧠 [AI ENGINE] Active Model: ${activeModel}`);
+    }
 
     history.push({ role: 'model', parts: [{ text: JSON.stringify(decision) }] });
 
@@ -293,21 +325,25 @@ When finished:
       collectedNotFixed.push(`Skipped unsafe command: ${cmd}`);
       history.push({
         role: 'user',
-        parts: [{ text: `Safety guardrail blocked that command (${safety.reason}). Choose a safe non-destructive alternative or finish with done: true.` }],
+        parts: [
+          {
+            text: `Safety guardrail blocked that command (${safety.reason}). Choose a safe non-destructive alternative or finish with done: true.`,
+          },
+        ],
       });
       continue;
     }
 
     onStatus(`AI Step ${step}/${MAX_STEPS}: Running repair command…`);
     onLine(`$ ${cmd}`);
-    const execRes = await runShellStreaming(cmd, onLine, 15_000);
+    const execRes = await runShellStreaming(cmd, onLine, 28_000);
     onLine(`[exit ${execRes.code}]`);
 
     if (execRes.code === 0 && decision.summaryOfFix) {
       collectedFixes.push(decision.summaryOfFix);
     }
 
-    const trimmedOut = execRes.output.trim().slice(-2400) || '(no output)';
+    const trimmedOut = execRes.output.trim().slice(-3200) || '(no output)';
     history.push({
       role: 'user',
       parts: [
@@ -315,20 +351,23 @@ When finished:
           text: `Command exited with code ${execRes.code}.\nOutput:\n${trimmedOut}\n\n${
             step === MAX_STEPS
               ? 'This was the final allowed command step. Now respond with done: true and the complete plain-English report.'
-              : 'Decide the next diagnostic/fix command or finish with done: true.'
+              : 'Decide the next diagnostic/fix/verification command or finish with done: true.'
           }`,
         },
       ],
     });
   }
 
-  // If AI didn't return done: true on the last loop, request the final summary cleanly
   if (!finalResult || !finalResult.done) {
-    onStatus('AI generating plain-English rescue report…');
-    finalResult = await callGeminiJson(apiKey, systemInstruction, history, onLine);
+    onStatus('AI generating final plain-English rescue report…');
+    const finalWrap = await callGeminiJson(apiKey, systemInstruction, history, onLine);
+    finalResult = finalWrap.result;
+    activeModel = finalWrap.modelUsed;
   }
 
   return {
+    answer: finalResult.answer || finalResult.reasoning,
+    modelUsed: activeModel,
     whatWasFixed:
       finalResult.whatWasFixed?.length
         ? finalResult.whatWasFixed

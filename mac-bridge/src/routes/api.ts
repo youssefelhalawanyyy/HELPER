@@ -38,6 +38,7 @@ import {
 } from '../services/workspaceFilesService.js';
 import type { PerfStudioService } from '../services/perfStudioService.js';
 import type { PowerThermalService } from '../services/powerThermalService.js';
+import type { SystemDoctorService } from '../services/systemDoctorService.js';
 import type { PerfStudioMode } from '../types/protocol.js';
 
 const execFileAsync = promisify(execFile);
@@ -228,6 +229,7 @@ export interface ApiRouterDeps {
   };
   perfStudio?: PerfStudioService;
   powerThermal?: PowerThermalService;
+  systemDoctor?: SystemDoctorService;
 }
 
 export function createApiRouter(deps: ApiRouterDeps): Router {
@@ -756,6 +758,21 @@ export function createApiRouter(deps: ApiRouterDeps): Router {
     }
     const rules = deps.perfStudio?.setCustomRule(appName, mode || null) || {};
     res.json({ ok: true, rules });
+  });
+
+  // --- AI Principal Systems Engineer Ask & Auto-Fix ---
+  router.post('/doctor/ask', deps.auth.requireAuth, async (req, res) => {
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    if (!prompt || !deps.systemDoctor) {
+      res.status(400).json({ ok: false, error: 'Prompt required' });
+      return;
+    }
+    try {
+      const result = await deps.systemDoctor.askAiEngineer(prompt);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : 'AI Doctor failed' });
+    }
   });
 
   // --- Meeting Command Bar (DND + Pause Music + Mic/Camera/Leave Call) ---

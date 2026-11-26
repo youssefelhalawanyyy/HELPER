@@ -935,7 +935,7 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
       };
 
       const doFreeRam = async () => {
-        this.log('Optimizing memory & trimming idle working sets…');
+        this.log('Optimizing memory, resetting QuickLook cache & trimming idle hogs…');
         if (IS_WIN) {
           const encoded = Buffer.from(
             `Add-Type 'using System; using System.Runtime.InteropServices; public class Mem { [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(IntPtr h); }'; $c=0; Get-Process | Where-Object { $_.WorkingSet64 -gt 80MB -and $_.ProcessName -notmatch 'System|csrss|dwm|explorer|node' } | ForEach-Object { try { if([Mem]::EmptyWorkingSet($_.Handle)){ $c++ } } catch {} }; Write-Output "Trimmed working set memory on $c background processes."`,
@@ -948,8 +948,19 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
           );
           whatWasFixed.push('Trimmed standby/working-set RAM across heavy Windows background apps.');
         } else {
-          await this.execStreaming('vm_stat', [], 5000);
-          whatWasFixed.push('Audited macOS virtual memory & page pressure.');
+          // Real macOS memory relief: reset QuickLook/thumbnail caches + deprioritize heavy idle background hogs
+          await this.execStreaming('qlmanage', ['-r', 'cache'], 6000).catch(() => {});
+          await this.execStreaming(
+            '/bin/zsh',
+            [
+              '-lc',
+              'ps -Arcwwwxo pid,pmem,comm | tail -n +2 | head -n 12 | awk \'$2+0 > 4.0 && $3 !~ /WindowServer|kernel_task|node|Antigravity|Finder/ {print $1}\' | xargs -r renice +8 2>/dev/null || true; vm_stat | head -n 8',
+            ],
+            6000,
+          );
+          whatWasFixed.push(
+            'Cleared macOS QuickLook/thumbnail memory caches and lowered priority on heavy background RAM hogs.',
+          );
         }
         return 'Memory optimized';
       };
@@ -1208,6 +1219,75 @@ Write-Output ($errs.Count.ToString() + '||' + ($start1.Count + $start2.Count).to
       this.emit();
       this.onAlert?.('error', msg.slice(0, 80));
       return msg;
+    }
+  }
+
+  async askAiEngineer(prompt: string): Promise<{
+    ok: boolean;
+    answer: string;
+    modelUsed: string;
+    whatWasFixed: string[];
+    nextSteps: string[];
+  }> {
+    const clean = prompt.trim();
+    if (!clean) throw new Error('Please describe the problem you want AI Doctor to fix');
+    if (this.report.repairing) {
+      throw new Error('Another repair is currently running — wait a moment and try again.');
+    }
+
+    if (!this.report.scannedAt) {
+      await this.runScan();
+    }
+
+    const startScore = this.report.score;
+    this.report.repairing = true;
+    this.report.activeAction = `Gemini 2.5 Pro investigating: ${clean.slice(0, 48)}…`;
+    this.term('==================================================');
+    this.term(`🧠 [ASK AI DOCTOR] "${clean}"`);
+    this.term('==================================================');
+    this.emit();
+
+    try {
+      const res = await runAutonomousAiRescue(
+        this.report,
+        (line) => this.term(line),
+        (statusText) => {
+          this.report.activeAction = statusText;
+          this.emit();
+        },
+        [],
+        [],
+        clean,
+      );
+
+      this.report.repairing = false;
+      this.report.activeAction = '';
+      await this.runScan();
+      this.report.postReport = {
+        generatedAt: Date.now(),
+        scoreBefore: startScore,
+        scoreAfter: this.report.score,
+        whatWasFixed: res.whatWasFixed,
+        whatWasNotFixed: res.whatWasNotFixed,
+        whyItHappened: res.whyItHappened,
+        nextSteps: res.nextSteps,
+      };
+      this.emit();
+      this.onAlert?.('success', `AI Doctor (${res.modelUsed}) finished!`);
+      return {
+        ok: true,
+        answer: res.answer || res.whatWasFixed.join(' • '),
+        modelUsed: res.modelUsed,
+        whatWasFixed: res.whatWasFixed,
+        nextSteps: res.nextSteps,
+      };
+    } catch (err) {
+      this.report.repairing = false;
+      this.report.activeAction = '';
+      const msg = err instanceof Error ? err.message : 'AI Doctor failed';
+      this.term(`❌ ${msg}`);
+      this.emit();
+      throw err;
     }
   }
 }

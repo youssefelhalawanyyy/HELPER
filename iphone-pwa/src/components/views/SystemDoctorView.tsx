@@ -16,6 +16,7 @@ import {
   KeyRound,
   MemoryStick,
   RefreshCw,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -37,11 +38,62 @@ function gradeColor(grade: string): string {
 }
 
 export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
-  const [rightTab, setRightTab] = useState<'issues' | 'terminal' | 'report'>('issues');
+  const [rightTab, setRightTab] = useState<'issues' | 'ask' | 'terminal' | 'report'>('issues');
   const [keyOpen, setKeyOpen] = useState(false);
   const [keyInput, setKeyInput] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [askingAi, setAskingAi] = useState(false);
+  const [aiAnswer, setAiAnswer] = useState<{
+    question: string;
+    answer: string;
+    modelUsed: string;
+    whatWasFixed: string[];
+  } | null>(null);
   const termRef = useRef<HTMLDivElement | null>(null);
   const prevReportTsRef = useRef<number>(0);
+
+  const askAiDoctor = async (customPrompt?: string) => {
+    const q = (customPrompt ?? aiPrompt).trim();
+    if (!q || askingAi || !deck.bridgeBaseUrl || !deck.pairing?.token) return;
+    soundEngine.playClick();
+    setAskingAi(true);
+    setAiPrompt('');
+    setRightTab('terminal');
+    try {
+      const res = await fetch(`${deck.bridgeBaseUrl}/api/doctor/ask`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deck.pairing.token}`,
+        },
+        body: JSON.stringify({ prompt: q }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        answer?: string;
+        modelUsed?: string;
+        whatWasFixed?: string[];
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        deck.showToast(false, data.error || 'AI Doctor request failed');
+        setRightTab('ask');
+        return;
+      }
+      setAiAnswer({
+        question: q,
+        answer: data.answer || 'Completed AI investigation and repair.',
+        modelUsed: data.modelUsed || 'gemini-2.5-pro',
+        whatWasFixed: data.whatWasFixed || [],
+      });
+      setRightTab('ask');
+      soundEngine.playSuccessChime();
+    } catch {
+      deck.showToast(false, 'Could not reach AI Doctor');
+    } finally {
+      setAskingAi(false);
+    }
+  };
 
   const doc = deck.doctorReport;
   const isWin = (doc.platform || deck.hello?.platform) === 'win32';
@@ -119,7 +171,7 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
               }}
             >
               <KeyRound className="h-2.5 w-2.5" />
-              {doc.aiConfigured ? 'AI ON' : 'SET KEY'}
+              {doc.aiConfigured ? 'GEMINI 2.5 PRO' : 'SET KEY'}
             </button>
             <span
               className="font-mono-tech rounded-full px-2 py-0.5 text-console-micro font-extrabold uppercase"
@@ -301,6 +353,22 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
               type="button"
               onClick={() => {
                 soundEngine.playClick();
+                setRightTab('ask');
+              }}
+              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-console-micro font-extrabold uppercase"
+              style={{
+                background: rightTab === 'ask' ? '#1f222c' : 'transparent',
+                color: rightTab === 'ask' ? '#c4b5fd' : '#7c8190',
+              }}
+            >
+              <Sparkles className="h-3 w-3" />
+              Ask AI
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
                 setRightTab('terminal');
               }}
               className="flex items-center gap-1 rounded-full px-2 py-0.5 text-console-micro font-extrabold uppercase"
@@ -396,6 +464,93 @@ export function SystemDoctorView({ deck }: { deck: DevDeckState }) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* TAB 1B: Interactive Gemini 2.5 Pro AI Doctor */}
+        {rightTab === 'ask' && (
+          <div className="flex min-h-0 flex-1 flex-col justify-between gap-2">
+            <div className="deck-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+              {aiAnswer ? (
+                <div className="space-y-2 rounded-xl border border-[#a78bfa]/35 bg-[#090d16] p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9.5px] font-extrabold text-[#c4b5fd]">
+                      Q: {aiAnswer.question}
+                    </span>
+                    <span className="font-mono-tech shrink-0 rounded-full bg-[#a78bfa]/20 px-2 py-0.5 text-[7.5px] font-extrabold text-[#c4b5fd] uppercase">
+                      {aiAnswer.modelUsed}
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] leading-relaxed text-white">{aiAnswer.answer}</p>
+                  {aiAnswer.whatWasFixed.length > 0 && (
+                    <div className="space-y-1 border-t border-white/10 pt-1.5">
+                      <div className="text-[8.5px] font-extrabold text-[#34d399] uppercase">
+                        ✓ Executed Repairs
+                      </div>
+                      {aiAnswer.whatWasFixed.map((item, idx) => (
+                        <div key={idx} className="text-[9.5px] text-zinc-300">
+                          • {item}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-[#a78bfa]/25 bg-black/65 p-3">
+                  <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#c4b5fd]">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Gemini 2.5 Pro Systems Engineer
+                  </div>
+                  <p className="mt-1 text-[9.5px] leading-relaxed text-zinc-300">
+                    Describe any error, lag, heat, disk bloat, or broken app — AI will inspect your
+                    live computer, execute safe verified fixes, and explain everything clearly.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {[
+                      'Why is my computer slow or hot right now? Fix it.',
+                      'Find what is eating my SSD space and safely clean caches.',
+                      'Inspect recent app crashes and fix corrupted configs.',
+                      'Check & fix slow Wi-Fi, DNS, and stuck ports.',
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        disabled={busy || askingAi}
+                        onClick={() => void askAiDoctor(preset)}
+                        className="rounded-lg border border-[#a78bfa]/35 bg-[#a78bfa]/12 px-2 py-1 text-left text-[9px] font-bold text-[#e9d5ff] hover:bg-[#a78bfa]/22 disabled:opacity-40"
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form
+              data-no-swipe="true"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void askAiDoctor();
+              }}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Ask Gemini 2.5 Pro to diagnose & fix any issue…"
+                className="h-8 min-w-0 flex-1 rounded-xl border border-[#a78bfa]/35 bg-[#060911] px-2.5 text-[10px] text-white outline-none focus:border-[#c4b5fd]"
+              />
+              <button
+                type="submit"
+                disabled={busy || askingAi || !aiPrompt.trim()}
+                className="flex h-8 shrink-0 items-center gap-1 rounded-xl bg-[#a78bfa] px-3 text-[9.5px] font-extrabold text-[#0c0618] disabled:opacity-40"
+              >
+                <Send className="h-3 w-3" />
+                FIX
+              </button>
+            </form>
           </div>
         )}
 

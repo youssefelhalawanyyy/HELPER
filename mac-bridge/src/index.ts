@@ -364,6 +364,7 @@ app.use(
     getLatestInput: () => ({ latestScan, latestVoice }),
     perfStudio: perfStudioService,
     powerThermal: powerThermalService,
+    systemDoctor: systemDoctorService,
   }),
 );
 
